@@ -8,6 +8,7 @@ TypeScript config. Zap never runs a config without it.
 | Tool | Why | Check |
 |---|---|---|
 | **Rust** via rustup (it installs the toolchain pinned in `rust-toolchain.toml`) | to build the `zap` binary | `cargo --version` |
+| **C toolchain** (`cc`; on Debian, `build-essential`) | Rust links with it | `cc --version` |
 | **fgro**, Gro's runtime | every command that reads a config evaluates `zap.ts` with `fgro eval`, in its kernel sandbox | `fgro --version` |
 | **Linux** with Landlock ABI 6 or later (6.12) | the sandbox `fgro` evaluates in | `uname -r` |
 | **ssh** | remote targets | `ssh -V` |

@@ -268,10 +268,10 @@ mod tests {
 
     #[test]
     fn an_oracle_is_named_for_its_commit_under_the_zap_home() {
-        assert_eq!(oracle_file_name("6cab2de"), "zap-6cab2de");
+        assert_eq!(oracle_file_name("0123abc"), "zap-0123abc");
         assert_eq!(
-            oracle_dir(Path::new("/home/u")).join(oracle_file_name("6cab2de")),
-            Path::new("/home/u/.zap/oracle/zap-6cab2de")
+            oracle_dir(Path::new("/home/u")).join(oracle_file_name("0123abc")),
+            Path::new("/home/u/.zap/oracle/zap-0123abc")
         );
     }
 

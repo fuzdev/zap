@@ -270,7 +270,7 @@ directory is removed afterwards; one an interrupted build left behind is removed
 by the next build. The run prints which oracle it used:
 
 ```
-oracle rev origin/main = 6cab2de (reused /home/ops/.zap/oracle/zap-6cab2de)
+oracle rev origin/main = 0123abc (reused /home/ops/.zap/oracle/zap-0123abc)
 ```
 
 The default is `origin/main` rather than the checked-out branch's upstream: the
