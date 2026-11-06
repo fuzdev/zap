@@ -1,0 +1,1 @@
+export{t as component}from"../chunks/D_V2OvLM.js";
