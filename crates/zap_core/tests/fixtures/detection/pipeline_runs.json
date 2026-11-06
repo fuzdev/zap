@@ -1,0 +1,27 @@
+{
+  "resource": {
+    "id": "ci",
+    "type": "pipeline",
+    "name": "CI pipeline",
+    "steps": [
+      {
+        "id": "test",
+        "run": "npm test"
+      },
+      {
+        "id": "build",
+        "run": "npm run build",
+        "depends_on": [
+          "test"
+        ]
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "recorded": {},
+  "expected": {
+    "outcome": "absent"
+  }
+}

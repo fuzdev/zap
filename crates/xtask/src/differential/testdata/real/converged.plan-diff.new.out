@@ -1,0 +1,6 @@
+plan diff — target local (0 change(s): +0 ~0)
+  user: op
+  home: /home/op
+  target: {"local":true,"package_manager":"apt","service_manager":"systemd"}
+  (no changes — converged)
+plan_hash: b56c8bf17d5d033c0b85941e9d55d8edc1e4b486d8e5eba9480c9afcffe9198c

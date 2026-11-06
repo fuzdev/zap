@@ -1,0 +1,10 @@
+plan diff — target local (2 change(s): +1 ~1)
+  [~] home-dir  (directory)
+      ~ mode: 700 → 755
+  [+] script  (script)
+      > cat <<'EOF'
+      - six spaces dash
+      ~ six spaces tilde
+      (triggered reload)
+EOF
+plan_hash: 90c76dfa6375d2b054a184bb4667553521d4db417aec8e217e237cadf09d05c4

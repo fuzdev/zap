@@ -1,0 +1,40 @@
+{
+  "resource": {
+    "id": "check-key",
+    "type": "verify",
+    "name": "authorized_keys hardened",
+    "assertions": [
+      {
+        "type": "path_exists",
+        "path": "/etc/app.conf",
+        "file_type": "file",
+        "mode": "600",
+        "owner": "app",
+        "not_empty": true
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "test -f '/etc/app.conf' && test -s '/etc/app.conf' && test \"$(stat -L -c %a -- '/etc/app.conf')\" = '600' && test \"$(stat -L -c %U -- '/etc/app.conf')\" = 'app'",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

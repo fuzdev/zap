@@ -1,0 +1,92 @@
+{
+  "resource": {
+    "id": "zig",
+    "type": "file",
+    "name": "zig toolchain",
+    "path": "/opt/zig",
+    "content": {
+      "type": "remote",
+      "url": "https://example.test/zig",
+      "extract": {
+        "type": "tar.xz"
+      },
+      "blake3": "1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig",
+        "facet": "lstat",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "metadata": {
+          "kind": "directory",
+          "mode": "755",
+          "owner": "root",
+          "group": "root"
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig/.zap_remote_hash",
+        "facet": "lstat",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "metadata": {
+          "kind": "regular",
+          "mode": "644",
+          "owner": "root",
+          "group": "root"
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig/.zap_remote_hash",
+        "facet": {
+          "read": {
+            "max": 4096
+          }
+        },
+        "privilege": "elevated"
+      },
+      "observation": {
+        "contents": {
+          "bytes": "1111111111111111111111111111111111111111111111111111111111111111",
+          "truncated": true
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig",
+        "facet": "empty",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "empty": false
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "file",
+      "drift": {
+        "kind": "provenance",
+        "observed": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    }
+  }
+}

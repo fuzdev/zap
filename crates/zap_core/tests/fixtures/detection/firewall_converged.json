@@ -1,0 +1,38 @@
+{
+  "resource": {
+    "id": "ufw-firewall",
+    "type": "firewall",
+    "name": "configure firewall",
+    "backend": "ufw",
+    "allow": [
+      "OpenSSH",
+      {
+        "port": 443,
+        "proto": "tcp"
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "exec ufw status verbose",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "Status: active\nLogging: on (low)\nDefault: deny (incoming), allow (outgoing), disabled (routed)\nNew profiles: skip\n\nTo                         Action      From\n--                         ------      ----\nOpenSSH                    ALLOW       Anywhere\n443/tcp                    ALLOW       Anywhere\nOpenSSH (v6)               ALLOW       Anywhere (v6)\n443/tcp (v6)               ALLOW       Anywhere (v6)\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

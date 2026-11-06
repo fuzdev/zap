@@ -1,0 +1,52 @@
+{
+  "resource": {
+    "id": "bashrc",
+    "type": "file",
+    "name": "app bashrc",
+    "path": "/home/app/.bashrc",
+    "content": {
+      "type": "source",
+      "path": "/opt/dotfiles/bashrc"
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/home/app/.bashrc",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/home/app/.bashrc",
+        "facet": "digest",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "digest": "8722e61430474747cb159d0fde2722d1bb9c3da262a9934d72c9f64c4d296c521eddcae1ce84838157f92200a9f4ca3f0fad8e41d5d60fbc374f0e40de3ab5c4"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/dotfiles/bashrc",
+        "facet": "digest",
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    }
+  ],
+  "expected": {
+    "outcome": "undetermined",
+    "reason": "failed to read the content source: /opt/dotfiles/bashrc"
+  }
+}

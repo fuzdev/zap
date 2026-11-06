@@ -1,0 +1,29 @@
+[package]
+name = "zap_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "zap convergence engine — IO over a pure plan (config eval, detect, plan, execute)"
+
+[dependencies]
+zap_types.workspace = true
+fuz_eval.workspace = true # the shared one-shot config-eval client of a pinned fgro eval (config/eval.rs)
+thiserror.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+blake3.workspace = true # config-slug hashing (cache namespacing)
+time.workspace = true # wall-clock RFC 3339 for the last-run report (and, later, lock + events)
+reqwest.workspace = true # deploy post-restart HTTP health check + remote_file fetch (rustls/ring; not JSON-RPC)
+rustls.workspace = true # install the ring crypto provider as the process default (reqwest uses rustls-no-provider)
+nix.workspace = true # advisory flock(2) on zap.lock writes; uid/gid → name for local path metadata; killpg/kill to stop a local batch past its deadline
+ring.workspace = true # SHA-512 of the content detection compares (rendered, content-cached, natively read)
+rustix.workspace = true # lgetxattr: a kept mode is refused on a file with a POSIX access list (connection/local_put.rs); tcflush: type-ahead is discarded before a prompt (commands/prompt.rs)
+tempfile.workspace = true # private 0700 staging dir for minisign verification (no predictable-path TOCTOU); also test fixtures
+
+[dev-dependencies]
+rustix = { workspace = true, features = ["pty"] } # a pseudo-terminal to prove the prompt discards type-ahead
+
+[lints]
+workspace = true

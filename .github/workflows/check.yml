@@ -1,0 +1,188 @@
+# Checks the Rust engine and the site.
+#
+# One job, `check`, because the lanes share a build: format, lint, tests (run
+# twice — once at the runner's umask, once at 000, because the suite's mode
+# assertions are only as strict as the umask their trees are born under), `gro
+# check` (the site and the TypeScript authoring surface — it runs after the
+# tests so its `zap config validate` e2e finds the `target/debug/zap` they
+# built and runs instead of skipping), the release dep-graph audit (`cargo
+# xtask check-release` — the rail that keeps `fuz_audit` and the other
+# test/audit crates out of the `zap` binary), and rustdoc held at zero
+# warnings. The config-eval tests need an `fgro` build (`ZAP_FGRO`), which CI
+# can't get until fgro ships a release: they skip here, accepted by
+# `ZAP_TEST_ALLOW_NO_FGRO=1` on the test steps, and run locally
+# (docs/contributing.md).
+#
+# Layout: zap path-depends on `fuz_eval` and `fuz_audit` in the sibling `fuz`
+# repository (`../fuz/crates/*`), so `fuz` is checked out beside zap at
+# `FUZ_REF` (set in the job's `env`). `actions/checkout` can't write outside
+# `$GITHUB_WORKSPACE`, so both go into subdirectories — `zap/` and `fuz/` —
+# and every `run` step works in `zap/`. The `fuz` checkout needs the
+# repository public (or a token).
+
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ['**']
+  # Allow manually re-running the check from the Actions tab.
+  workflow_dispatch:
+
+# Cancel a PR's in-progress run when a new commit supersedes it; let main-branch
+# runs finish so every push to main stays verified. Note that is per *push*, not
+# per commit: a push of several commits is checked at its tip only.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege: the checks only read the repo.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    # `FUZ_REF` is the `fuz` commit zap is checked against: a branch tracks
+    # it, a SHA pins it.
+    env:
+      FUZ_REF: main
+
+    defaults:
+      run:
+        working-directory: zap
+
+    steps:
+      # persist-credentials: false keeps the GITHUB_TOKEN out of .git/config (no step here pushes via git).
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: zap
+          persist-credentials: false
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: fuzdev/fuz
+          ref: ${{ env.FUZ_REF }}
+          path: fuz
+          persist-credentials: false
+
+      # The toolchain is pinned in rust-toolchain.toml, not `stable`: the
+      # workspace runs `clippy::nursery` at warn and this job denies warnings,
+      # so a floating toolchain would fail CI whenever a new Rust release adds a
+      # nursery lint. Bump the file deliberately, with fuz's. The runner's
+      # preinstalled rustup installs that toolchain and its components; any
+      # rustup 1.28+ reads the file with no arguments, so skip self-updating it.
+      # It runs in `zap/` (the job's working directory), so it reads zap's file;
+      # the `fuz` path crates build under that same toolchain.
+      - name: Install Rust
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+          cargo --version
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: zap -> target
+
+      - name: Use Node.js 24.14
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.14'
+          cache: npm
+          cache-dependency-path: zap/package-lock.json
+
+      # For `gro check`. The config-eval tests link this checkout as
+      # `@fuzdev/zap` and import nothing from its `node_modules`.
+      - run: npm ci
+
+      # The `zap_core` and `xtask` suites run their sh-vs-BusyBox pairs (the
+      # observe batch, command delivery, the Alpine preparation script) under
+      # BusyBox too, and drop that leg silently without it; their
+      # `required_programs` tests fail the run instead. `busybox true` proves
+      # the binary runs, not only that it is on `PATH`. The access-list cases
+      # need `setfacl` and `getfacl` (the `acl` package) the same way.
+      - name: Install BusyBox and acl
+        run: |
+          if ! command -v busybox >/dev/null || ! command -v setfacl >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y busybox acl
+          fi
+          busybox true
+          getfacl --version
+
+      # Every workspace package named, never `--all`: rustfmt follows path
+      # dependencies, so `--all` would check the `fuz` checkout's files too.
+      - name: Format
+        run: cargo fmt -p zap -p zap_core -p zap_types -p xtask --check
+
+      # `--locked` holds the committed lockfile, which records the `fuz` path
+      # crates (`fuz_eval`, `fuz_sys`, `fuz_audit`) with their versions and
+      # dependencies. Those crates take the fuz workspace version
+      # (`version.workspace = true`), so a fuz version bump, or a dependency
+      # change in any of them, at `FUZ_REF` fails here until zap's
+      # `Cargo.lock` is updated — loud, not a silently different graph from
+      # the one committed.
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      # No `fgro` in CI yet: the config-eval tests skip, and
+      # `ZAP_TEST_ALLOW_NO_FGRO=1` tells `required_programs` that's expected.
+      - name: Test
+        env:
+          ZAP_TEST_ALLOW_NO_FGRO: '1'
+        run: cargo test --locked --workspace
+
+      # `~/.zap` directory modes are load-bearing (the home is held at 0700,
+      # its records at 0600), and a mode that is never asserted is a mode the
+      # environment chose. `tempfile::tempdir()` does not create at 0700; it
+      # applies the process umask, so the runner's umask silently decides
+      # whether the suite's mode assertions mean anything. Re-running under the
+      # permissive extreme makes them mean it at both ends. The binaries are
+      # already built by the step above, so this leg costs test execution only.
+      - name: Test (umask 000)
+        env:
+          ZAP_TEST_ALLOW_NO_FGRO: '1'
+        run: |
+          umask 000
+          cargo test --locked --workspace
+
+      # `src/test/zap_config_validate.test.ts`, the `zap config validate` e2e,
+      # needs `ZAP_FGRO` and a built `target/debug/zap`. CI has no `fgro`, so
+      # the e2e is reported skipped; this step says so in the log and asserts
+      # the binary it would run.
+      - name: Note the e2e's skip and verify its zap binary
+        run: |
+          echo "::warning::zap config validate e2e skipped: no fgro build in CI (ZAP_FGRO unset)"
+          target/debug/zap version
+
+      # `npx @fuzdev/gro`, as the ecosystem's other repos run it in CI: gro is a
+      # devDependency here, so `npx` resolves the version `npm ci` just
+      # installed from the lockfile. (Local development uses the global `gro`;
+      # a runner has none.) `--workspace` fails on a dirty git tree;
+      # `--build` adds the static site build.
+      - name: gro check
+        run: npx @fuzdev/gro check --workspace --build
+
+      - name: Release dep-graph audit
+        run: cargo xtask check-release
+
+      # `-D warnings`, not a warning count against a baseline: `cargo doc` is
+      # incremental, so a count taken against a warm target dir re-emits
+      # warnings only for the crates it actually rebuilt and can read *lower*
+      # than the baseline. Hard zero is immune.
+      #
+      # `--document-private-items` because rustdoc only checks the docs of the
+      # items it documents: without it, every doc comment on a private or
+      # `pub(crate)` item goes unchecked. Private mode is a superset for these
+      # lints, and `private_intra_doc_links` still fires in it.
+      #
+      # `--no-deps` keeps the `fuz` path crates out (fuz's own CI documents
+      # them). `--all-features` is a no-op today — zap's crates declare no
+      # features — and keeps a future feature-gated item inside the gate.
+      - name: Rustdoc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --no-deps --all-features --document-private-items

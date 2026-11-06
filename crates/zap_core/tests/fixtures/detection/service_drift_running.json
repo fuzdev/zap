@@ -1,0 +1,54 @@
+{
+  "resource": {
+    "id": "nginx-service",
+    "type": "service",
+    "name": "nginx service",
+    "service": "nginx",
+    "enabled": true,
+    "running": true
+  },
+  "target": {
+    "local": true,
+    "service_manager": "systemd"
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "systemctl is-active --quiet nginx",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 3,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "systemctl is-enabled nginx",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "enabled\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "service",
+      "is_running": false,
+      "is_enabled": true
+    }
+  }
+}

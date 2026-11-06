@@ -1,0 +1,41 @@
+{
+  "resource": {
+    "id": "motd",
+    "type": "file",
+    "name": "message of the day",
+    "path": "/etc/motd",
+    "content": {
+      "type": "inline",
+      "content": "welcome\n"
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/motd",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "directory"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/motd",
+        "facet": "digest",
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    }
+  ],
+  "expected": {
+    "outcome": "undetermined",
+    "reason": "failed to read file: /etc/motd"
+  }
+}

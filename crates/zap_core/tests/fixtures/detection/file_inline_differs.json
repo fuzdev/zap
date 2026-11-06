@@ -1,0 +1,48 @@
+{
+  "resource": {
+    "id": "motd",
+    "type": "file",
+    "name": "message of the day",
+    "path": "/etc/motd",
+    "content": {
+      "type": "inline",
+      "content": "welcome\n"
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/motd",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/motd",
+        "facet": "digest",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "digest": "b21637e7f86a35d91bd4a1d7213a6db7f1e73f03fe5fd0197e9cd9a4f499ad756f2dd3e730645e29f027570f1ad66d8b967238418432f0ec9428d563b0e8fc22"
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "file",
+      "drift": {
+        "kind": "content"
+      }
+    }
+  }
+}

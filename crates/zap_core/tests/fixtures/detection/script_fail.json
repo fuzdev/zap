@@ -1,0 +1,33 @@
+{
+  "resource": {
+    "id": "fish-setup",
+    "type": "script",
+    "name": "fish shell setup",
+    "check": "test -f /etc/ready",
+    "run": "touch /etc/ready"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "test -f /etc/ready",
+        "privilege": "login",
+        "timeout_secs": 60,
+        "origin": "operator"
+      },
+      "observation": {
+        "command": {
+          "code": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}

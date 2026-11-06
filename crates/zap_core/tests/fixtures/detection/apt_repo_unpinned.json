@@ -1,0 +1,91 @@
+{
+  "resource": {
+    "id": "pgdg",
+    "type": "apt_repo",
+    "name": "PostgreSQL apt repository",
+    "key_url": "https://www.postgresql.org/media/keys/ACCC4CF8.asc",
+    "source": "deb https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/usr/share/keyrings/pgdg.asc",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/usr/share/keyrings/pgdg.asc",
+        "facet": {
+          "read": {
+            "max": 1048576
+          }
+        },
+        "privilege": "elevated"
+      },
+      "observation": {
+        "contents": {
+          "bytes": "pgdg signing key\n",
+          "truncated": false
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/apt/sources.list.d/pgdg.list",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/apt/sources.list.d/pgdg.list",
+        "facet": {
+          "read": {
+            "max": 65536
+          }
+        },
+        "privilege": "elevated"
+      },
+      "observation": {
+        "contents": {
+          "bytes": "deb [signed-by=/usr/share/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main\n",
+          "truncated": false
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": ". /etc/os-release && printf '%s\\n' \"deb [signed-by=/usr/share/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main\"",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "deb [signed-by=/usr/share/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "undetermined",
+    "reason": "tracked signing key has no usable pin — run `zap update pgdg` to mint or advance it (or declare a `key_blake3` to vendor it)"
+  }
+}

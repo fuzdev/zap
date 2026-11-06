@@ -1,0 +1,26 @@
+{
+  "resource": {
+    "id": "app-current",
+    "type": "link",
+    "name": "app current symlink",
+    "path": "/opt/app/current",
+    "target": "/opt/app/releases/v2"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/app/current",
+        "facet": "link_target",
+        "privilege": "login"
+      },
+      "observation": "failed"
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}

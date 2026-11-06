@@ -1,0 +1,56 @@
+{
+  "resource": {
+    "id": "zig",
+    "type": "file",
+    "name": "zig toolchain",
+    "path": "/opt/zig",
+    "content": {
+      "type": "remote",
+      "url": "https://example.test/zig",
+      "extract": {
+        "type": "none"
+      },
+      "blake3": "caf62fbe63bd2d3f0e6204be7becb6e7c6a1122bb8cce581bab1d4af66831934"
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "content_cache": {
+    "caf62fbe63bd2d3f0e6204be7becb6e7c6a1122bb8cce581bab1d4af66831934/zig": "zig-binary\n"
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig",
+        "facet": "digest",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "digest": "df421090ab0ef8e5ebf37c780b855e3c99ec2dcf09bf19a3dab5a08139bcd9cadf53cf4c2cc443c1ed37156c9d6a88d2651a198599e910351df22adf161c943a"
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "file",
+      "drift": {
+        "kind": "digest",
+        "sha512": "df421090ab0ef8e5ebf37c780b855e3c99ec2dcf09bf19a3dab5a08139bcd9cadf53cf4c2cc443c1ed37156c9d6a88d2651a198599e910351df22adf161c943a"
+      }
+    }
+  }
+}

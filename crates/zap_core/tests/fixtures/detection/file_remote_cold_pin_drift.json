@@ -1,0 +1,50 @@
+{
+  "resource": {
+    "id": "zig",
+    "type": "file",
+    "name": "zig toolchain",
+    "path": "/opt/zig",
+    "content": {
+      "type": "remote",
+      "url": "https://example.test/zig",
+      "extract": {
+        "type": "none"
+      },
+      "blake3": "caf62fbe63bd2d3f0e6204be7becb6e7c6a1122bb8cce581bab1d4af66831934"
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "recorded": {
+    "timeout 300 sh -c 'p=$1; fd=/proc/self/fd/3; no() { echo \"zap: $p: $1\" >&2; exit 93; }; for t in stat cat; do command -v $t >/dev/null || no \"no $t on this machine\"; done; [ -d ${fd%/*} ] || no \"no /proc on this machine to hold it open through\"; [ ! -L \"$p\" ] || no \"a symbolic link is not read through\"; [ ! -e \"$p\" ] || [ -f \"$p\" ] || no \"not a regular file\"; exec 3<\"$p\" || exit 1; m=$(stat -L -c %d:%i:%h $fd) && [ -f $fd ] && [ \"$(stat -c %d:%i -- \"$p\")\" = \"${m%:*}\" ] || no \"not a regular file of its own (a symbolic link is not followed)\"; [ \"${m##*:}\" = 1 ] || no \"it has more than one hard link, so it is not read: replace it with a copy of its own (a single link)\"; exec cat <&3' sh '/opt/zig'": {
+      "success": true,
+      "code": 0,
+      "stdout": "tampered\n",
+      "stderr": ""
+    }
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "file",
+      "drift": {
+        "kind": "pin",
+        "observed": "31d92ab05b515ff3815f99d0dfa94bc6f6c5d648423fbc6ebcde7fc9eb5040c4"
+      }
+    }
+  }
+}

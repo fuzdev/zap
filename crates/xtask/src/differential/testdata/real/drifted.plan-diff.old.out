@@ -1,0 +1,21 @@
+plan diff — target local (4 change(s): +1 ~3)
+  [~] home-dir  (directory)
+      ~ mode: 700 → 755
+  [~] home-file  (file)
+      ~ content: differs → inline (18 bytes)
+  [~] home-link  (link)
+      ~ target: /nonexistent → ~/zr/file.txt
+  [+] script  (script)
+      > cat > ~/zr/rules <<'EOF'
+#!/usr/sbin/nft -f
+
+table inet filter {
+	chain input {
+		type filter hook input priority 0; policy drop;
+	}
+}
+    four spaces
+- item
+EOF
+touch ~/zr/script.marker
+plan_hash: dcad07ba5f5923ceac44cba7bbba4a4b974144dbefb2dc84a451796ea6137883

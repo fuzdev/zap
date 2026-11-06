@@ -1,0 +1,49 @@
+{
+  "resource": {
+    "id": "zig",
+    "type": "file",
+    "name": "zig toolchain",
+    "path": "/opt/zig",
+    "content": {
+      "type": "remote",
+      "url": "https://example.test/zig",
+      "extract": {
+        "type": "none"
+      },
+      "blake3": "caf62fbe63bd2d3f0e6204be7becb6e7c6a1122bb8cce581bab1d4af66831934"
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "content_cache": {
+    "caf62fbe63bd2d3f0e6204be7becb6e7c6a1122bb8cce581bab1d4af66831934/zig": "zig-binary\n"
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig",
+        "facet": "digest",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "digest": "5b6d04ed006e5556dfd1bc183a0e7822846b19c1f585cfbdf6f73110bed70a970d7ced55f3894720428afa242f06d551259929d83d0b84c86e5e4dae7ebaf881"
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

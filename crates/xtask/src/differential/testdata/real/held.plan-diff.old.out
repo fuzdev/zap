@@ -1,0 +1,16 @@
+  LOCK — the pin ledger does not answer for 1 resource(s), so they are withheld from the comparison below:
+      blob-tracked — no pin yet; run `zap update blob-tracked`
+  UNVERIFIABLE — 1 referenced variable(s) are unset or empty, so this comparison cannot be trusted:
+      ZR_UNSET
+  an unset reference resolves to an empty string, which can both hide real drift and invent drift that isn't there.
+  provide them (--env-file or the environment) and re-run.
+  UNDETERMINED — 1 resource(s) could not be probed, so no change is planned for them and this changeset is partial:
+      blob-tracked — tracked remote file has no usable pin — run `zap update blob-tracked` to mint or advance it (or declare a `blake3` to vendor it): /home/op/zc/blob.bin
+  their live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
+plan diff — target local (3 change(s): +3 ~0)
+  [+] home-dir  (directory)
+  [+] s  (script)
+      > echo a
+echo b
+  [+] tmpl  (file)
+plan_hash: 4bf7dd1dc7b493f5eb4dc1e53e0c06c3ad7737e85799953752deeedbfd78ad60

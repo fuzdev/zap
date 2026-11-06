@@ -1,0 +1,77 @@
+{
+  "resource": {
+    "id": "pgdg",
+    "type": "apt_repo",
+    "name": "PostgreSQL apt repository",
+    "key_url": "https://www.postgresql.org/media/keys/ACCC4CF8.asc",
+    "source": "deb https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main",
+    "key_blake3": "f18429791ba134760fd843185bd8cdba0b3c16ad1f08be139a299932cd069c97"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/usr/share/keyrings/pgdg.asc",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/usr/share/keyrings/pgdg.asc",
+        "facet": {
+          "read": {
+            "max": 1048576
+          }
+        },
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/apt/sources.list.d/pgdg.list",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/apt/sources.list.d/pgdg.list",
+        "facet": {
+          "read": {
+            "max": 65536
+          }
+        },
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": ". /etc/os-release && printf '%s\\n' \"deb [signed-by=/usr/share/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main\"",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "deb [signed-by=/usr/share/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}

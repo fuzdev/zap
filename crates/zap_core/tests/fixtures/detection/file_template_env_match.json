@@ -1,0 +1,47 @@
+{
+  "resource": {
+    "id": "pkgconf",
+    "type": "file",
+    "name": "template with an operator var",
+    "path": "/etc/pkg.conf",
+    "content": {
+      "type": "template",
+      "template": "pkg={{pkg}}\n",
+      "vars": {
+        "pkg": {
+          "$env": "CARGO_PKG_NAME"
+        }
+      }
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/pkg.conf",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/pkg.conf",
+        "facet": "digest",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "digest": "d9678cb86d66d64d92c7d65f5403b062a412acf0f22070676abcde19df6b903b4e35f408ab9ea0848c8ff3c1c65a9b77c701c120a1a79496609a63f8fd87ce9e"
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

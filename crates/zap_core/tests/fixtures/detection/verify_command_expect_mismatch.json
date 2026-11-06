@@ -1,0 +1,38 @@
+{
+  "resource": {
+    "id": "check-user",
+    "type": "verify",
+    "name": "running as root",
+    "assertions": [
+      {
+        "type": "command",
+        "run": "whoami",
+        "expect": "root"
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "whoami",
+        "privilege": "login",
+        "timeout_secs": 60,
+        "origin": "operator"
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "deploy\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}

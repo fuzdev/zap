@@ -1,0 +1,16 @@
+plan diff — target local (2 change(s): +1 ~1)
+  user: op
+  home: /home/op
+  target: {"local":true,"package_manager":"apt","service_manager":"systemd"}
+  [~] home-dir  (directory)
+      path: ~/zr
+      mode: 755
+      ~ mode: 700 → 755
+  [+] script  (script)
+      check: false
+      > cat <<'EOF'
+              - six spaces dash
+              ~ six spaces tilde
+              (triggered reload)
+        EOF
+plan_hash: 887580acd6f99f495bc5c3f9ae3b7829fb27d9b653e557354ba2fdf2798f2aca

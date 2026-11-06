@@ -1,0 +1,35 @@
+{
+  "resource": {
+    "id": "devdir",
+    "type": "directory",
+    "name": "dev directory",
+    "path": "/opt/devdir",
+    "mode": "755"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/devdir",
+        "facet": "kind",
+        "privilege": "login"
+      },
+      "observation": "failed"
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/devdir",
+        "facet": "lstat",
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}

@@ -1,0 +1,4 @@
+detected live state — target local (pkg: apt, service: systemd)
+2 resource(s):
+  drift  home-dir  directory  — drifted (mode 700, owner op, group op)
+  absent script  script  — absent

@@ -1,0 +1,23 @@
+{
+  "resource": {
+    "id": "zig",
+    "type": "file",
+    "name": "zig toolchain",
+    "path": "/opt/zig",
+    "content": {
+      "type": "remote",
+      "url": "https://example.test/zig",
+      "extract": {
+        "type": "none"
+      }
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [],
+  "expected": {
+    "outcome": "undetermined",
+    "reason": "tracked remote file has no usable pin — run `zap update zig` to mint or advance it (or declare a `blake3` to vendor it): /opt/zig"
+  }
+}

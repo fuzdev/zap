@@ -1,0 +1,49 @@
+{
+  "resource": {
+    "id": "nginx-service",
+    "type": "service",
+    "name": "nginx service",
+    "service": "nginx",
+    "enabled": true,
+    "running": true
+  },
+  "target": {
+    "local": true,
+    "service_manager": "openrc"
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "rc-service --exists nginx; case $? in 0) ;; 1) exit 3;; *) exit 2;; esac; rc-service nginx status",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": " * status: started\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "[ -d /etc/runlevels ] && [ -r /etc/runlevels ] && [ -x /etc/runlevels ] || exit 2; for r in /etc/runlevels/*/nginx; do [ -e \"$r\" ] && exit 0; done; exit 1",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

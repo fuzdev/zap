@@ -1,0 +1,65 @@
+{
+  "resource": {
+    "id": "ghostty",
+    "type": "build",
+    "name": "ghostty from source",
+    "source": {
+      "type": "remote",
+      "url": "https://release.files.ghostty.org/1.2.3/ghostty-1.2.3.tar.gz",
+      "extract": {
+        "type": "tar.gz"
+      },
+      "blake3": "559770fe9773161e93e3dd9177d916e27037d7f548edcf6186eabc571c0e520b"
+    },
+    "run": "zig build -p $HOME/.local -Doptimize=ReleaseFast",
+    "output": "/opt/ghostty/bin/ghostty"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/ghostty/bin/ghostty",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/ghostty/bin/ghostty.zap-build",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/ghostty/bin/ghostty.zap-build",
+        "facet": {
+          "read": {
+            "max": 4096
+          }
+        },
+        "privilege": "elevated"
+      },
+      "observation": {
+        "contents": {
+          "bytes": "3729d566e7fdc5e245743db6a7790012196c97067a8ee22796d62895bb985e62",
+          "truncated": false
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

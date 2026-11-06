@@ -1,0 +1,87 @@
+[workspace]
+resolver = "2"
+members = ["crates/zap", "crates/zap_core", "crates/zap_types", "crates/xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "0BSD"
+publish = false
+repository = "https://github.com/fuzdev/zap"
+homepage = "https://zap.fuz.dev/"
+
+[workspace.dependencies]
+zap_types = { path = "crates/zap_types" }
+zap_core = { path = "crates/zap_core" }
+# Shared release-audit tooling from the sibling `fuz` checkout (`../fuz`) — dev-only,
+# used by `cargo xtask check-release`; never linked from the `zap` production binary.
+fuz_audit = { path = "../fuz/crates/fuz_audit" }
+# The shared one-shot config-eval client of a pinned `fgro eval` (the `zap.ts` eval).
+# Requires the sibling `fuz` checkout (`../fuz`), the same topology `fuz_audit` relies on.
+fuz_eval = { path = "../fuz/crates/fuz_eval" }
+argh = "0.1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+blake3 = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "sync", "io-util", "time"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+# rustls with the `ring` provider only — `rustls-no-provider` above leaves the
+# process default unset, so zap installs ring explicitly (see `zap_core::tls`).
+# ring drops the aws-lc-sys C library + cmake build, so the binary cross-compiles
+# cleanly to a static musl target.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+nix = { version = "0.31", default-features = false, features = ["fs", "user", "signal"] }
+# SHA-512 — the digests detection compares: a file's rendered content, a remote file's
+# content-cached bytes, and a file the Local runner reads natively. Already in the graph
+# as rustls's crypto provider; used only through `zap_core::digest`.
+ring = { version = "0.17", default-features = false }
+tempfile = "3"
+# The one read nix lacks: a file's POSIX access list (`lgetxattr`), so a kept mode
+# never drops one, and the terminal flush (`tcflush`) that discards type-ahead before
+# a wetrun's prompt. Already in the graph through tempfile.
+rustix = { version = "1.1", default-features = false, features = ["fs", "std", "termios"] }
+time = { version = "0.3", features = ["formatting"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unused_lifetimes = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.rustdoc]
+# A doc link is the only machine-checkable claim a doc comment makes, so
+# deny broken links and malformed markup (CI's `cargo doc` step enforces it).
+broken_intra_doc_links = "deny"
+invalid_html_tags = "deny"
+bare_urls = "deny"
+redundant_explicit_links = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+# Fires only on test asserts; its `assert_eq!(x, [] as [T; 0])` rewrite reads worse
+assert_is_empty = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+similar_names = "allow"
+too_many_lines = "allow"
+significant_drop_tightening = "allow"
+cargo_common_metadata = "allow"
+multiple_crate_versions = "allow"
+clone_on_ref_ptr = "warn"
+dbg_macro = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

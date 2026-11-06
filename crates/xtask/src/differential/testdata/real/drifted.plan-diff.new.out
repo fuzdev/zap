@@ -1,0 +1,33 @@
+plan diff — target local (4 change(s): +1 ~3)
+  user: op
+  home: /home/op
+  target: {"local":true,"package_manager":"apt","service_manager":"systemd"}
+  [~] home-dir  (directory)
+      path: ~/zr
+      mode: 755
+      ~ mode: 700 → 755
+  [~] home-file  (file)
+      path: ~/zr/file.txt
+      mode: 644
+      content: inline (18 bytes, sha512 8bb21ebab8648a9b…)
+      ~ content: differs → inline (18 bytes)
+  [~] home-link  (link)
+      path: ~/zr/link
+      to: ~/zr/file.txt
+      ~ target: /nonexistent → ~/zr/file.txt
+  [+] script  (script)
+      env: ZR_MODE=slow
+      check: test -f ~/zr/script.marker
+      > cat > ~/zr/rules <<'EOF'
+        #!/usr/sbin/nft -f
+        
+        table inet filter {
+                chain input {
+                        type filter hook input priority 0; policy drop;
+                }
+        }
+            four spaces
+        - item
+        EOF
+        touch ~/zr/script.marker
+plan_hash: fca30614b6cdcae5533a5b9e0cb96f29313c02fa096be6a55a28c96f17b22663

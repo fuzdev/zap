@@ -1,0 +1,66 @@
+{
+  "resource": {
+    "id": "deploy-user",
+    "type": "user",
+    "name": "create deploy user",
+    "username": "deploy",
+    "sudo": "nopasswd"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "id -u -- 'deploy'",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "1001\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "test -f '/etc/sudoers.d/deploy'",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/sudoers.d/deploy",
+        "facet": {
+          "read": {
+            "max": 65536
+          }
+        },
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "user",
+      "drift": {
+        "sudo": "missing"
+      }
+    }
+  }
+}

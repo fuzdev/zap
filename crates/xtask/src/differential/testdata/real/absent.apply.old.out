@@ -1,0 +1,19 @@
+apply — target local (dry-run)
+  [+] home-dir  (directory)
+  [+] home-file  (file)
+  [+] home-link  (link)
+  [+] script  (script)
+      > cat > ~/zh/rules <<'EOF'
+#!/usr/sbin/nft -f
+
+table inet filter {
+	chain input {
+		type filter hook input priority 0; policy drop;
+	}
+}
+    four spaces
+- item
+EOF
+touch ~/zh/script.marker
+  (dry-run — re-run with --wetrun to apply)
+plan_hash: 57bda57a4e2e17eb90c3956b1ce3287a493b7e17c0cf6dc4813e414b3c93df5a

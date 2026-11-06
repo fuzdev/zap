@@ -1,0 +1,74 @@
+{
+  "resource": {
+    "id": "zig",
+    "type": "file",
+    "name": "zig toolchain",
+    "path": "/opt/zig",
+    "content": {
+      "type": "remote",
+      "url": "https://example.test/zig.tar.xz",
+      "blake3": "1111111111111111111111111111111111111111111111111111111111111111",
+      "extract": {
+        "type": "tar.xz"
+      }
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig",
+        "facet": "lstat",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "metadata": {
+          "kind": "directory",
+          "mode": "755",
+          "owner": "root",
+          "group": "root"
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig/.zap_remote_hash",
+        "facet": "lstat",
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig/.zap_remote_hash",
+        "facet": {
+          "read": {
+            "max": 4096
+          }
+        },
+        "privilege": "elevated"
+      },
+      "observation": "failed"
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/zig",
+        "facet": "empty",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "empty": false
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "undetermined",
+    "reason": "/opt/zig: it holds files and no extract sentinel, so zap did not extract it; move it aside or remove it"
+  }
+}

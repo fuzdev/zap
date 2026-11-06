@@ -1,0 +1,3 @@
+detected live state — target local (pkg: apt, service: systemd)
+1 resource(s):
+  ok     home-dir  directory  — converged

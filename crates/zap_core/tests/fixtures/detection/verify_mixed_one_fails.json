@@ -1,0 +1,56 @@
+{
+  "resource": {
+    "id": "preflight",
+    "type": "verify",
+    "name": "path present and command succeeds",
+    "assertions": [
+      {
+        "type": "path_exists",
+        "path": "/etc/hostname"
+      },
+      {
+        "type": "command",
+        "run": "false"
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "test -e '/etc/hostname'",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "false",
+        "privilege": "login",
+        "timeout_secs": 60,
+        "origin": "operator"
+      },
+      "observation": {
+        "command": {
+          "code": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "resource": {
+    "id": "foo",
+    "type": "package",
+    "name": "foo",
+    "from": {
+      "apt": "foo"
+    },
+    "check": "/usr/bin/foo"
+  },
+  "target": {
+    "local": true,
+    "package_manager": "apt"
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/usr/bin/foo",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

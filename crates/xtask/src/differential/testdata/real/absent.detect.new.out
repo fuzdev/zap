@@ -1,0 +1,6 @@
+detected live state — target local (pkg: apt, service: systemd)
+4 resource(s):
+  absent home-dir  directory  — absent
+  absent home-file  file  — absent
+  absent home-link  link  — absent
+  absent script  script  — absent

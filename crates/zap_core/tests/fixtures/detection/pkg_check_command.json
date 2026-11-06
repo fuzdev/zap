@@ -1,0 +1,36 @@
+{
+  "resource": {
+    "id": "jq",
+    "type": "package",
+    "name": "jq",
+    "from": {
+      "apt": "jq"
+    },
+    "check": "command -v jq"
+  },
+  "target": {
+    "local": true,
+    "package_manager": "apt"
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "command -v jq",
+        "privilege": "login",
+        "timeout_secs": 60,
+        "origin": "operator"
+      },
+      "observation": {
+        "command": {
+          "code": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}

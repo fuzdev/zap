@@ -1,0 +1,29 @@
+{
+  "resource": {
+    "id": "deno",
+    "type": "installer",
+    "name": "Deno runtime",
+    "url": "https://deno.land/install.sh",
+    "check": "/root/.deno",
+    "shell": "sh"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/root/.deno",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "directory"
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "resource": {
+    "id": "verify-ssh",
+    "type": "verify",
+    "name": "verify ssh access",
+    "assertions": [
+      {
+        "type": "command",
+        "run": "whoami",
+        "expect": "root"
+      },
+      {
+        "type": "path_exists",
+        "path": "/etc/hosts",
+        "file_type": "file"
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "whoami",
+        "privilege": "login",
+        "timeout_secs": 60,
+        "origin": "operator"
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "root\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "test -f '/etc/hosts'",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

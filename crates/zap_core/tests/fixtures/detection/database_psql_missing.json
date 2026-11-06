@@ -1,0 +1,39 @@
+{
+  "resource": {
+    "id": "app-db",
+    "type": "database",
+    "name": "no PostgreSQL on the target (no psql, or no postgres account: a fresh host) reads absent",
+    "engine": "postgresql",
+    "database_name": "app",
+    "username": "app",
+    "auth": {
+      "method": "scram-sha-256",
+      "hosts": [
+        "127.0.0.1/32"
+      ]
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "command -v psql >/dev/null 2>&1 || exit 96; id -u postgres >/dev/null 2>&1 || exit 96; out=$(timeout 50 sudo -u postgres psql -X -tAc 'SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='\\''app'\\''), EXISTS (SELECT 1 FROM pg_database WHERE datname='\\''app'\\''), encode(convert_to((SELECT pg_catalog.pg_get_userbyid(d.datdba) FROM pg_database d WHERE d.datname='\\''app'\\''), '\\''UTF8'\\''), '\\''hex'\\''), current_setting('\\''hba_file'\\'')') || { r=$?; case $r in 124|143) r=95;; 95|96) r=1;; esac; exit \"$r\"; }; case $out in *'\n'*) printf '\\n%s\\n' \"$out\"; exit 0;; esac; hba=${out#*|*|*|}; s=$(sudo -u postgres sh -c 'f=$1; shift; for p in \"$@\"; do grep -qE -e \"$p\" -- \"$f\"; printf \" %s\" \"$?\"; done' sh \"$hba\" '^\\s*host\\s+app\\s+app\\s+127\\.0\\.0\\.1/32\\s+scram-sha-256(\\s|$)'); printf '%s\\n%s\\n' \"$s\" \"$out\"",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 96,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}

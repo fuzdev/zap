@@ -1,0 +1,46 @@
+{
+  "resource": {
+    "id": "app-ready",
+    "type": "script",
+    "check": {
+      "$text": [
+        "test \"",
+        {
+          "$env": "CARGO_PKG_NAME"
+        },
+        "\" = zap_core && test -f ready"
+      ]
+    },
+    "run": "touch ready",
+    "cwd": "/srv/app",
+    "env": {
+      "APP_ENV": "it's prod",
+      "LANG": "C.UTF-8"
+    }
+  },
+  "target": {
+    "host": "app.example",
+    "user": "deploy"
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "CDPATH= cd -P -- '/srv/app' >/dev/null 2>&1 || exit; export APP_ENV='it'\\''s prod' LANG='C.UTF-8'\ntest \"zap_core\" = zap_core && test -f ready",
+        "privilege": "login",
+        "timeout_secs": 60,
+        "origin": "operator"
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

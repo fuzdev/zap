@@ -1,0 +1,45 @@
+{
+  "resource": {
+    "id": "ufw-firewall",
+    "type": "firewall",
+    "name": "regression: a declared any-proto port 80 must NOT substring-match an 8080/tcp line",
+    "backend": "ufw",
+    "allow": [
+      {
+        "port": 80,
+        "proto": "any"
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "exec ufw status verbose",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "Status: active\nLogging: on (low)\nDefault: deny (incoming), allow (outgoing), disabled (routed)\nNew profiles: skip\n\nTo                         Action      From\n--                         ------      ----\n8080/tcp                   ALLOW       Anywhere\n8080/tcp (v6)              ALLOW       Anywhere (v6)\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "firewall",
+      "drift": {
+        "missing_rules": [
+          "80"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "resource": {
+    "id": "ufw-firewall",
+    "type": "firewall",
+    "name": "an any-proto port rule converges against a bare <port> status line (and its v6 sibling)",
+    "backend": "ufw",
+    "allow": [
+      {
+        "port": 80,
+        "proto": "any"
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "exec ufw status verbose",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "Status: active\nLogging: on (low)\nDefault: deny (incoming), allow (outgoing), disabled (routed)\nNew profiles: skip\n\nTo                         Action      From\n--                         ------      ----\n80                         ALLOW       Anywhere\n80 (v6)                    ALLOW       Anywhere (v6)\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

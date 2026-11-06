@@ -1,0 +1,35 @@
+{
+  "resource": {
+    "id": "curl",
+    "type": "package",
+    "name": "curl",
+    "from": {
+      "apt": "curl"
+    }
+  },
+  "target": {
+    "local": true,
+    "package_manager": "apt"
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "s=$(dpkg-query -W -f='${db:Status-Status}\\n' curl 2>/dev/null); case $? in 0|1) ;; *) exit 2;; esac; printf '%s\\n' \"$s\" | grep -qx installed",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 2,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "undetermined",
+    "reason": "detection failed: the probe exited 2"
+  }
+}

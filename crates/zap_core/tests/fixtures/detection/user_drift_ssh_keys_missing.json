@@ -1,0 +1,102 @@
+{
+  "resource": {
+    "id": "deploy-user",
+    "type": "user",
+    "name": "create deploy user",
+    "username": "deploy",
+    "ssh_keys": {
+      "keys": [
+        "ssh-ed25519 AAAA deploy"
+      ]
+    }
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "id -u -- 'deploy'",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "1001\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "awk -F: -v u='deploy' '$1\"\"==u{print $6}' /etc/passwd",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "/home/deploy\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "if [ -e '/home/deploy' ] || [ -L '/home/deploy' ]; then exec stat -c '%f %u %g' -- '/home/deploy'; elif [ -d /home ] && [ -x /home ]; then echo absent; else exit 94; fi",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "41ed 1001 1001\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "[ ! -L '/home/deploy/.ssh/authorized_keys' ] || exit 3; [ ! -e '/home/deploy/.ssh/authorized_keys' ] || [ -f '/home/deploy/.ssh/authorized_keys' ] || exit 3; exec sudo -u 'deploy' head -c 1048577 -- '/home/deploy/.ssh/authorized_keys'",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "exec awk -F: -v u='deploy' '$1\"\"==u{print $2}' /etc/shadow",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "*\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "user",
+      "drift": {
+        "ssh_keys": "missing_or_empty"
+      }
+    }
+  }
+}

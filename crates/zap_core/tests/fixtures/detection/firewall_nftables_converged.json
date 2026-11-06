@@ -1,0 +1,45 @@
+{
+  "resource": {
+    "id": "nftables-firewall",
+    "type": "firewall",
+    "name": "configure firewall",
+    "backend": "nftables",
+    "allow": [
+      {
+        "port": 22,
+        "proto": "tcp"
+      },
+      {
+        "port": 80,
+        "proto": "tcp"
+      },
+      {
+        "port": 443,
+        "proto": "tcp"
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "exec nft list table inet filter",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t\tct state established,related accept\n\t\tct state invalid drop\n\t\tiif \"lo\" accept\n\t\tip protocol icmp accept\n\t\tip6 nexthdr ipv6-icmp accept\n\t\ttcp dport 22 accept\n\t\ttcp dport 80 accept\n\t\ttcp dport 443 accept\n\t}\n\n\tchain forward {\n\t\ttype filter hook forward priority filter; policy drop;\n\t}\n\n\tchain output {\n\t\ttype filter hook output priority filter; policy accept;\n\t\tct state established,related accept\n\t\toif \"lo\" accept\n\t}\n}\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+blake3.workspace = true
+fuz_audit.workspace = true
+rustls.workspace = true # the differential harness's https origin (TLS in the in-process content server)
+serde_json.workspace = true
+tempfile.workspace = true
+zap_core.workspace = true # the content cache's layout, for seeding a warm one
+
+[lints]
+workspace = true
+
+# Dev tooling — exempt from `fuz_audit`'s production-binary scan so
+# `cargo xtask check-release` can itself depend on `fuz_audit`.
+[package.metadata.fuz_audit]
+dev_only = true

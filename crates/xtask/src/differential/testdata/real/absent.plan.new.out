@@ -1,0 +1,30 @@
+plan — target local (4 change(s): +4 ~0)
+  user: op
+  home: /home/op
+  target: {"local":true,"package_manager":"apt","service_manager":"systemd"}
+  [+] home-dir  (directory)
+      path: ~/zh
+      mode: 755
+  [+] home-file  (file)
+      path: ~/zh/file.txt
+      mode: 644
+      content: inline (18 bytes, sha512 8bb21ebab8648a9b…)
+  [+] home-link  (link)
+      path: ~/zh/link
+      to: ~/zh/file.txt
+  [+] script  (script)
+      env: ZR_MODE=slow
+      check: test -f ~/zh/script.marker
+      > cat > ~/zh/rules <<'EOF'
+        #!/usr/sbin/nft -f
+        
+        table inet filter {
+                chain input {
+                        type filter hook input priority 0; policy drop;
+                }
+        }
+            four spaces
+        - item
+        EOF
+        touch ~/zh/script.marker
+plan_hash: 51910ad3c3fb1f3be6c0936e9eb79b4f1a9ab922deb71f369b3d5fffd9c2a79c

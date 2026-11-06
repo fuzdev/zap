@@ -1,0 +1,17 @@
+{
+  "resource": {
+    "id": "nginx-service",
+    "type": "service",
+    "name": "nginx service",
+    "service": "nginx",
+    "enabled": true
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [],
+  "expected": {
+    "outcome": "undetermined",
+    "reason": "service_manager not set in target (required for service resources)"
+  }
+}

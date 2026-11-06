@@ -1,0 +1,38 @@
+{
+  "resource": {
+    "id": "verify-keys",
+    "type": "verify",
+    "name": "verify authorized_keys",
+    "assertions": [
+      {
+        "type": "path_exists",
+        "path": "/home/app/.ssh/authorized_keys",
+        "mode": "600",
+        "not_empty": true
+      }
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "test -e '/home/app/.ssh/authorized_keys' && test -s '/home/app/.ssh/authorized_keys' && test \"$(stat -L -c %a -- '/home/app/.ssh/authorized_keys')\" = '600'",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}

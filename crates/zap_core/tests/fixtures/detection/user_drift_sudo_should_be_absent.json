@@ -1,0 +1,53 @@
+{
+  "resource": {
+    "id": "deploy-user",
+    "type": "user",
+    "name": "create deploy user",
+    "username": "deploy",
+    "sudo": false
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "id -u -- 'deploy'",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "1001\n",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "test -f '/etc/sudoers.d/deploy'",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "user",
+      "drift": {
+        "sudo": "should_be_absent"
+      }
+    }
+  }
+}

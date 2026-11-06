@@ -1,0 +1,59 @@
+{
+  "resource": {
+    "id": "motd",
+    "type": "file",
+    "name": "message of the day",
+    "path": "/etc/motd",
+    "content": {
+      "type": "inline",
+      "content": "welcome\n"
+    },
+    "mode": "644"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/motd",
+        "facet": "kind",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "kind": "regular"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/motd",
+        "facet": "digest",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "digest": "87bf2c3815c11d8f5c60ba4449caa7c21891cd04cf25344ae2cc5073b297cadaca1aefdc0a5ca89e3af844e6f4148612704b0ceacd60224d377dd95aff38f354"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/etc/motd",
+        "facet": "lstat",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "metadata": {
+          "kind": "regular",
+          "mode": "644",
+          "owner": "root",
+          "group": "root"
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

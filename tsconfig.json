@@ -1,0 +1,24 @@
+{
+	"extends": "$app/tsconfig",
+	"compilerOptions": {
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"strict": true,
+		"useUnknownInCatchVariables": false,
+		"exactOptionalPropertyTypes": false,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitReturns": true,
+		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedIndexedAccess": true,
+		"sourceMap": true,
+		"declaration": true,
+		"declarationMap": true,
+		"sourceRoot": "../src/lib/",
+		"importHelpers": true,
+		"erasableSyntaxOnly": true,
+		"rewriteRelativeImportExtensions": false
+	},
+	"include": ["*.js", "*.ts", "src/**/*.js", "src/**/*.ts", "src/**/*.svelte"]
+}

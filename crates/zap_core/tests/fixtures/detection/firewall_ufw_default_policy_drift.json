@@ -1,0 +1,40 @@
+{
+  "resource": {
+    "id": "ufw-firewall",
+    "type": "firewall",
+    "name": "an out-of-band `ufw default allow incoming` drifts though every allow rule is present",
+    "backend": "ufw",
+    "allow": [
+      "OpenSSH"
+    ]
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "exec ufw status verbose",
+        "privilege": "root",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "Status: active\nLogging: on (low)\nDefault: allow (incoming), allow (outgoing), disabled (routed)\nNew profiles: skip\n\nTo                         Action      From\n--                         ------      ----\nOpenSSH                    ALLOW       Anywhere\nOpenSSH (v6)               ALLOW       Anywhere (v6)\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "firewall",
+      "drift": {
+        "default_incoming": "allow"
+      }
+    }
+  }
+}

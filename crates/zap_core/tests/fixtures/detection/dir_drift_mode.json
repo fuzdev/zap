@@ -1,0 +1,52 @@
+{
+  "resource": {
+    "id": "devdir",
+    "type": "directory",
+    "name": "dev directory",
+    "path": "/opt/devdir",
+    "mode": "755",
+    "owner": "root",
+    "group": "root"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/devdir",
+        "facet": "kind",
+        "privilege": "login"
+      },
+      "observation": {
+        "kind": "directory"
+      }
+    },
+    {
+      "query": {
+        "type": "path",
+        "path": "/opt/devdir",
+        "facet": "lstat",
+        "privilege": "elevated"
+      },
+      "observation": {
+        "metadata": {
+          "kind": "directory",
+          "mode": "700",
+          "owner": "root",
+          "group": "root"
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "drifted",
+    "current": {
+      "kind": "directory",
+      "mode": "700",
+      "owner": "root",
+      "group": "root"
+    }
+  }
+}

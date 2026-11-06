@@ -1,0 +1,22 @@
+[package]
+name = "zap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "zap CLI — convergent machine-state management"
+
+[[bin]]
+name = "zap"
+path = "src/main.rs"
+
+[dependencies]
+argh.workspace = true
+zap_core.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

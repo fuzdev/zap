@@ -1,0 +1,34 @@
+{
+  "resource": {
+    "id": "curl",
+    "type": "package",
+    "name": "curl",
+    "from": {
+      "apk": "curl"
+    }
+  },
+  "target": {
+    "local": true,
+    "package_manager": "apk"
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "apk info -e curl",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 0,
+          "stdout": "curl\n",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "converged"
+  }
+}

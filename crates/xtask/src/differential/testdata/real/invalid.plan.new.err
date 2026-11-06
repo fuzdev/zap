@@ -1,0 +1,3 @@
+error: invalid config: config has 2 structural error(s):
+         - duplicate resource ids: dup
+         - resource `dup` depends_on unknown resource `nope`

@@ -1,0 +1,62 @@
+{
+  "resource": {
+    "id": "swap-file",
+    "type": "swap",
+    "name": "2GB swap file",
+    "size": "2G",
+    "path": "/swapfile"
+  },
+  "target": {
+    "local": true
+  },
+  "observed": [
+    {
+      "query": {
+        "type": "command",
+        "snippet": "test -f '/swapfile'",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "P='/swapfile' awk '$1 == ENVIRON[\"P\"] { found = 1 } END { exit !found }' /proc/swaps",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "query": {
+        "type": "command",
+        "snippet": "test -e /etc/fstab || exit 1; P='/swapfile' awk '$1 == ENVIRON[\"P\"] { found = 1 } END { exit !found }' /etc/fstab",
+        "privilege": "login",
+        "timeout_secs": 60
+      },
+      "observation": {
+        "command": {
+          "code": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ],
+  "expected": {
+    "outcome": "absent"
+  }
+}
