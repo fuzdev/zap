@@ -31,13 +31,13 @@ carry the family in the artifact's own name (`hardened_systemd_unit`,
 
 | Module | Exports | What it gives you |
 |---|---|---|
-| `recipe_nginx.ts` | `nginx_site_core` | the portable single-page-app server block: static root, `/api` proxy with a rate limit, security headers, CSP, and a redirect to it for alias names such as `www.`; returned as whole `template` content, the `domain` and `port` you pass held to `hostname` and `port`. An alias name is literal text, where `{{domain}}` may stand for the domain (`www.{{domain}}`), or carries a reference (`zap.env('MIRROR_DOMAIN')`), which becomes a variable of its own, `redirect_domain_<i>` for the entry at index `i`, held to `hostname` |
+| `recipe_nginx.ts` | `nginx_site_core` | the portable single-page-app server block ([the app shape it assumes](#the-nginx-site)): static root, `/api` proxy with a rate limit, security headers with the `hsts` you choose, CSP, and a redirect to it for alias names such as `www.`; returned as whole `template` content, the `domain` and `port` you pass held to `hostname` and `port`. An alias name is a literal host name, where a whole label may be `{{domain}}` (`www.{{domain}}`), or carries a reference (`zap.env('MIRROR_DOMAIN')`), which becomes a variable of its own, `redirect_domain_<i>` for the entry at index `i`, held to `hostname` |
 | `recipe_nginx.ts` | `nginx_catch_all_core`, `nginx_catch_all_server`, `nginx_remove_default_core` | the catch-all core: the stock default site removed, then a `default_server` on every socket the site listens on that closes a request for any other host name (`444`) and refuses its TLS handshake, carrying the site's SSL parameters |
-| `recipe_nginx.ts` | `ssl_params`, `rate_limit_zone` | the TLS and rate-limit snippets |
+| `recipe_nginx.ts` | `ssl_params`, `rate_limit_zone` | the TLS snippet, its session cache in a zone of its own (`zap_SSL` unless you name one), and the rate-limit zone |
 | `recipe_nginx.ts` | `SSL_PARAMS_PATH` | where the TLS snippet goes, the same on both distros; the site wrappers include it from there |
 | `recipe_nginx.ts` | `RATE_LIMIT_ZONE` | the rate-limit zone name an `extra_locations` block's own `limit_req` references |
-| `recipe_nginx.ts` | `site_security_header_directives` | the security-header lines, the site's CSP included, an `extra_locations` block with its own `add_header` repeats |
-| `recipe_nginx.ts` | `SECURITY_HEADER_DIRECTIVES` | those lines without the CSP, for a block that sets a policy of its own |
+| `recipe_nginx.ts` | `site_security_header_directives` | the security-header lines, the site's HSTS and CSP included, an `extra_locations` block with its own `add_header` repeats; pass it the site's `csp` and `hsts` |
+| `recipe_nginx.ts` | `security_header_directives` | those lines without the CSP, for a block that sets a policy of its own |
 | `recipe_nginx.ts` | `NGINX_VALIDATE` | `sudo nginx -t`, for a `file`'s `validate` |
 | `recipe_nginx.ts` | `nginx_config_verify` | a `verify` payload that re-checks the config every plan |
 | `recipe_csp.ts` | `spa_csp` | a `Content-Security-Policy` value for a single-page app, with hooks for a websocket origin and extra `connect-src`, `img-src`, `worker-src` entries; pass it to the site recipe's `csp` |
@@ -75,6 +75,42 @@ carry the family in the artifact's own name (`hardened_systemd_unit`,
 | `recipe_alpine_ssh.ts` | `alpine_ssh_service` | the sshd `service` on OpenRC's `sshd` |
 | `recipe_alpine_postgres.ts` | `alpine_postgres_setup` | the OpenRC cluster-init `script` (`apk` doesn't run `initdb` for you), with `initdb`'s `trust` rules turned to `peer` and `scram-sha-256` |
 | `recipe_alpine_firewall.ts` | `alpine_web_firewall` | the nftables `firewall` **and** the `nftables` persistence `service` the structural gate requires |
+
+## The nginx site
+
+The site recipes (`debian_nginx_spa_site`, `alpine_nginx_spa_site`, over
+`nginx_site_core`) serve one app shape:
+
+- a static frontend in `root`, such as a prerendered SvelteKit build, with its
+  content-hashed assets under `/_app`, cached for a year, and a `200.html` shell
+  that client-side routes fall back to (`spa_try_files` sets the chain);
+- a backend on a loopback `port` answering `/api` (HTTP and WebSocket),
+  `/health`, and `/ready`, the readiness check a `zap deploy` health gate polls.
+
+nginx terminates TLS, redirects HTTP to HTTPS (serving the ACME challenge
+plain), sets the security headers and the CSP, rate-limits `/api` and `/ready`
+per client address, forwards the `Authorization` header, and sends the
+client's address in `X-Forwarded-For`. The rest is the backend's:
+authentication, tighter per-route limits (on a login, say), refusing a
+credential where it shouldn't be used, and trusting `X-Forwarded-For` only from
+the loopback hop. An app with other routes adds them through `extra_locations`.
+
+`hsts` sets the `Strict-Transport-Security` header, the redirect server's
+included: by default `max-age` a year and no `includeSubDomains`.
+`{include_subdomains: true}` holds every name under the domain to HTTPS in a
+browser that has seen it, so a subdomain served over HTTP alone stops loading
+there; set it only when every name under the domain serves HTTPS. `{max_age: 0}`
+is how a browser forgets the policy, and `false` sends no header. A block of
+your own with its own `add_header` repeats the set with
+`site_security_header_directives(csp, hsts)`, the same `hsts` the site got.
+
+Every value the recipe interpolates as text is refused when it could change the
+config's structure: `root`, `acme_webroot`, `spa_try_files`, and
+`error_page_404` hold no `;`, `{`, `}`, quote, `#`, `\`, tab, line break, or NUL (and
+the first two no blank), `client_max_body_size` is a size such as `4m`,
+`api_burst` a whole number, a literal `redirect_domains` entry a host name, and
+`client_max_body_size_comment` one line. `extra_locations` is nginx config by
+design and goes in as written.
 
 ## Writing your own
 

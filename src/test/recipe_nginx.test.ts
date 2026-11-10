@@ -8,7 +8,7 @@ import {
 	nginx_config_verify,
 	nginx_site_core,
 	rate_limit_zone,
-	SECURITY_HEADER_DIRECTIVES,
+	security_header_directives,
 	SSL_PARAMS_PATH,
 	site_security_header_directives,
 	ssl_params
@@ -45,12 +45,26 @@ test('ssl_params reproduces the reference SSL_PARAMS snippet byte-for-byte', () 
 	const expected = `ssl_protocols TLSv1.2 TLSv1.3;
 ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
 ssl_prefer_server_ciphers off;
-ssl_session_cache shared:fuz_app_SSL:10m;
+ssl_session_cache shared:zap_SSL:10m;
 ssl_session_timeout 1d;
 ssl_session_tickets off;
 `;
 
 	assert.equal(ssl_params(), expected);
+});
+
+test('ssl_params names the session cache zone it is given, and refuses one that is not a name', () => {
+	assert.include(
+		ssl_params({ session_cache_zone: 'app_SSL' }),
+		'\nssl_session_cache shared:app_SSL:10m;\n'
+	);
+	for (const session_cache_zone of ['', 'a b', 'a;', 'a:1m', 'a}', 'a\nb']) {
+		assert.throws(
+			() => ssl_params({ session_cache_zone }),
+			/ssl_params: session_cache_zone .* must be letters, digits, or `_`/,
+			session_cache_zone
+		);
+	}
 });
 
 test('rate_limit_zone reproduces the reference nginx-rate-limit content byte-for-byte', () => {
@@ -65,9 +79,30 @@ test('rate_limit_zone renders overrides for size and rate', () => {
 		rate_limit_zone({ size: '20m', rate: '30r/s' }),
 		'limit_req_zone $binary_remote_addr zone=global:20m rate=30r/s;\n'
 	);
+	assert.equal(
+		rate_limit_zone({ size: '512k', rate: '600r/m' }),
+		'limit_req_zone $binary_remote_addr zone=global:512k rate=600r/m;\n'
+	);
 });
 
-test('nginx_site_core reproduces a reference fuz_app site byte-for-byte', () => {
+test('rate_limit_zone refuses a size or rate that is not in its form', () => {
+	for (const size of ['', '10m;', '10m rate=1r/s', '1g', 'm', '10m\n']) {
+		assert.throws(
+			() => rate_limit_zone({ size }),
+			/rate_limit_zone: size .* must be a number/,
+			size
+		);
+	}
+	for (const rate of ['', '10r/s;', '10r/h', '10', 'r/s', '10r/s burst=5', '10r/s\n']) {
+		assert.throws(
+			() => rate_limit_zone({ rate }),
+			/rate_limit_zone: rate .* must be requests per second or minute/,
+			rate
+		);
+	}
+});
+
+test('nginx_site_core reproduces a reference site byte-for-byte', () => {
 	const site = build_site({
 		root: '/home/app/app/current/build',
 		csp: CSP,
@@ -89,12 +124,12 @@ server {
 
     server_tokens off;
 
-    # Rate limiting is scoped to the dynamic /api surface (see location /api),
-    # NOT applied server-wide. A global limit_req here also throttles the
-    # static /_app/* chunks, and the SPA cold-loads dozens of them in one
-    # parallel burst — exceeding the burst and rejecting assets, which breaks
-    # hydration ("context value is not set"). Static assets are fingerprinted
-    # and immutable; they don't need request-rate protection.
+    # Rate limiting is scoped to the proxied /api and /ready locations, NOT
+    # applied server-wide. A global limit_req here also throttles the static
+    # /_app/* chunks, and the SPA cold-loads dozens of them in one parallel
+    # burst — exceeding the burst and rejecting assets, which breaks
+    # hydration. Static assets are fingerprinted and immutable; they don't
+    # need request-rate protection.
 
     # Throttling answers 429, not nginx's default 503. A throttled client is
     # being asked to slow down, not told the server is unavailable: 429 is the
@@ -109,18 +144,19 @@ server {
     root /home/app/app/current/build;
 
     # Security headers
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Content-Security-Policy "${CSP}" always;
 
-    # API and health routes -> backend. The /api prefix covers /api/rpc and the
-    # /api/ws WebSocket upgrade; the upgrade headers below carry both.
+    # API and health routes -> backend. The /api prefix covers the backend's
+    # HTTP API and any WebSocket under it; the upgrade headers below carry both.
     location /api {
-        # Rate limit dynamic API traffic only. burst is generous to absorb
-        # the dashboard's RPC fan-out on load; auth endpoints also have their
-        # own app-level per-IP limiters as the real backstop.
+        # Rate limit dynamic API traffic only, per client address. burst absorbs
+        # the requests a page sends at once on load. This is one coarse limit
+        # for the whole prefix: tighter per-route limits (on a login, say) are
+        # the backend's to enforce.
         limit_req zone=global burst=50 nodelay;
 
         proxy_pass http://127.0.0.1:{{port}};
@@ -133,21 +169,11 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
 
-        # Forward bearer auth so API-token clients work through nginx.
-        #
-        # Browser token leakage is covered by the backend's is_browser_context
-        # guard (rejects a bearer when Origin/Referer is present), and cookie/
-        # browser requests carry no Authorization — so stripping here buys
-        # nothing against XSS exfiltration while silently breaking every
-        # API-token client.
-        #
-        # It is NOT a no-op in general, though: stripping would also block
-        # replay of a token stolen from CI, an env var, or a config file —
-        # that client sends no Origin, so the guard admits it. Forwarding is a
-        # deliberate trade (working API tokens for a wider replay surface),
-        # not a free one. Compensating controls are token revocation, the
-        # bearer IP limiter, and per-spec credential_types gating on anything
-        # sensitive. Revisit if a deployment wants bearer disabled at the edge.
+        # Forward the client's Authorization header, so bearer-token API clients
+        # work through nginx. nginx checks no credential: the backend decides
+        # what a token may do, and is expected to refuse one where it shouldn't
+        # be used (sent from a browser page, say, or to a route that takes
+        # only a session) and to limit failed attempts.
         proxy_set_header Authorization $http_authorization;
 
         # Timeouts
@@ -165,9 +191,11 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Readiness deploy gate — the spine /ready schema-drift probe. zap's
-    # post-deploy poll targets it (503 => rollback); proxy it like /health so
-    # it reaches the daemon rather than 404ing at nginx.
+    # Readiness check, answered by the backend: a zap deploy with a health gate
+    # polls it after each release and rolls the release back on a failing
+    # answer (a 404 reads as no readiness check unless the gate's path is
+    # /ready). Proxied like /health so it reaches the backend rather than
+    # 404ing at nginx.
     location = /ready {
         limit_req zone=global burst=5 nodelay;
         proxy_pass http://127.0.0.1:{{port}};
@@ -182,7 +210,7 @@ server {
     location /_app {
         expires 1y;
         add_header Cache-Control "public, immutable";
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
         add_header X-Frame-Options "SAMEORIGIN" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
@@ -190,12 +218,12 @@ server {
         try_files $uri =404;
     }
 
-    # Serve static files, fall back to 200.html for SPA routes.
+    # Serve static files, fall back to the SPA shell for client-side routes.
     #
     # Cache-Control on the HTML entry point: force revalidation on every
     # request (browser sends If-None-Match, server returns 304 if unchanged
     # ~ a few hundred bytes). Without this, browsers apply heuristic
-    # caching to 200.html, which after a deploy means they serve the OLD
+    # caching to the shell, which after a deploy means they serve the OLD
     # shell — and the old shell references OLD hashed /_app/* asset URLs
     # that no longer exist in the new release directory. Result: broken
     # page until the user hard-refreshes one or more times. The /_app/*
@@ -204,15 +232,15 @@ server {
     location / {
         # nginx drops inherited add_header directives in any location that sets
         # its own, so the security headers + CSP must be repeated here — this is
-        # the HTML shell (prerendered routes + 200.html), where they matter most.
+        # the HTML (prerendered routes and the SPA shell), where they matter most.
         add_header Cache-Control "no-cache, must-revalidate" always;
-        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
         add_header X-Frame-Options "SAMEORIGIN" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Content-Security-Policy "${CSP}" always;
-        # Serve prerendered route HTML when present (public-read: real <title>,
-        # content, SEO); fall back to the 200.html SPA shell for dynamic routes.
+        # Serve prerendered route HTML when present (a real <title> and content,
+        # for SEO); fall back to the SPA shell for client-side routes.
         try_files $uri $uri/index.html /200.html;
     }
 }
@@ -225,7 +253,8 @@ server {
 
     # ACME HTTP-01 challenge (certbot --webroot). Served over plain HTTP and
     # NOT redirected, so certbot renew works with nginx running on port 80
-    # (the old --standalone authenticator couldn't bind 80 while nginx held it).
+    # (the standalone authenticator the first issuance uses can't bind 80
+    # while nginx holds it).
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
         default_type "text/plain";
@@ -295,7 +324,7 @@ test('error_page_404 renders before the SPA catch-all', () => {
 	// It sits between the `/_app` block's `try_files` and the SPA catch-all comment.
 	const error_index = site.indexOf('error_page 404');
 	const app_index = site.indexOf('location /_app');
-	const catchall_index = site.indexOf('# Serve static files, fall back to 200.html');
+	const catchall_index = site.indexOf('# Serve static files, fall back to the SPA shell');
 	assert.ok(error_index > app_index, 'error_page after the /_app block');
 	assert.ok(error_index < catchall_index, 'error_page before the SPA catch-all');
 });
@@ -379,7 +408,7 @@ server {
 
     server_tokens off;
 
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
@@ -442,11 +471,16 @@ test('every HTTPS location that sets its own headers carries the full set, the C
 
 test('site_security_header_directives is the base set plus the site CSP', () => {
 	assert.deepEqual(site_security_header_directives(CSP), [
-		...SECURITY_HEADER_DIRECTIVES,
+		...security_header_directives(),
+		`add_header Content-Security-Policy "${CSP}" always;`
+	]);
+	const hsts = { include_subdomains: true };
+	assert.deepEqual(site_security_header_directives(CSP, hsts), [
+		...security_header_directives(hsts),
 		`add_header Content-Security-Policy "${CSP}" always;`
 	]);
 	assert.ok(
-		!SECURITY_HEADER_DIRECTIVES.some((directive) => directive.includes('Content-Security'))
+		!security_header_directives().some((directive) => directive.includes('Content-Security'))
 	);
 	assert.throws(() => site_security_header_directives('a"; add_header X y'), /must hold no/);
 	assert.throws(() => site_security_header_directives('a\nb'), /must hold no/);
@@ -484,7 +518,7 @@ test('refuses an extra_locations block that sets a header but no CSP', () => {
 	]) {
 		assert.throws(
 			() => site(extra),
-			/sets add_header but no non-empty Content-Security-Policy.*site_security_header_directives\(csp\)/,
+			/sets add_header but no non-empty Content-Security-Policy.*site_security_header_directives\(csp, hsts\)/,
 			extra
 		);
 	}
@@ -617,16 +651,36 @@ test('redirect_domains mixes literal names and references, each variable named b
 	assert.deepEqual(placeholders, new Set(Object.keys(content.vars)));
 });
 
-test('a literal redirect_domains placeholder naming no site variable is left for the structural gate', () => {
-	const content = build_content({
+test('refuses a literal redirect_domains entry that is not a host name', () => {
+	for (const name of [
+		'{{mirror}}',
+		'{{port}}.example.org',
+		'www{{domain}}',
+		'',
+		'a..b',
+		'-a.example.org',
+		'a-.example.org',
+		'*.example.org',
+		'a_b.example.org',
+		'a.example.org;',
+		'a.example.org b.example.org',
+		'a.example.org}',
+		'a.example.org\n',
+		`${'a'.repeat(64)}.example.org`,
+		`${'a.'.repeat(127)}ab`
+	]) {
+		assert.throws(
+			() => build_content({ root: '/srv/build', csp: CSP, redirect_domains: [name] }),
+			/redirect_domains\[0\] .* must be a host name/,
+			name
+		);
+	}
+	// whole labels may be the placeholder, and a long name is a host name
+	build_content({
 		root: '/srv/build',
 		csp: CSP,
-		redirect_domains: ['{{mirror}}']
+		redirect_domains: ['www.{{domain}}', '{{domain}}.example.org', `${'a'.repeat(63)}.example.org`]
 	});
-
-	assert.ok(content.template.includes('    server_name {{mirror}};\n'), 'written as given');
-	assert.deepEqual(Object.keys(content.vars), ['domain', 'port'], 'no variable fills it');
-	assert.deepEqual(Object.keys(content.kinds), ['domain', 'port']);
 });
 
 test('refuses a redirect_domains reference that also holds a placeholder', () => {
@@ -652,4 +706,181 @@ test('refuses another input writing a redirect_domains reference placeholder', (
 			}),
 		/the placeholder `\{\{redirect_domain_0\}\}` is the redirect_domains reference's own/
 	);
+});
+
+test('hsts sets the Strict-Transport-Security header of every HTTPS server alike', () => {
+	const hsts_lines = (site: string) =>
+		site.split('\n').filter((line) => line.includes('Strict-Transport-Security'));
+	const cases: Array<[Parameters<typeof build_site>[0]['hsts'], string | null]> = [
+		[undefined, '"max-age=31536000"'],
+		[{}, '"max-age=31536000"'],
+		[{ include_subdomains: true }, '"max-age=31536000; includeSubDomains"'],
+		[{ max_age: 0 }, '"max-age=0"'],
+		[{ max_age: 600, include_subdomains: true }, '"max-age=600; includeSubDomains"'],
+		[false, null]
+	];
+	for (const [hsts, value] of cases) {
+		const site = build_site({
+			root: '/srv/build',
+			csp: CSP,
+			hsts,
+			redirect_domains: ['www.{{domain}}']
+		});
+		const lines = hsts_lines(site);
+		if (value === null) {
+			assert.deepEqual(lines, [], 'no header anywhere');
+			continue;
+		}
+		// the main server, its /_app and SPA blocks, and the redirect server
+		assert.equal(lines.length, 4, JSON.stringify(hsts));
+		for (const line of lines) {
+			assert.equal(
+				line.trim(),
+				`add_header Strict-Transport-Security ${value} always;`,
+				JSON.stringify(hsts)
+			);
+		}
+		assert.deepEqual(
+			security_header_directives(hsts).filter((d) => d.includes('Strict-Transport-Security')),
+			[`add_header Strict-Transport-Security ${value} always;`]
+		);
+	}
+	assert.ok(
+		!security_header_directives(false).some((d) => d.includes('Strict-Transport-Security'))
+	);
+});
+
+test('refuses an hsts max_age that is not a whole number of seconds', () => {
+	for (const max_age of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+		assert.throws(
+			() => build_site({ root: '/srv/build', csp: CSP, hsts: { max_age } }),
+			/nginx_site_core: hsts\.max_age .* must be a whole number/,
+			String(max_age)
+		);
+		assert.throws(
+			() => security_header_directives({ max_age }),
+			/security_header_directives: hsts\.max_age/,
+			String(max_age)
+		);
+	}
+});
+
+test('the comments the site writes make no claim about a particular backend', () => {
+	const site = build_site({ root: '/srv/build', csp: CSP });
+	const comments = site
+		.split('\n')
+		.filter((line) => line.trim().startsWith('#'))
+		.join('\n');
+	for (const word of ['fuz_app', 'spine', 'is_browser_context', 'credential_types', 'daemon']) {
+		assert.notInclude(comments, word);
+	}
+	// the shell's name is `spa_try_files`'s, not the comments'
+	assert.notInclude(comments, '200.html');
+});
+
+test('refuses a value that would end its directive or change how nginx reads it', () => {
+	const structural = [';', '{', '}', '"', "'", '#', '\\', '\t', '\r', '\n', '\0'];
+	const one_word: Array<'root' | 'acme_webroot'> = ['root', 'acme_webroot'];
+	for (const field of one_word) {
+		for (const value of [...structural.map((c) => `/srv/a${c}b`), '/srv/a b', '', ' ']) {
+			assert.throws(
+				() => build_site({ root: '/srv/build', csp: CSP, [field]: value }),
+				new RegExp(`nginx_site_core: ${field} `),
+				`${field}: ${JSON.stringify(value)}`
+			);
+		}
+	}
+	const words: Array<'spa_try_files' | 'error_page_404'> = ['spa_try_files', 'error_page_404'];
+	for (const field of words) {
+		for (const value of [...structural.map((c) => `$uri ${c} /200.html`), '', ' ']) {
+			assert.throws(
+				() => build_site({ root: '/srv/build', csp: CSP, [field]: value }),
+				new RegExp(`nginx_site_core: ${field} .* must be nginx words`),
+				`${field}: ${JSON.stringify(value)}`
+			);
+		}
+		// several words, and nginx variables, are the field's form
+		build_site({ root: '/srv/build', csp: CSP, [field]: '$uri $uri.html =404' });
+	}
+	for (const ssl_snippet_path of ['/etc/a;b', '/etc/a b', '/etc/a\nb', '']) {
+		assert.throws(
+			() =>
+				nginx_site_core({
+					ssl_snippet_path,
+					domain: 'app.example.com',
+					port: '4040',
+					root: '/srv/build',
+					csp: CSP
+				}),
+			/nginx_site_core: ssl_snippet_path /,
+			ssl_snippet_path
+		);
+		assert.throws(
+			() => nginx_catch_all_server({ ssl_snippet_path }),
+			/nginx_catch_all_server: ssl_snippet_path /,
+			ssl_snippet_path
+		);
+	}
+	// unused in certbot mode, so not read
+	nginx_catch_all_server({ ssl: 'certbot', ssl_snippet_path: '' });
+	for (const client_max_body_size of ['', '4m;', '4 m', '4t', 'm', '4m\n']) {
+		assert.throws(
+			() => build_site({ root: '/srv/build', csp: CSP, client_max_body_size }),
+			/nginx_site_core: client_max_body_size .* must be a number/,
+			client_max_body_size
+		);
+	}
+	for (const client_max_body_size of ['4m', '15M', '900', '1g', '512k']) {
+		build_site({ root: '/srv/build', csp: CSP, client_max_body_size });
+	}
+	for (const comment of ['a\nlocation / {}', 'a\rb']) {
+		assert.throws(
+			() =>
+				build_site({
+					root: '/srv/build',
+					csp: CSP,
+					client_max_body_size: '4m',
+					client_max_body_size_comment: comment
+				}),
+			/nginx_site_core: client_max_body_size_comment must be one line/,
+			comment
+		);
+	}
+	// a comment runs to the end of its line, so anything else in one line is text
+	build_site({
+		root: '/srv/build',
+		csp: CSP,
+		client_max_body_size: '4m',
+		client_max_body_size_comment: 'caps "uploads"; see {upload_route} # here'
+	});
+	for (const api_burst of [-1, 1.5, Number.NaN]) {
+		assert.throws(
+			() => build_site({ root: '/srv/build', csp: CSP, api_burst }),
+			/nginx_site_core: api_burst .* must be a whole number/,
+			String(api_burst)
+		);
+	}
+	build_site({ root: '/srv/build', csp: CSP, api_burst: 0 });
+});
+
+test('refuses a missing or empty csp, and an hsts that is neither options nor false', () => {
+	const site = (options: Record<string, unknown>) =>
+		build_site({ root: '/srv/build', csp: CSP, ...options });
+	for (const csp of [undefined, null, '', '  ', 42]) {
+		assert.throws(() => site({ csp }), /^nginx_site_core: csp is required/, String(csp));
+		assert.throws(
+			() => site_security_header_directives(csp as string),
+			/^site_security_header_directives: csp is required/,
+			String(csp)
+		);
+	}
+	assert.throws(() => site({ csp: 'a\0b' }), /^nginx_site_core: csp .* must hold no/);
+	assert.throws(() => site_security_header_directives('a\0b'), /must hold no/);
+	for (const hsts of [null, 'on', 1, true]) {
+		assert.throws(() => site({ hsts }), /^nginx_site_core: hsts must be the header's options/);
+		assert.throws(
+			() => security_header_directives(hsts as never),
+			/^security_header_directives: hsts must be the header's options/
+		);
+	}
 });

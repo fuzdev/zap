@@ -2,10 +2,21 @@
  * The neutral nginx core shared by the `recipe_debian_nginx` /
  * `recipe_alpine_nginx` wrappers.
  *
- * These build the nginx config fragments for a single-page app behind nginx — a
- * prerendered SvelteKit frontend
- * served as static files, with `/api`, `/health` and `/ready` reverse-proxied to a loopback
- * backend, SSL terminated by nginx, and an HTTP→HTTPS redirect:
+ * These build the nginx config fragments for a single-page app behind nginx, SSL
+ * terminated by nginx, with an HTTP→HTTPS redirect. The site recipe assumes one app
+ * shape:
+ *
+ * - a static frontend in `root` (a prerendered SvelteKit build, say), its
+ *   content-hashed assets under `/_app`, and a `200.html` shell that client-side
+ *   routes fall back to (`spa_try_files` changes the fallback chain);
+ * - a backend on a loopback port answering `/api` (HTTP and WebSocket), `/health`,
+ *   and `/ready`, the readiness check a `zap deploy` health gate polls.
+ *
+ * nginx rate-limits `/api` and `/ready` per client address, sets the security headers
+ * and CSP, and forwards the client's address in `X-Forwarded-For`. Everything else is
+ * the backend's: authentication, per-route limits (a login, say), refusing a credential
+ * where it shouldn't be used, and taking the client address from `X-Forwarded-For`
+ * only from the loopback hop. The fragments:
  *
  * - `ssl_params` — the shared `ssl_protocols`/`ssl_ciphers`/session snippet
  *   content, identical across distros, written at `SSL_PARAMS_PATH` on both.
@@ -43,9 +54,12 @@
  * refuses a value that is neither. Used whole, the content carries its kinds;
  * overriding `kinds` or rebuilding the content drops them. A `redirect_domains` entry
  * that carries a reference adds one more variable, `redirect_domain_<i>` (`i` its
- * index in `redirect_domains`), held to `hostname` too. Beyond those, a placeholder in
- * `extra_locations` or a literal `redirect_domains` entry uses `{{domain}}` or
- * `{{port}}`, and any other is a structural error when the config is read.
+ * index in `redirect_domains`), held to `hostname` too. A literal `redirect_domains`
+ * entry is held to a host name when the recipe runs, whole labels of it `{{domain}}`
+ * where it uses the placeholder. Beyond those, a placeholder in `extra_locations` uses
+ * `{{domain}}` or `{{port}}`, and any other is a structural error when the config is
+ * read. The other values a caller gives (`root`, `spa_try_files`, …) are interpolated
+ * as text, so each is refused when it could end its directive or block.
  *
  * Recipes are imported at config eval time inside zap's sandboxed config eval
  * (`fgro eval`), which has no network, no writes, and no environment, and where
@@ -99,27 +113,46 @@ export function nginx_config_verify(): VerifyResource {
  */
 export const SSL_PARAMS_PATH = '/etc/nginx/snippets/ssl_params.conf';
 
+/** Options for `ssl_params`. */
+export interface SslParamsOptions {
+	/**
+	 * The `ssl_session_cache` shared-memory zone's name: letters, digits, and `_`.
+	 * Defaults to `'zap_SSL'`. Renaming it on a running host allocates a new zone at the
+	 * next reload, dropping the cached sessions.
+	 */
+	session_cache_zone?: string;
+}
+
+/** What a shared-memory zone name must be: one word nginx reads as the name. */
+const NGINX_ZONE_NAME = /^[A-Za-z0-9_]+$/;
+
 /**
  * Build the shared SSL-parameters snippet content.
  *
  * The `ssl_protocols`/`ssl_ciphers`/`ssl_prefer_server_ciphers` +
  * `ssl_session_*` block both server contexts include to avoid duplication. The
- * value is fixed across distros, and so is its path (`SSL_PARAMS_PATH`), so this
- * takes no parameters.
+ * value is fixed across distros, and so is its path (`SSL_PARAMS_PATH`).
  *
- * The session-cache zone is named `fuz_app_SSL`, not the conventional `SSL`, because
- * Alpine's stock `nginx.conf` already declares `ssl_session_cache shared:SSL:2m` in the
- * http block — a second `SSL` zone at a different size makes `nginx -t` fail with a
- * zone-size conflict. A unique name sidesteps any distro's built-in zone (Debian's
+ * The session-cache zone is not the conventional `SSL`, because Alpine's stock
+ * `nginx.conf` already declares `ssl_session_cache shared:SSL:2m` in the http block —
+ * a second `SSL` zone at a different size makes `nginx -t` fail with a zone-size
+ * conflict. A name of its own sidesteps any distro's built-in zone (Debian's
  * `nginx.conf` declares none, so it's harmless there).
  *
  * @returns the complete snippet text, terminated by a trailing newline.
+ * @throws Error if `session_cache_zone` is not a zone name
  */
-export function ssl_params(): string {
+export function ssl_params(options?: SslParamsOptions): string {
+	const { session_cache_zone = 'zap_SSL' } = options ?? {};
+	if (!NGINX_ZONE_NAME.test(session_cache_zone)) {
+		throw new Error(
+			`ssl_params: session_cache_zone ${JSON.stringify(session_cache_zone)} must be letters, digits, or \`_\``
+		);
+	}
 	return `ssl_protocols TLSv1.2 TLSv1.3;
 ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
 ssl_prefer_server_ciphers off;
-ssl_session_cache shared:fuz_app_SSL:10m;
+ssl_session_cache shared:${session_cache_zone}:10m;
 ssl_session_timeout 1d;
 ssl_session_tickets off;
 `;
@@ -144,11 +177,17 @@ export const RATE_LIMIT_ZONE = 'global';
 
 /** Options for `rate_limit_zone`. */
 export interface RateLimitZoneOptions {
-	/** Shared-memory zone size. Defaults to `'10m'`. */
+	/** Shared-memory zone size, a number with an optional `k` or `m` suffix. Defaults to `'10m'`. */
 	size?: string;
-	/** `rate=` cap. Defaults to `'10r/s'`. */
+	/** `rate=` cap, requests per second or minute (`'10r/s'`, `'30r/m'`). Defaults to `'10r/s'`. */
 	rate?: string;
 }
+
+/** What an nginx size must be: a number, optionally `k` or `m` (any case). */
+const NGINX_SIZE = /^[0-9]+[kKmM]?$/;
+
+/** What a `limit_req_zone` rate must be: requests per second or minute. */
+const NGINX_RATE = /^[0-9]+r\/[sm]$/;
 
 /**
  * Build the http-context rate-limit zone line (`rate_limit.conf`, which the caller
@@ -159,9 +198,20 @@ export interface RateLimitZoneOptions {
  * IP; the defaults suit a single-page app's API.
  *
  * @returns the directive text, terminated by a trailing newline.
+ * @throws Error if `size` or `rate` is not in its form
  */
 export function rate_limit_zone(options?: RateLimitZoneOptions): string {
 	const { size = '10m', rate = '10r/s' } = options ?? {};
+	if (!NGINX_SIZE.test(size)) {
+		throw new Error(
+			`rate_limit_zone: size ${JSON.stringify(size)} must be a number with an optional \`k\` or \`m\`, such as \`10m\``
+		);
+	}
+	if (!NGINX_RATE.test(rate)) {
+		throw new Error(
+			`rate_limit_zone: rate ${JSON.stringify(rate)} must be requests per second or minute, such as \`10r/s\``
+		);
+	}
 
 	return `limit_req_zone $binary_remote_addr zone=${RATE_LIMIT_ZONE}:${size} rate=${rate};\n`;
 }
@@ -179,12 +229,17 @@ export interface NginxSpaSiteOptions {
 	domain: string;
 	/** The backend's loopback port, `{{port}}`'s value. Held to `port`. */
 	port: string | number;
-	/** Document `root` for the static frontend, e.g. `` `${CURRENT_LINK}/build` ``. */
+	/**
+	 * Document `root` for the static frontend, e.g. `` `${CURRENT_LINK}/build` ``. One
+	 * word: a blank, `;`, `{`, `}`, a quote, `#`, `\`, a line break, or a NUL is refused, since
+	 * each would end the directive or change how nginx reads it.
+	 */
 	root: string;
 	/**
-	 * The `Content-Security-Policy` header value (interpolated, not a placeholder). One
-	 * holding a `"`, a `\`, a `$`, or a line break is refused: inside the quoted header
-	 * value the first three end it or read as an escape or an nginx variable.
+	 * The `Content-Security-Policy` header value (interpolated, not a placeholder).
+	 * Required: a missing or empty one is refused, as is one holding a `"`, a `\`, a `$`,
+	 * a line break, or a NUL: inside the quoted header value the first three end it or
+	 * read as an escape or an nginx variable.
 	 */
 	csp: string;
 	/**
@@ -196,6 +251,18 @@ export interface NginxSpaSiteOptions {
 	 *   `ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;` (certbot-managed params).
 	 */
 	ssl?: 'snippet' | 'certbot';
+	/**
+	 * The `Strict-Transport-Security` header every HTTPS server sends, the redirect
+	 * server included. Defaults to `{}`: `max-age` a year, without `includeSubDomains`.
+	 *
+	 * A browser that has seen the header refuses plain HTTP to the name until
+	 * `max-age` runs out, and with `include_subdomains` to every name under it too, so
+	 * a subdomain served over HTTP alone stops loading in that browser. Set
+	 * `include_subdomains` only when every name under the domain serves HTTPS. A
+	 * browser forgets the policy once it sees `max_age: 0`, the way to undo one;
+	 * `false` sends no header, which forgets nothing.
+	 */
+	hsts?: NginxHsts;
 	/**
 	 * Serve HTTP/2 in the HTTPS server. Defaults to `true`.
 	 *
@@ -226,26 +293,29 @@ export interface NginxSpaSiteOptions {
 	 */
 	http2?: boolean;
 	/**
-	 * Server-level `client_max_body_size` cap. Emitted as its own line (with the
-	 * surrounding blank lines) only when set; omit for nginx's default.
+	 * Server-level `client_max_body_size` cap, a number with an optional `k`, `m`, or
+	 * `g` (`'4m'`). Emitted as its own line (with the surrounding blank lines) only when
+	 * set; omit for nginx's default.
 	 */
 	client_max_body_size?: string;
 	/**
 	 * App-specific comment line rendered directly above `client_max_body_size`
-	 * (without the leading `# `, which is added here). Ignored unless
+	 * (without the leading `# `, which is added here). One line: a line break is
+	 * refused, since the text after it would be read as config. Ignored unless
 	 * `client_max_body_size` is set; omit for no comment.
 	 */
 	client_max_body_size_comment?: string;
-	/** `/api` `limit_req` `burst=`. Defaults to `50`. */
+	/** `/api` `limit_req` `burst=`, a whole number. Defaults to `50`. */
 	api_burst?: number;
 	/**
-	 * The `location /` `try_files` arguments (the SPA fallback chain).
-	 * Defaults to `'$uri $uri/index.html /200.html'`.
+	 * The `location /` `try_files` arguments (the SPA fallback chain), words separated
+	 * by spaces. Defaults to `'$uri $uri/index.html /200.html'`. A `;`, `{`, `}`, a
+	 * quote, `#`, `\`, a tab, a line break, or a NUL is refused.
 	 */
 	spa_try_files?: string;
 	/**
-	 * `error_page 404 <target>;` in the HTTPS server, e.g. `'/404.html'`.
-	 * Emitted only when set.
+	 * `error_page 404 <target>;` in the HTTPS server, e.g. `'/404.html'`, held to the
+	 * rule `spa_try_files` is. Emitted only when set.
 	 */
 	error_page_404?: string;
 	/**
@@ -253,12 +323,15 @@ export interface NginxSpaSiteOptions {
 	 * (already indented to the server-block level, no leading/trailing blank
 	 * lines), placed just before the `/_app` static block. A block with no
 	 * `add_header` inherits the server's security headers and CSP; one with its own
-	 * inherits none, so it renders `site_security_header_directives(csp)` beside them,
+	 * inherits none, so it renders `site_security_header_directives(csp, hsts)` beside them,
 	 * or a `Content-Security-Policy` of its own. A block (a `location`, or an `if` in
 	 * one) that sets `add_header` with no `Content-Security-Policy` is refused.
 	 */
 	extra_locations?: string;
-	/** ACME HTTP-01 challenge webroot for the redirect server. Defaults to `/var/www/certbot`. */
+	/**
+	 * ACME HTTP-01 challenge webroot for the redirect server, one word as `root` is.
+	 * Defaults to `/var/www/certbot`.
+	 */
 	acme_webroot?: string;
 	/**
 	 * Further host names that 301 to `https://{{domain}}` — e.g. `['www.{{domain}}']`
@@ -267,8 +340,9 @@ export interface NginxSpaSiteOptions {
 	 * redirects, on the site's certificate, so the cert must cover them: pass the
 	 * same names to the certbot recipes' `extra_domains`. Defaults to none.
 	 *
-	 * A literal name may use the `{{domain}}` placeholder, substituted with the rest
-	 * of the template. A name that carries a reference (`zap.env('MIRROR_DOMAIN')`,
+	 * A literal name is a host name, held to the `hostname` kind's form when the
+	 * recipe runs, where whole labels may be the `{{domain}}` placeholder, substituted
+	 * with the rest of the template; any other placeholder is refused. A name that carries a reference (`zap.env('MIRROR_DOMAIN')`,
 	 * whole or interpolated) becomes its own variable, `redirect_domain_<i>` for the
 	 * entry at index `i`, held to `hostname` once it resolves; it takes no placeholder,
 	 * since a variable's value is never read for one.
@@ -284,7 +358,7 @@ export interface NginxSiteCoreOptions extends NginxSpaSiteOptions {
 	/**
 	 * The on-disk path the `ssl: 'snippet'` `include` points at — the one bit of
 	 * the site config the distro wrappers supply, `SSL_PARAMS_PATH` on both.
-	 * Unused when `ssl === 'certbot'`.
+	 * Unused when `ssl === 'certbot'`. One word, as `root` is.
 	 */
 	ssl_snippet_path: string;
 }
@@ -331,6 +405,7 @@ const redirect_names = (redirect_domains: ReadonlyArray<string>): NginxRedirectN
 	const result: NginxRedirectNames = { names: [], vars: {}, kinds: {} };
 	redirect_domains.forEach((entry, i) => {
 		if (!carries_reference(entry)) {
+			assert_redirect_name(entry, i);
 			result.names.push(entry);
 			return;
 		}
@@ -347,42 +422,104 @@ const redirect_names = (redirect_domains: ReadonlyArray<string>): NginxRedirectN
 	return result;
 };
 
+/** The `Strict-Transport-Security` header a site sends (`NginxSpaSiteOptions.hsts`). */
+export interface NginxHstsOptions {
+	/** `max-age`, in seconds: a whole number. Defaults to `31536000`, a year. */
+	max_age?: number;
+	/**
+	 * Add `includeSubDomains`, so a browser holds every name under the domain to HTTPS
+	 * too. Defaults to `false`.
+	 */
+	include_subdomains?: boolean;
+}
+
+/** A site's HSTS: the header's options, or `false` for no header. */
+export type NginxHsts = NginxHstsOptions | false;
+
 /**
- * The site-independent security-header `add_header … always;` directives: HSTS,
- * `X-Frame-Options`, `nosniff`, and `Referrer-Policy`, in render order, unindented.
- * The `Content-Security-Policy` is per site, so it is not here:
+ * The `Strict-Transport-Security` directive for `hsts`, or none for `false`.
+ *
+ * @throws Error if `max_age` is not a whole number
+ */
+const hsts_directives = (hsts: NginxHsts, recipe: string): Array<string> => {
+	if (hsts === false) return [];
+	if (hsts === null || typeof hsts !== 'object') {
+		throw new Error(
+			`${recipe}: hsts must be the header's options (\`{}\` for the default) or \`false\` for none, got ${JSON.stringify(hsts)}`
+		);
+	}
+	const { max_age = 31536000, include_subdomains = false } = hsts;
+	if (!Number.isSafeInteger(max_age) || max_age < 0) {
+		throw new Error(`${recipe}: hsts.max_age ${max_age} must be a whole number of seconds`);
+	}
+	const value = include_subdomains ? `max-age=${max_age}; includeSubDomains` : `max-age=${max_age}`;
+	return [`add_header Strict-Transport-Security "${value}" always;`];
+};
+
+/**
+ * The site-independent security-header `add_header … always;` directives: HSTS as
+ * `hsts` gives it, `X-Frame-Options`, `nosniff`, and `Referrer-Policy`, in render
+ * order, unindented. The `Content-Security-Policy` is per site, so it is not here:
  * `site_security_header_directives` appends it.
  *
  * nginx drops inherited `add_header` directives in any block that sets its own,
  * so the set can't be declared once at the server level. A block that sets its
  * own headers repeats the whole set, the CSP included, or it serves without them:
- * an `extra_locations` block renders `site_security_header_directives(csp)`. A
+ * an `extra_locations` block renders `site_security_header_directives(csp, hsts)`. A
  * block with a policy of its own (a sandboxing CSP for user-uploaded bytes) renders
  * these and its own `Content-Security-Policy` instead.
+ *
+ * @param hsts - the site's `hsts`; defaults to the site recipe's default
+ * @returns the directives, one per entry.
+ * @throws Error if `hsts.max_age` is not a whole number
  */
-export const SECURITY_HEADER_DIRECTIVES: ReadonlyArray<string> = [
-	'add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;',
-	'add_header X-Frame-Options "SAMEORIGIN" always;',
-	'add_header X-Content-Type-Options "nosniff" always;',
-	'add_header Referrer-Policy "strict-origin-when-cross-origin" always;'
-];
+export function security_header_directives(hsts: NginxHsts = {}): Array<string> {
+	return [
+		...hsts_directives(hsts, 'security_header_directives'),
+		'add_header X-Frame-Options "SAMEORIGIN" always;',
+		'add_header X-Content-Type-Options "nosniff" always;',
+		'add_header Referrer-Policy "strict-origin-when-cross-origin" always;'
+	];
+}
 
 /**
  * The full security-header set a site's server block declares, as the directives a
- * block that sets its own `add_header` repeats: `SECURITY_HEADER_DIRECTIVES` and the
- * site's `Content-Security-Policy`, in render order, unindented.
+ * block that sets its own `add_header` repeats: `security_header_directives(hsts)` and
+ * the site's `Content-Security-Policy`, in render order, unindented.
  *
  * @param csp - the site's `Content-Security-Policy` value, the `csp` the site recipe is given
+ * @param hsts - the site's `hsts`, the one the site recipe is given; defaults to its default
  * @returns the directives, one per entry.
+ * @throws Error if `csp` is missing or holds a `"`, a `\`, a `$`, a line break, or a NUL,
+ * if `hsts` is neither options nor `false`, or `hsts.max_age`
+ * is not a whole number
  */
-export function site_security_header_directives(csp: string): Array<string> {
-	if (/["\\\r\n$]/.test(csp)) {
+export function site_security_header_directives(csp: string, hsts: NginxHsts = {}): Array<string> {
+	assert_csp('site_security_header_directives', csp);
+	return [
+		...security_header_directives(hsts),
+		`add_header Content-Security-Policy "${csp}" always;`
+	];
+}
+
+/**
+ * Refuse a `csp` that isn't a non-empty policy the quoted header value can hold: a
+ * missing one would render `"undefined"` or no policy at all, and a `"`, a `\`, a `$`,
+ * a line break, or a NUL ends the quoted value or reads as an escape or an nginx
+ * variable there.
+ */
+const assert_csp = (recipe: string, csp: unknown): void => {
+	if (typeof csp !== 'string' || csp.trim() === '') {
 		throw new Error(
-			`site_security_header_directives: csp ${JSON.stringify(csp)} must hold no \`"\`, \`\\\`, \`$\` or line break: the first three end the quoted header value or read as an escape or an nginx variable there`
+			`${recipe}: csp is required, a non-empty Content-Security-Policy value such as spa_csp() gives, got ${JSON.stringify(csp) ?? 'nothing'}`
 		);
 	}
-	return [...SECURITY_HEADER_DIRECTIVES, `add_header Content-Security-Policy "${csp}" always;`];
-}
+	if (/["\\\r\n$\0]/.test(csp)) {
+		throw new Error(
+			`${recipe}: csp ${JSON.stringify(csp)} must hold no \`"\`, \`\\\`, \`$\`, line break, or NUL: the first three end the quoted header value or read as an escape or an nginx variable there`
+		);
+	}
+};
 
 /** One `{ … }` block of nginx config: its opening words and its own directives' names. */
 interface NginxBlock {
@@ -473,29 +610,90 @@ const assert_extra_locations_keep_csp = (extra_locations: string): void => {
 			continue;
 		}
 		throw new Error(
-			`nginx_site_core: the extra_locations block \`${block.head}\` sets add_header but no non-empty Content-Security-Policy, and nginx gives a block with any add_header none of the server's, so it would serve without the site's CSP; render site_security_header_directives(csp) in it, or a Content-Security-Policy of its own`
+			`nginx_site_core: the extra_locations block \`${block.head}\` sets add_header but no non-empty Content-Security-Policy, and nginx gives a block with any add_header none of the server's, so it would serve without the site's CSP; render site_security_header_directives(csp, hsts) in it, or a Content-Security-Policy of its own`
 		);
 	}
 };
 
 /**
- * The security-header block at `indent`: `site_security_header_directives(csp)`, or
- * `SECURITY_HEADER_DIRECTIVES` alone where `csp` is omitted (a redirect-only server).
- * Lines are joined by newlines with no trailing newline — the caller's template
- * supplies the surrounding lines.
+ * The security-header block at `indent`: `site_security_header_directives(csp, hsts)`,
+ * or `security_header_directives(hsts)` alone where `csp` is omitted (a redirect-only
+ * server). Lines are joined by newlines with no trailing newline — the caller's
+ * template supplies the surrounding lines.
  */
-function security_headers(indent: string, csp?: string): string {
+function security_headers(indent: string, hsts: NginxHsts, csp?: string): string {
 	const directives =
-		csp === undefined ? SECURITY_HEADER_DIRECTIVES : site_security_header_directives(csp);
+		csp === undefined
+			? security_header_directives(hsts)
+			: site_security_header_directives(csp, hsts);
 	return directives.map((directive) => `${indent}${directive}`).join('\n');
 }
+
+/**
+ * What would end an nginx directive, open or close a block, open a quoted string or a
+ * comment, or escape the next character, wherever a value lands among a directive's
+ * words: `;`, `{`, `}`, a quote, `#`, `\`, a tab, or a line break; and a NUL, which
+ * would cut a path short.
+ */
+const NGINX_STRUCTURE = /[;{}"'#\\\t\r\n\0]/;
+
+/**
+ * Refuse a value spliced into a directive as words separated by spaces unless it holds
+ * none of `NGINX_STRUCTURE` and is not blank.
+ */
+const assert_nginx_words = (recipe: string, field: string, value: string): void => {
+	if (NGINX_STRUCTURE.test(value) || value.trim() === '') {
+		throw new Error(
+			`${recipe}: ${field} ${JSON.stringify(value)} must be nginx words with no \`;\`, \`{\`, \`}\`, quote, \`#\`, \`\\\`, tab, line break, or NUL, since each would end the directive or change how nginx reads it`
+		);
+	}
+};
+
+/** Refuse a value spliced into a directive as one word: `assert_nginx_words`, with no blank. */
+const assert_nginx_word = (recipe: string, field: string, value: string): void => {
+	assert_nginx_words(recipe, field, value);
+	if (value.includes(' ')) {
+		throw new Error(
+			`${recipe}: ${field} ${JSON.stringify(value)} must be one word, with no blank, since nginx reads each word as another argument`
+		);
+	}
+};
+
+/** What a `client_max_body_size` must be: a number, optionally `k`, `m`, or `g` (any case). */
+const NGINX_BODY_SIZE = /^[0-9]+[kKmMgG]?$/;
+
+/** One label of a host name, the `hostname` kind's form. */
+const HOSTNAME_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+
+/**
+ * Refuse a literal `redirect_domains` entry that isn't a host name: dot-separated
+ * labels of the `hostname` kind's form, where a whole label may be the `{{domain}}`
+ * placeholder.
+ */
+const assert_redirect_name = (name: string, i: number): void => {
+	const labels = name.split('.');
+	const literal_length = labels.filter((label) => label !== '{{domain}}').join('.').length;
+	if (
+		literal_length > 253 ||
+		!labels.every((label) => label === '{{domain}}' || HOSTNAME_LABEL.test(label))
+	) {
+		throw new Error(
+			`nginx_site_core: redirect_domains[${i}] ${JSON.stringify(name)} must be a host name: dot-separated labels of letters, digits, and \`-\` (each at most 63 bytes, not starting or ending with \`-\`), where a whole label may be \`{{domain}}\``
+		);
+	}
+};
 
 /**
  * The SSL-parameter lines of a server block at the server-block indent, no trailing
  * newline: the `ssl_params` snippet's `include` (`'snippet'`), or certbot's options file
  * and DH parameters (`'certbot'`).
  */
-function ssl_params_lines(ssl: 'snippet' | 'certbot', ssl_snippet_path: string): string {
+function ssl_params_lines(
+	ssl: 'snippet' | 'certbot',
+	ssl_snippet_path: string,
+	recipe: string
+): string {
+	if (ssl === 'snippet') assert_nginx_word(recipe, 'ssl_snippet_path', ssl_snippet_path);
 	return ssl === 'certbot'
 		? `    include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;`
@@ -509,17 +707,18 @@ function ssl_params_lines(ssl: 'snippet' | 'certbot', ssl_snippet_path: string):
  * Composes the HTTPS `server` block — SSL cert + the SSL params (snippet or
  * certbot), HTTP/2 unless `http2` is off, `server_tokens off`, an optional
  * server-level `client_max_body_size`,
- * the document `root`, the security-header set with the CSP (repeated in the
+ * the document `root`, the security-header set with `hsts` and the CSP (repeated in the
  * `/_app` and `location /` blocks, which set headers of their own and so inherit
  * none; the proxied locations inherit it), a rate-limited `/api` reverse
  * proxy (with WebSocket upgrade headers + `Authorization` forward + timeouts),
- * `/health`, the `/ready` deploy-readiness gate (zap's post-deploy poll target),
+ * `/health`, the `/ready` readiness check (what a `zap deploy` health gate polls),
  * the immutable `/_app` static block, any `extra_locations`, an
  * optional `error_page 404`, and the SPA catch-all `location /` (no-cache +
  * the `try_files` fallback) — plus the
  * HTTP→HTTPS redirect `server` block (ACME challenge served plain, everything
  * else 301'd), and, for any `redirect_domains`, an HTTPS `server` that 301s them
- * to `{{domain}}`.
+ * to `{{domain}}`, sending the same HSTS header. The app shape it serves, and what it
+ * leaves to the backend, are in the module doc.
  *
  * Neither server is a `default_server`: the `*_nginx_catch_all` recipes add one that
  * gives a request for any other host name no answer, so the proxied locations forward
@@ -527,13 +726,20 @@ function ssl_params_lines(ssl: 'snippet' | 'certbot', ssl_snippet_path: string):
  *
  * `{{domain}}` / `{{port}}` are placeholders for zap's template engine, their values
  * the options' `domain` and `port`; `root`/`csp`/etc. are interpolated from the
- * options. Prefer the `debian_nginx_spa_site` / `alpine_nginx_spa_site` wrappers,
+ * options, each refused when it could change the config's structure. `extra_locations`
+ * is the exception: it is nginx config by design, spliced in as given. Prefer the `debian_nginx_spa_site` / `alpine_nginx_spa_site` wrappers,
  * which supply `ssl_snippet_path` for you.
  *
  * @returns the `template` content: the complete site config (terminated by a trailing
  * newline), `domain` and `port` as its `vars` with a `redirect_domain_<i>` for each
  * `redirect_domains` entry carrying a reference, and their kinds.
- * @throws Error if `csp` holds a `"`, a `\`, a `$`, or a line break, if an
+ * @throws Error if `csp` is missing or holds a `"`, a `\`, a `$`, a line break, or a NUL,
+ * if `hsts` is neither options nor `false`, if `root`,
+ * `acme_webroot`, `ssl_snippet_path`, `spa_try_files`, or `error_page_404` holds a
+ * character that would end its directive (and the one-word fields a blank), if
+ * `client_max_body_size`, `api_burst`, or `hsts.max_age` is not a size or whole number,
+ * if `client_max_body_size_comment` holds a line break, if a literal
+ * `redirect_domains` entry is not a host name, if an
  * `extra_locations` block sets `add_header` with no non-empty
  * `Content-Security-Policy`, if a `redirect_domains` entry carrying a reference holds a
  * placeholder, or if another input writes a `redirect_domain_<i>` placeholder such an
@@ -547,6 +753,7 @@ export function nginx_site_core(options: NginxSiteCoreOptions): NginxSiteContent
 		csp,
 		ssl = 'snippet',
 		ssl_snippet_path,
+		hsts = {},
 		http2 = true,
 		client_max_body_size,
 		client_max_body_size_comment,
@@ -558,12 +765,36 @@ export function nginx_site_core(options: NginxSiteCoreOptions): NginxSiteContent
 		redirect_domains = []
 	} = options;
 
+	// every value spliced into the config as text is held to what can't change its
+	// structure; `domain` and `port` are variables, held to their kinds
+	hsts_directives(hsts, 'nginx_site_core');
+	assert_csp('nginx_site_core', csp);
+	assert_nginx_word('nginx_site_core', 'root', root);
+	assert_nginx_word('nginx_site_core', 'acme_webroot', acme_webroot);
+	assert_nginx_words('nginx_site_core', 'spa_try_files', spa_try_files);
+	if (error_page_404 !== undefined) {
+		assert_nginx_words('nginx_site_core', 'error_page_404', error_page_404);
+	}
+	if (client_max_body_size !== undefined && !NGINX_BODY_SIZE.test(client_max_body_size)) {
+		throw new Error(
+			`nginx_site_core: client_max_body_size ${JSON.stringify(client_max_body_size)} must be a number with an optional \`k\`, \`m\`, or \`g\`, such as \`4m\``
+		);
+	}
+	if (client_max_body_size_comment !== undefined && /[\r\n]/.test(client_max_body_size_comment)) {
+		throw new Error(
+			`nginx_site_core: client_max_body_size_comment must be one line, since the text after a line break would be read as config`
+		);
+	}
+	if (!Number.isSafeInteger(api_burst) || api_burst < 0) {
+		throw new Error(`nginx_site_core: api_burst ${api_burst} must be a whole number`);
+	}
+
 	// HTTP/2 as a `listen` parameter on both sockets, not the `http2 on;`
 	// directive — see the `http2` option's docs for why the older spelling is
 	// the one that runs on every supported host.
 	const http2_param = http2 ? ' http2' : '';
 
-	const ssl_include = ssl_params_lines(ssl, ssl_snippet_path);
+	const ssl_include = ssl_params_lines(ssl, ssl_snippet_path, 'nginx_site_core');
 
 	// Server-level body-size cap: its own paragraph with a leading blank line
 	// when present (an optional app-specific comment above the directive),
@@ -621,7 +852,7 @@ ${ssl_include}
 
     server_tokens off;
 
-${security_headers('    ')}
+${security_headers('    ', hsts)}
 
     location / {
         return 301 https://{{domain}}$request_uri;
@@ -641,12 +872,12 @@ ${ssl_include}
 
     server_tokens off;
 
-    # Rate limiting is scoped to the dynamic /api surface (see location /api),
-    # NOT applied server-wide. A global limit_req here also throttles the
-    # static /_app/* chunks, and the SPA cold-loads dozens of them in one
-    # parallel burst — exceeding the burst and rejecting assets, which breaks
-    # hydration ("context value is not set"). Static assets are fingerprinted
-    # and immutable; they don't need request-rate protection.
+    # Rate limiting is scoped to the proxied /api and /ready locations, NOT
+    # applied server-wide. A global limit_req here also throttles the static
+    # /_app/* chunks, and the SPA cold-loads dozens of them in one parallel
+    # burst — exceeding the burst and rejecting assets, which breaks
+    # hydration. Static assets are fingerprinted and immutable; they don't
+    # need request-rate protection.
 
     # Throttling answers 429, not nginx's default 503. A throttled client is
     # being asked to slow down, not told the server is unavailable: 429 is the
@@ -658,14 +889,15 @@ ${client_max_body_size_block}
     root ${root};
 
     # Security headers
-${security_headers('    ', csp)}
+${security_headers('    ', hsts, csp)}
 
-    # API and health routes -> backend. The /api prefix covers /api/rpc and the
-    # /api/ws WebSocket upgrade; the upgrade headers below carry both.
+    # API and health routes -> backend. The /api prefix covers the backend's
+    # HTTP API and any WebSocket under it; the upgrade headers below carry both.
     location /api {
-        # Rate limit dynamic API traffic only. burst is generous to absorb
-        # the dashboard's RPC fan-out on load; auth endpoints also have their
-        # own app-level per-IP limiters as the real backstop.
+        # Rate limit dynamic API traffic only, per client address. burst absorbs
+        # the requests a page sends at once on load. This is one coarse limit
+        # for the whole prefix: tighter per-route limits (on a login, say) are
+        # the backend's to enforce.
         limit_req zone=${RATE_LIMIT_ZONE} burst=${api_burst} nodelay;
 
         proxy_pass http://127.0.0.1:{{port}};
@@ -678,21 +910,11 @@ ${security_headers('    ', csp)}
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
 
-        # Forward bearer auth so API-token clients work through nginx.
-        #
-        # Browser token leakage is covered by the backend's is_browser_context
-        # guard (rejects a bearer when Origin/Referer is present), and cookie/
-        # browser requests carry no Authorization — so stripping here buys
-        # nothing against XSS exfiltration while silently breaking every
-        # API-token client.
-        #
-        # It is NOT a no-op in general, though: stripping would also block
-        # replay of a token stolen from CI, an env var, or a config file —
-        # that client sends no Origin, so the guard admits it. Forwarding is a
-        # deliberate trade (working API tokens for a wider replay surface),
-        # not a free one. Compensating controls are token revocation, the
-        # bearer IP limiter, and per-spec credential_types gating on anything
-        # sensitive. Revisit if a deployment wants bearer disabled at the edge.
+        # Forward the client's Authorization header, so bearer-token API clients
+        # work through nginx. nginx checks no credential: the backend decides
+        # what a token may do, and is expected to refuse one where it shouldn't
+        # be used (sent from a browser page, say, or to a route that takes
+        # only a session) and to limit failed attempts.
         proxy_set_header Authorization $http_authorization;
 
         # Timeouts
@@ -710,9 +932,11 @@ ${security_headers('    ', csp)}
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Readiness deploy gate — the spine /ready schema-drift probe. zap's
-    # post-deploy poll targets it (503 => rollback); proxy it like /health so
-    # it reaches the daemon rather than 404ing at nginx.
+    # Readiness check, answered by the backend: a zap deploy with a health gate
+    # polls it after each release and rolls the release back on a failing
+    # answer (a 404 reads as no readiness check unless the gate's path is
+    # /ready). Proxied like /health so it reaches the backend rather than
+    # 404ing at nginx.
     location = /ready {
         limit_req zone=${RATE_LIMIT_ZONE} burst=5 nodelay;
         proxy_pass http://127.0.0.1:{{port}};
@@ -727,16 +951,16 @@ ${extra_locations_block}
     location /_app {
         expires 1y;
         add_header Cache-Control "public, immutable";
-${security_headers('        ', csp)}
+${security_headers('        ', hsts, csp)}
         try_files $uri =404;
     }
 ${error_page_block}
-    # Serve static files, fall back to 200.html for SPA routes.
+    # Serve static files, fall back to the SPA shell for client-side routes.
     #
     # Cache-Control on the HTML entry point: force revalidation on every
     # request (browser sends If-None-Match, server returns 304 if unchanged
     # ~ a few hundred bytes). Without this, browsers apply heuristic
-    # caching to 200.html, which after a deploy means they serve the OLD
+    # caching to the shell, which after a deploy means they serve the OLD
     # shell — and the old shell references OLD hashed /_app/* asset URLs
     # that no longer exist in the new release directory. Result: broken
     # page until the user hard-refreshes one or more times. The /_app/*
@@ -745,11 +969,11 @@ ${error_page_block}
     location / {
         # nginx drops inherited add_header directives in any location that sets
         # its own, so the security headers + CSP must be repeated here — this is
-        # the HTML shell (prerendered routes + 200.html), where they matter most.
+        # the HTML (prerendered routes and the SPA shell), where they matter most.
         add_header Cache-Control "no-cache, must-revalidate" always;
-${security_headers('        ', csp)}
-        # Serve prerendered route HTML when present (public-read: real <title>,
-        # content, SEO); fall back to the 200.html SPA shell for dynamic routes.
+${security_headers('        ', hsts, csp)}
+        # Serve prerendered route HTML when present (a real <title> and content,
+        # for SEO); fall back to the SPA shell for client-side routes.
         try_files ${spa_try_files};
     }
 }
@@ -762,7 +986,8 @@ server {
 
     # ACME HTTP-01 challenge (certbot --webroot). Served over plain HTTP and
     # NOT redirected, so certbot renew works with nginx running on port 80
-    # (the old --standalone authenticator couldn't bind 80 while nginx held it).
+    # (the standalone authenticator the first issuance uses can't bind 80
+    # while nginx holds it).
     location /.well-known/acme-challenge/ {
         root ${acme_webroot};
         default_type "text/plain";
@@ -884,7 +1109,7 @@ server {
     listen 443 ssl${http2_param} default_server;
     listen [::]:443 ssl${http2_param} default_server;
     server_name _;
-${ssl_params_lines(ssl, ssl_snippet_path)}
+${ssl_params_lines(ssl, ssl_snippet_path, 'nginx_catch_all_server')}
     ssl_reject_handshake on;
     return 444;
 }
