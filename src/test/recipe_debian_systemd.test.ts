@@ -255,7 +255,20 @@ test('refuses a malformed loosening', () => {
 test('refuses root, and any user or group that is not an account name', () => {
 	assert.throws(() => hardened_systemd_unit({ ...BASE, user: 'root' }), /user "root" is root/);
 	assert.throws(() => hardened_systemd_unit({ ...BASE, group: 'root' }), /group "root" is root/);
-	for (const name of [' root', 'root ', '+0', '0', '1000', 'a b', '-x', 'a$b', '', 'ro\not']) {
+	for (const name of [
+		' root',
+		'root ',
+		'+0',
+		'0',
+		'1000',
+		'a b',
+		'-x',
+		'a$b',
+		'',
+		'ro\not',
+		'Svc_2',
+		'SVC'
+	]) {
 		assert.throws(
 			() => hardened_systemd_unit({ ...BASE, user: name }),
 			/user .* must be an account name/,
@@ -267,7 +280,7 @@ test('refuses root, and any user or group that is not an account name', () => {
 			JSON.stringify(name)
 		);
 	}
-	for (const name of ['svc', '_svc', 'svc-1', 'Svc_2', 'host$']) {
+	for (const name of ['svc', '_svc', 'svc-1', 'svc_2', 'host$']) {
 		assert.ok(hardened_systemd_unit({ ...BASE, user: name }).includes(`\nUser=${name}\n`), name);
 	}
 });

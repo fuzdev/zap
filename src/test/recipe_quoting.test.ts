@@ -175,8 +175,10 @@ describe('script recipes pass each value as one word', () => {
 
 	test('ssh_hardening_verify', () => {
 		const { run } = create_shell();
-		// A user name is one word, so the hostile value is one with no whitespace.
-		const user = HOSTILE.replaceAll(/\s/g, '${IFS}');
+		// A hostile value is no account name, and is refused; the `$` one may end in
+		// is quoted like any other byte.
+		assert.throws(() => ssh_hardening_verify({ user: HOSTILE }), /must be an account name/);
+		const user = 'svc$';
 		const { assertions } = ssh_hardening_verify({ user });
 		const allow = assertions.find((a) => a.type === 'command' && a.run.includes('allowusers'));
 		assert.ok(allow?.type === 'command');

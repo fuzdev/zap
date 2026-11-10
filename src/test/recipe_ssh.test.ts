@@ -8,7 +8,8 @@ import {
 	SSHD_VALIDATE,
 	ssh_hardening,
 	ssh_hardening_verify,
-	ssh_service_core
+	ssh_service_core,
+	to_ssh_port
 } from '#lib/recipe_ssh.ts';
 
 test('reproduces the reference SSH_HARDENED_CONFIG byte-for-byte', () => {
@@ -107,21 +108,72 @@ test('ssh_hardening_verify passes only when the user is the one allowed', () => 
 	assert.ok(!passes('allowusers other\n'));
 	assert.ok(!passes('port 22\n'), 'no AllowUsers allows everyone');
 	assert.ok(!passes(''), 'sshd -T printing nothing');
-	// A name a shell would read as code is compared as text.
-	const hostile = 'x\'y$(touch${IFS}canary)`touch${IFS}canary`;"q"$HOME*';
-	assert.ok(allow_passes(hostile, `allowusers ${hostile}\n`));
-	assert.ok(!allow_passes(hostile, 'allowusers x\n'));
+	// The `$` an account name may end in is compared as text, not expanded.
+	assert.ok(allow_passes('svc$', 'allowusers svc$\n'));
+	assert.ok(!allow_passes('svc$', 'allowusers svc\n'));
 });
 
-test('ssh_hardening and ssh_hardening_verify refuse a user that would be several', () => {
-	for (const user of ['', 'a b', 'a\tb', 'a\nb', ' a']) {
-		assert.throws(() => ssh_hardening({ user }), /one name, with no whitespace/, user);
-		assert.throws(() => ssh_hardening_verify({ user }), /one name, with no whitespace/, user);
+test('ssh_hardening and ssh_hardening_verify refuse a user that is not an account name', () => {
+	for (const user of [
+		'',
+		'a b',
+		'a\tb',
+		'a\nb',
+		' a',
+		// sshd patterns, which would allow other accounts
+		'*',
+		'a*',
+		'a?',
+		'!a',
+		// a `user@host` entry limits by client; a `,` would add a key to the
+		// verify's connection spec
+		'a@10.0.0.1',
+		'a,addr=10.0.0.1',
+		'a,',
+		// a uid, and a name a shell would read as code
+		'0',
+		'#0',
+		"it's",
+		'a$(touch canary)',
+		// the schema's account names are lowercase
+		'Svc',
+		'SVC',
+		'svc_A'
+	]) {
+		for (const recipe of [ssh_hardening, ssh_hardening_verify]) {
+			assert.throws(
+				() => recipe({ user }),
+				/ssh_hardening: user .* must be an account name/,
+				JSON.stringify(user)
+			);
+		}
 	}
-	// a `,` would add a key to the verify's connection spec
-	for (const user of ['a,addr=10.0.0.1', 'a,']) {
-		assert.throws(() => ssh_hardening_verify({ user }), /one name, with no `,`/, user);
+	for (const user of ['svc', '_svc', 'svc-1', 'svc_2', 'svc$']) {
+		ssh_hardening({ user });
+		ssh_hardening_verify({ user });
 	}
+});
+
+test('ssh_port is the port the verify connects on, and the drop-in sets none', () => {
+	for (const assertion of ssh_hardening_verify({ user: 'svc', ssh_port: 2222 }).assertions) {
+		assert.ok(assertion.type === 'command');
+		assert.include(assertion.run, "'user=svc,host=192.0.2.1,addr=192.0.2.1,lport=2222'");
+	}
+	assert.equal(ssh_hardening({ user: 'svc', ssh_port: 2222 }), ssh_hardening({ user: 'svc' }));
+	assert.notMatch(ssh_hardening({ user: 'svc', ssh_port: 2222 }), /^port/im);
+	assert.equal(to_ssh_port('r'), 22);
+	assert.equal(to_ssh_port('r', { ssh_port: 65535 }), 65535);
+	for (const ssh_port of [0, -22, 65536, 22.5, Number.NaN]) {
+		assert.throws(
+			() => ssh_hardening_verify({ user: 'svc', ssh_port }),
+			/ssh_hardening: ssh_port .* must be a port/,
+			String(ssh_port)
+		);
+	}
+	// a string, as an untyped config might pass, is refused and shown quoted
+	const loose = { user: 'svc', ssh_port: '22' } as unknown as { user: string; ssh_port: number };
+	assert.throws(() => ssh_hardening_verify(loose), /ssh_hardening: ssh_port "22" must be a port/);
+	assert.throws(() => to_ssh_port('r', { ssh_port: 2.5 }), /^r: ssh_port 2\.5 must be a port/);
 });
 
 test('ssh_hardening_verify reads the config sshd applies to the allowed user, Match blocks included', () => {
@@ -150,12 +202,12 @@ test('ssh_hardening_verify asserts the tunables the drop-in was given', () => {
 });
 
 test('ssh_hardening_verify matches the user name as one quoted word', () => {
-	const runs = ssh_hardening_verify({ user: "it's" }).assertions.map((a) =>
+	const runs = ssh_hardening_verify({ user: 'svc$' }).assertions.map((a) =>
 		a.type === 'command' ? a.run : ''
 	);
 	assert.ok(
 		runs.includes(
-			`test "$(sudo sshd -T -C 'user=it'\\''s,host=192.0.2.1,addr=192.0.2.1,lport=22' | grep '^allowusers ')" = 'allowusers it'\\''s'`
+			`test "$(sudo sshd -T -C 'user=svc$,host=192.0.2.1,addr=192.0.2.1,lport=22' | grep '^allowusers ')" = 'allowusers svc$'`
 		),
 		runs.join('\n')
 	);

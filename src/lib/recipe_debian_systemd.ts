@@ -57,11 +57,7 @@
  * @module
  */
 
-/**
- * What `user` and `group` must be: an account name, never a uid or gid, so `root` is
- * refused by name and `0` can't stand in for it.
- */
-const ACCOUNT_NAME = /^[a-z_][a-z0-9_-]*\$?$/i;
+import { ACCOUNT_NAME } from './shell.ts';
 
 /**
  * Options for `hardened_systemd_unit`.
@@ -190,7 +186,7 @@ export function hardened_systemd_unit(options: HardenedSystemdUnitOptions): stri
 	] as const) {
 		if (!ACCOUNT_NAME.test(name)) {
 			throw new Error(
-				`hardened_systemd_unit: ${field} ${JSON.stringify(name)} must be an account name: a letter or \`_\`, then letters, digits, \`_\` or \`-\`, optionally ending in \`$\``
+				`hardened_systemd_unit: ${field} ${JSON.stringify(name)} must be an account name: a lowercase letter or \`_\`, then lowercase letters, digits, \`_\` or \`-\`, optionally ending in \`$\``
 			);
 		}
 		if (name === 'root') {

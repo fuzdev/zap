@@ -975,7 +975,7 @@ test('refuses root, and any user or group that is not an account name', () => {
 		() => hardened_openrc_service({ ...OPENRC_BASE, group: 'root' }),
 		/group "root" is root/
 	);
-	for (const name of [' root', 'root ', '+0', '0', 'a b', '-x', '', 'host$']) {
+	for (const name of [' root', 'root ', '+0', '0', 'a b', '-x', '', 'host$', 'Svc', 'SVC']) {
 		for (const field of ['user', 'group']) {
 			assert.throws(
 				() => hardened_openrc_service({ ...OPENRC_BASE, [field]: name }),
@@ -983,6 +983,9 @@ test('refuses root, and any user or group that is not an account name', () => {
 				`${field}=${JSON.stringify(name)}`
 			);
 		}
+	}
+	for (const name of ['svc', '_svc', 'svc-1', 'svc_2']) {
+		assert.include(hardened_openrc_service({ ...OPENRC_BASE, user: name }), `'${name}'`, name);
 	}
 });
 

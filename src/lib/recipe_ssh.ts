@@ -11,6 +11,9 @@
  *   rejects is rolled back before anything reloads onto it.
  * - `ssh_hardening_verify` re-asserts the hardening in sshd's effective config on
  *   every plan, from the same options.
+ * - `SshPortOptions` names the port sshd listens on (`ssh_port`, default `22`), which
+ *   the verify, `fail2ban_jail`, and the web firewall recipes all take, so one value
+ *   spread into each keeps them agreeing; `to_ssh_port` is its one check.
  * - `ssh_service_core` builds the sshd `service` payload that reloads on a drop-in
  *   change. The service name is the one distro-varying value (systemd `ssh`,
  *   OpenRC `sshd`), so it's a parameter; the public wrappers are
@@ -37,19 +40,60 @@
  */
 
 import type { ServiceResource, VerifyResource } from './schema.ts';
-import { single_quote } from './shell.ts';
+import { ACCOUNT_NAME, single_quote } from './shell.ts';
+
+/** The port sshd listens on unless it is configured otherwise. */
+export const DEFAULT_SSH_PORT = 22;
+
+/**
+ * The port sshd listens on, for every recipe that must agree on it: the
+ * `ssh_hardening_verify` connection, the `fail2ban_jail` sshd jail, and the SSH rule of
+ * the web firewall recipes (`debian_web_firewall`, `alpine_web_firewall`). A firewall
+ * that denies by default and allows another port than sshd's locks the host out, so
+ * give each the same value, one object spread into all of them:
+ * `const ssh = {ssh_port: 2222}`.
+ */
+export interface SshPortOptions {
+	/**
+	 * The port sshd listens on, a whole number from 1 to 65535. Defaults to
+	 * `DEFAULT_SSH_PORT` (`22`). The recipes read it; none sets it: sshd's own
+	 * `Port` is the operator's to configure.
+	 */
+	ssh_port?: number;
+}
+
+/**
+ * `options.ssh_port` with its default, the one check of it.
+ *
+ * @param recipe - the recipe's name, for the error
+ * @param options - the options naming the port
+ * @returns the port
+ * @throws Error if `ssh_port` is not a whole number from 1 to 65535
+ */
+export function to_ssh_port(recipe: string, options?: SshPortOptions): number {
+	const ssh_port = options?.ssh_port ?? DEFAULT_SSH_PORT;
+	if (!Number.isInteger(ssh_port) || ssh_port < 1 || ssh_port > 65535) {
+		throw new Error(
+			`${recipe}: ssh_port ${JSON.stringify(ssh_port)} must be a port, a whole number from 1 to 65535`
+		);
+	}
+	return ssh_port;
+}
 
 /**
  * Options for `ssh_hardening` and `ssh_hardening_verify`.
  *
  * `user` is the per-deploy variation (the account allowed to log in);
- * `max_auth_tries` and `login_grace_time` default to the shared baseline.
+ * `max_auth_tries` and `login_grace_time` default to the shared baseline, and
+ * `ssh_port` to `22`.
  */
-export interface SshHardeningOptions {
+export interface SshHardeningOptions extends SshPortOptions {
 	/**
-	 * `AllowUsers` — the sole account permitted to SSH in (the deploy user). One name,
-	 * so no whitespace (sshd would read each word as another user) and no `,` (the
-	 * verify names the user in `sshd -C`'s comma-separated connection spec).
+	 * `AllowUsers` — the sole account permitted to SSH in (the deploy user). An account
+	 * name (`ACCOUNT_NAME`): sshd reads `AllowUsers`'s words as patterns, so a `*` or
+	 * `?` would allow other accounts, a `user@host` limits by client, and a blank adds
+	 * another user; the verify also names the user in `sshd -C`'s comma-separated
+	 * connection spec.
 	 */
 	user: string;
 	/** `MaxAuthTries` — auth attempts before the connection is dropped. Defaults to `3`. */
@@ -59,26 +103,21 @@ export interface SshHardeningOptions {
 }
 
 /**
- * `options` with the tunables' defaults filled in, the one home of those defaults.
- * Throws on a `user` that is empty or holds whitespace: sshd reads `AllowUsers`'s
- * words as one user each, so it would allow more than one, and the verify, which
- * asserts exactly the one, would fail on every plan. Throws on a `,` too, which would
- * split the verify's `sshd -C` connection spec.
+ * `options` with the defaults filled in, the one home of those defaults. Throws on a
+ * `user` that isn't an account name: sshd reads `AllowUsers`'s words as patterns, so a
+ * wildcard or a second word would allow more than the one account, and the verify,
+ * which asserts exactly the one, would fail on every plan; a `,` would split the
+ * verify's `sshd -C` connection spec.
  */
 const hardening_values = (options: SshHardeningOptions): Required<SshHardeningOptions> => {
 	const { user, max_auth_tries = 3, login_grace_time = 20 } = options;
-	if (user === '' || /\s/.test(user)) {
+	if (!ACCOUNT_NAME.test(user)) {
 		throw new Error(
-			`ssh_hardening: user must be one name, with no whitespace, got ${JSON.stringify(user)}`
+			`ssh_hardening: user ${JSON.stringify(user)} must be an account name: a lowercase letter or \`_\`, then lowercase letters, digits, \`_\` or \`-\`, optionally ending in \`$\`, since sshd reads AllowUsers as patterns`
 		);
 	}
-	// the verify names the user in `sshd -C`'s comma-separated connection spec
-	if (user.includes(',')) {
-		throw new Error(
-			`ssh_hardening: user must be one name, with no \`,\`, got ${JSON.stringify(user)}`
-		);
-	}
-	return { user, max_auth_tries, login_grace_time };
+	const ssh_port = to_ssh_port('ssh_hardening', options);
+	return { user, max_auth_tries, login_grace_time, ssh_port };
 };
 
 /**
@@ -90,20 +129,20 @@ const VERIFY_CLIENT_ADDRESS = '192.0.2.1';
 
 /**
  * The command printing the config sshd would apply to `user` logging in from
- * `VERIFY_CLIENT_ADDRESS` on port 22, the port the drop-in leaves sshd on: `sshd -T`
- * with `-C`, so each `Match` block that applies to
- * that connection is applied first. The client's host name is its address, as sshd
- * has it with `UseDNS no`, the default.
+ * `VERIFY_CLIENT_ADDRESS` on `ssh_port`: `sshd -T` with `-C`, so each `Match` block
+ * that applies to that connection (a `Match LocalPort` one included) is applied first.
+ * The client's host name is its address, as sshd has it with `UseDNS no`, the default.
  */
-const sshd_effective = (user: string): string =>
-	`sudo sshd -T -C ${single_quote(`user=${user},host=${VERIFY_CLIENT_ADDRESS},addr=${VERIFY_CLIENT_ADDRESS},lport=22`)}`;
+const sshd_effective = (user: string, ssh_port: number): string =>
+	`sudo sshd -T -C ${single_quote(`user=${user},host=${VERIFY_CLIENT_ADDRESS},addr=${VERIFY_CLIENT_ADDRESS},lport=${ssh_port}`)}`;
 
 /**
  * Build the hardened `sshd_config` drop-in text for `options`.
  *
  * The hardened baseline: root login disabled, password + keyboard-interactive
  * auth off, X11 forwarding off. Only `AllowUsers` and the tunables (`max_auth_tries`,
- * `login_grace_time`) come from inputs. It leaves `UsePAM` to the distro: Debian's and Ubuntu's stock
+ * `login_grace_time`) come from inputs; `ssh_port` is read by the verify, and the drop-in
+ * sets no `Port`. It leaves `UsePAM` to the distro: Debian's and Ubuntu's stock
  * `sshd_config` sets it, and Alpine's sshd is built without PAM and warns on the
  * keyword; with password and keyboard-interactive auth off, PAM authenticates
  * nobody either way.
@@ -162,7 +201,7 @@ export const SSHD_VALIDATE = 'sudo sshd -t';
  * `zap deploy`'s preflight. Spread it into a `zap.verify` that depends on the ssh
  * service.
  *
- * The config is read for a connection, `sshd -T -C user=<user>,host=…,addr=…,lport=22`, so a
+ * The config is read for a connection, `sshd -T -C user=<user>,host=…,addr=…,lport=<ssh_port>`, so a
  * `Match` block that applies to the allowed user (`Match User`, `Match Group`,
  * `Match All`, an address list that holds every client) and re-enables password
  * auth fails the verify; without `-C`, sshd prints only the global values. The client
@@ -176,10 +215,10 @@ export const SSHD_VALIDATE = 'sudo sshd -t';
  * @returns the `verify` `assertions`.
  */
 export function ssh_hardening_verify(options: SshHardeningOptions): VerifyResource {
-	const { user, max_auth_tries, login_grace_time } = hardening_values(options);
+	const { user, max_auth_tries, login_grace_time, ssh_port } = hardening_values(options);
 	const line = (expected: string) => ({
 		type: 'command' as const,
-		run: `${sshd_effective(user)} | grep -qxF ${single_quote(expected)}`
+		run: `${sshd_effective(user, ssh_port)} | grep -qxF ${single_quote(expected)}`
 	});
 	return {
 		assertions: [
@@ -189,7 +228,7 @@ export function ssh_hardening_verify(options: SshHardeningOptions): VerifyResour
 			line('x11forwarding no'),
 			{
 				type: 'command',
-				run: `test "$(${sshd_effective(user)} | grep '^allowusers ')" = ${single_quote(`allowusers ${user}`)}`
+				run: `test "$(${sshd_effective(user, ssh_port)} | grep '^allowusers ')" = ${single_quote(`allowusers ${user}`)}`
 			},
 			line(`maxauthtries ${max_auth_tries}`),
 			line(`logingracetime ${login_grace_time}`)

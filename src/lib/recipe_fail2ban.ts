@@ -18,6 +18,8 @@
  * @module
  */
 
+import { DEFAULT_SSH_PORT, type SshPortOptions, to_ssh_port } from './recipe_ssh.ts';
+
 /**
  * The `sshd` filter's arguments for a log file: the stock filter, told about the
  * `facility.priority` word BusyBox `syslogd` writes after the host name
@@ -46,9 +48,11 @@ const SSHD_JOURNAL_MATCH =
  *
  * Every field defaults to the shared baseline, so `fail2ban_jail()` takes no
  * argument for the common case: a Debian or Ubuntu host whose sshd logs to the
- * journal and whose firewall is ufw (iptables).
+ * journal on port 22 and whose firewall is ufw (iptables). `ssh_port` is the port the
+ * jail bans on: give it the value the firewall and `ssh_hardening_verify` get, or a
+ * ban blocks a port sshd isn't on.
  */
-export interface Fail2banJailOptions {
+export interface Fail2banJailOptions extends SshPortOptions {
 	/** `[DEFAULT] bantime` — how long a banned host stays banned. Defaults to `'1h'`. */
 	ban_time?: string;
 	/** `[DEFAULT] findtime` — the window failures are counted within. Defaults to `'10m'`. */
@@ -89,7 +93,11 @@ export interface Fail2banJailOptions {
  * values win over a packaged default, such as Debian's `nftables` banaction or
  * Alpine's `alpine-sshd` filter.
  *
+ * The `[sshd]` jail bans on `port = ssh`, the service name for 22, unless `ssh_port`
+ * names another port, which it then names.
+ *
  * @returns the complete `jail.local` text, terminated by a trailing newline.
+ * @throws Error if a text value holds a line break, or `ssh_port` is not a port
  */
 export function fail2ban_jail(options?: Fail2banJailOptions): string {
 	const {
@@ -101,6 +109,7 @@ export function fail2ban_jail(options?: Fail2banJailOptions): string {
 		banaction = 'iptables-multiport',
 		sshd_logpath
 	} = options ?? {};
+	const ssh_port = to_ssh_port('fail2ban_jail', options);
 
 	const values: Array<[string, string]> = [
 		['ban_time', ban_time],
@@ -128,7 +137,7 @@ banaction = ${banaction}
 
 [sshd]
 enabled = true
-port = ssh
+port = ${ssh_port === DEFAULT_SSH_PORT ? 'ssh' : ssh_port}
 ${source}maxretry = ${sshd_max_retry}
 bantime = ${sshd_ban_time}
 `;

@@ -14,12 +14,13 @@ import { type WebFirewallOptions, web_firewall_allow_rules } from './recipe_fire
 import type { FirewallResource } from './schema.ts';
 
 /**
- * Build the ufw `firewall` payload for a web host (SSH + HTTP + HTTPS).
+ * Build the ufw `firewall` payload for a web host (SSH on `ssh_port` + HTTP + HTTPS).
  *
  * Spread into a `zap.firewall({id, ...debian_web_firewall()})`. Leaves
  * `default_incoming` / `default_outgoing` at the schema defaults (deny in, allow out).
  *
  * @returns the `backend` + `allow` for a ufw `firewall` resource.
+ * @throws Error if `ssh_port` is not a port
  */
 export function debian_web_firewall(
 	options?: WebFirewallOptions

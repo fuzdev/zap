@@ -117,7 +117,7 @@
  * @module
  */
 
-import { single_quote } from './shell.ts';
+import { ACCOUNT_NAME, single_quote } from './shell.ts';
 
 /** One word OpenRC's start line can `eval` as itself: no blank, quote, or shell syntax. */
 const OPENRC_WORD = /^[A-Za-z0-9_./:@%+,=^!-]+$/;
@@ -545,9 +545,11 @@ export function hardened_openrc_service(options: HardenedOpenrcServiceOptions): 
 		['user', user],
 		['group', group]
 	] as const) {
-		if (!/^[a-z_][a-z0-9_-]*$/i.test(account)) {
+		// `ACCOUNT_NAME`, less the trailing `$` it allows, which the start line would
+		// read as shell
+		if (!ACCOUNT_NAME.test(account) || account.endsWith('$')) {
 			throw new Error(
-				`hardened_openrc_service: ${field} ${JSON.stringify(account)} must be an account name, not a numeric id: a letter or \`_\`, then letters, digits, \`_\` or \`-\``
+				`hardened_openrc_service: ${field} ${JSON.stringify(account)} must be an account name, not a numeric id: a lowercase letter or \`_\`, then lowercase letters, digits, \`_\` or \`-\`, with no trailing \`$\``
 			);
 		}
 		if (account === 'root') {

@@ -13,9 +13,20 @@
  * text is escaped (`'\''`), which is what it means inside single quotes.
  *
  * A pure function, like the recipes that import it: it only assembles a string.
+ * Beside it are the checks of the names recipes write into commands and config:
+ * `sudo_as_user` and `ACCOUNT_NAME`.
  *
  * @module
  */
+
+/**
+ * What an account name a recipe writes must be: a lowercase letter or `_`, then
+ * lowercase letters, digits, `_` or `-`, optionally ending in `$`, exactly the
+ * schema's `AccountName`. Never a uid or gid, so `0` can't stand in for root, and
+ * never a pattern or a list, as sshd's `AllowUsers` would read `*`, `?`, `!`,
+ * `user@host`, or a `,`.
+ */
+export const ACCOUNT_NAME = /^[a-z_][a-z0-9_-]*\$?$/;
 
 /**
  * `value` as one single-quoted shell word, each `'` in it written `'\''`.

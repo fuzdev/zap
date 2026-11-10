@@ -77,3 +77,11 @@ test('refuses a line break in a value', () => {
 		assert.throws(() => fail2ban_jail(options), /must be one line/);
 	}
 });
+
+test('ssh_port names the jail port, and 22 keeps the ssh service name', () => {
+	assert.include(fail2ban_jail({ ssh_port: 2222 }), '\nport = 2222\n');
+	assert.equal(fail2ban_jail({ ssh_port: 22 }), fail2ban_jail());
+	for (const ssh_port of [0, 65536, 2.5]) {
+		assert.throws(() => fail2ban_jail({ ssh_port }), /fail2ban_jail: ssh_port .* must be a port/);
+	}
+});

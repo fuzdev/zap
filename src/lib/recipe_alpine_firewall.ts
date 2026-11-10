@@ -19,7 +19,7 @@ import type { FirewallResource, ServiceResource } from './schema.ts';
 
 /**
  * Build the nftables `firewall` payload **and** its companion persistence `service` for
- * a web host (SSH + HTTP + HTTPS).
+ * a web host (SSH on `ssh_port` + HTTP + HTTPS).
  *
  * Spread each piece into its own resource, and make the service depend on the firewall
  * so the ruleset file is written before the service loads it:
@@ -31,6 +31,7 @@ import type { FirewallResource, ServiceResource } from './schema.ts';
  * ```
  *
  * @returns `{firewall, service}` — the payloads for a `firewall` and a `service` resource.
+ * @throws Error if `ssh_port` is not a port
  */
 export function alpine_web_firewall(options?: WebFirewallOptions): {
 	firewall: Pick<FirewallResource, 'backend' | 'allow'>;
