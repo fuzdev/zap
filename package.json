@@ -1,6 +1,6 @@
 {
   "name": "@fuzdev/zap",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "convergent machine-state management: set up and ship to Linux machines from TypeScript",
   "glyph": "↯",
   "logo": "logo.svg",
