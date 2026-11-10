@@ -121,9 +121,27 @@ export default (zap: ZapBuilder) => {
 ```
 
 To use the shipped **recipes** (nginx sites, hardened systemd units, SSH
-hardening, certbot, firewalls), your project needs the `@fuzdev/zap` package resolvable
-under `node_modules/@fuzdev/zap`. The package isn't published to npm; point a path
-dependency at your checkout:
+hardening, certbot, firewalls), your project needs the `@fuzdev/zap` package
+under its own `node_modules/@fuzdev/zap`. Install it from npm as a dev
+dependency, pinned to one exact version so a recipe's output changes only when
+you change the pin:
+
+```sh
+npm i -D --save-exact @fuzdev/zap
+```
+
+That install, in the config's own project, is the one way its import of
+`@fuzdev/zap` resolves: a `node_modules` above the project is never searched
+([security.md](./security.md#the-config-can-only-describe)). The package holds
+the authoring surface only: the builder types, the schema, and the recipes,
+each as TypeScript source and as built `dist/` files. fgro resolves recipe
+imports through the package's `exports`, which carry a `gro` condition pointing
+at the TypeScript sources; TypeScript and your editor resolve the same imports
+through `dist/`. The `zap` binary and `fgro` don't come with it: build them as
+above.
+
+To work on the recipes themselves, point a path dependency at a `zap` checkout
+instead:
 
 ```json
 {
@@ -133,16 +151,13 @@ dependency at your checkout:
 }
 ```
 
-`npm install` then symlinks the checkout into `node_modules`. That link, in the
-config's own project, is the one way its import of `@fuzdev/zap` resolves: a
-`node_modules` above the project is never searched ([security.md](./security.md#the-config-can-only-describe)). The
-checkout must not sit under a directory every user can write. fgro resolves
-recipe imports through the package's `exports`, which carry a `gro` condition
-pointing at the TypeScript sources, so a recipe edit in the checkout reaches
-your next plan with no build step. TypeScript and your editor resolve
-the same imports through the built `dist/`, so run
-`npm install && npm run build` in the `zap` checkout once (and after pulling) to
-keep types current.
+`npm install` then symlinks the checkout into `node_modules`. The checkout must
+not sit under a directory every user can write. A recipe edit in the checkout
+reaches your next plan with no build step, since fgro reads the sources; run
+`npm install && npm run build` in the checkout once (and after pulling) to keep
+the `dist/` types current.
+
+Either way, import each recipe by its full module path:
 
 ```ts
 import type {ZapBuilder} from '@fuzdev/zap/zap.ts';

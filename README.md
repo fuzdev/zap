@@ -1,6 +1,6 @@
 # zap ↯
 
-[<img src="static/logo.svg" alt="a friendly orange spider haloed by lightning bolts" align="right" width="192" height="192">](https://zap.fuz.dev/)
+[<img src="https://zap.fuz.dev/logo.svg" alt="a friendly orange spider haloed by lightning bolts" align="right" width="192" height="192">](https://zap.fuz.dev/)
 
 > convergent machine-state management: set up and ship to Linux machines from TypeScript ↯ pre-alpha
 
@@ -67,6 +67,19 @@ Zap is part of the Fuz stack
 
 AI disclosure: this codebase is LLM-generated with uneven human review.
 
+## The npm package
+
+`@fuzdev/zap` on npm is the authoring surface for a config: the builder types
+(`zap.ts`), the schema (`schema.ts`), and the recipes (`recipe_*.ts`), each as
+TypeScript source and built `dist/` files. Install it in your config's project
+with `npm i -D --save-exact @fuzdev/zap` and import each module by its full path
+(`@fuzdev/zap/recipe_ssh.ts`).
+
+It is not the tool. The `zap` CLI and `fgro`, the runtime that evaluates a
+config, are built from source ([install](https://zap.fuz.dev/docs/install)):
+a Rust toolchain, Linux with Landlock ABI 6 or later (kernel 6.12) for the
+sandbox `fgro` evaluates in, and an `fgro` built on x86_64 Linux.
+
 ## What it does differently
 
 - **A wetrun executes only the plan you reviewed.** Dry run is the default, with
@@ -105,12 +118,12 @@ execution. **Not planned**: cloud resources, orchestration, agents on the host,
 fleets.
 
 **Status**: pre-alpha, one maintainer. The schema and CLI change without
-compatibility layers. Read [docs/security.md](docs/security.md) before pointing
+compatibility layers. Read [the threat model](https://zap.fuz.dev/docs/security) before pointing
 it at a machine you care about.
 
 ## Install
 
-Zap is built from source; see [docs/install.md](docs/install.md). You need a Rust
+Zap is built from source; see [install](https://zap.fuz.dev/docs/install). You need a Rust
 toolchain, `fgro` from [Gro](https://github.com/fuzdev/gro) (it runs your config,
 on Linux), and `ssh`. Zap depends on crates from the sibling
 [Fuz](https://github.com/fuzdev/fuz) repository, resolved by relative path, so
@@ -122,26 +135,26 @@ git clone https://github.com/fuzdev/zap
 cd zap && cargo xtask install      # → ~/.zap/bin/zap
 ```
 
-Then follow [docs/getting-started.md](docs/getting-started.md): your own machine
+Then follow [getting started](https://zap.fuz.dev/docs/getting-started): your own machine
 first, then a server.
 
 ## Docs
 
 | page | what's there |
 |---|---|
-| [introduction](docs/introduction.md) | what Zap is, who it's for, what it is not |
-| [install](docs/install.md), [getting started](docs/getting-started.md) | from zero to a converged machine |
-| [concepts](docs/concepts.md) | the model: convergence, verdicts, the plan, the review |
-| [configs](docs/configs.md) | writing `zap.ts` |
-| [resources](docs/resources.md), [recipes](docs/recipes.md) | every resource kind; the shipped fragments |
-| [targets](docs/targets.md), [env](docs/env.md), [lock](docs/lock.md) | SSH and privilege; references and secrets; pinning and `~/.zap` |
-| [deploy](docs/deploy.md) | shipping releases |
-| [cli](docs/cli.md) | every command, flag, exit code, and event |
-| [comparison](docs/comparison.md) | against Ansible, pyinfra, Terraform, Pulumi, NixOS, Puppet, Kamal, and more |
-| [security](docs/security.md), [stability](docs/stability.md) | the threat model; what a release promises |
-| [faq](docs/faq.md), [glossary](docs/glossary.md) | the first questions; every term |
-| [detection](docs/detection.md) | the full detection contract |
-| [contributing](docs/contributing.md), [testing](docs/testing.md), [differential](docs/differential.md) | building and checking Zap; validating against real VMs |
+| [introduction](https://zap.fuz.dev/docs/introduction) | what Zap is, who it's for, what it is not |
+| [install](https://zap.fuz.dev/docs/install), [getting started](https://zap.fuz.dev/docs/getting-started) | from zero to a converged machine |
+| [concepts](https://zap.fuz.dev/docs/concepts) | the model: convergence, verdicts, the plan, the review |
+| [configs](https://zap.fuz.dev/docs/configs) | writing `zap.ts` |
+| [resources](https://zap.fuz.dev/docs/resources), [recipes](https://zap.fuz.dev/docs/recipes) | every resource kind; the shipped fragments |
+| [targets](https://zap.fuz.dev/docs/targets), [env](https://zap.fuz.dev/docs/env), [lock](https://zap.fuz.dev/docs/lock) | SSH and privilege; references and secrets; pinning and `~/.zap` |
+| [deploy](https://zap.fuz.dev/docs/deploy) | shipping releases |
+| [cli](https://zap.fuz.dev/docs/cli) | every command, flag, exit code, and event |
+| [comparison](https://zap.fuz.dev/docs/comparison) | against Ansible, pyinfra, Terraform, Pulumi, NixOS, Puppet, Kamal, and more |
+| [security](https://zap.fuz.dev/docs/security), [stability](https://zap.fuz.dev/docs/stability) | the threat model; what a release promises |
+| [faq](https://zap.fuz.dev/docs/faq), [glossary](https://zap.fuz.dev/docs/glossary) | the first questions; every term |
+| [detection](https://zap.fuz.dev/docs/detection) | the full detection contract |
+| [contributing](https://zap.fuz.dev/docs/contributing), [testing](https://zap.fuz.dev/docs/testing), [differential](https://zap.fuz.dev/docs/differential) | building and checking Zap; validating against real VMs |
 
 The same pages render at [zap.fuz.dev/docs](https://zap.fuz.dev/docs), with the
 API reference for the TypeScript authoring surface.
@@ -177,7 +190,7 @@ gro check                    # the site and TS surface
 ## Contributing
 
 [fuz.dev/contributing](https://www.fuz.dev/contributing);
-building and checking Zap is in [docs/contributing.md](docs/contributing.md).
+building and checking Zap is in [contributing](https://zap.fuz.dev/docs/contributing).
 
 ## Security
 
