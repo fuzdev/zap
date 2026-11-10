@@ -6,7 +6,6 @@
   "logo": "logo.svg",
   "logo_alt": "a friendly orange spider haloed by lightning bolts",
   "license": "0BSD",
-  "private": true,
   "homepage": "https://zap.fuz.dev/",
   "repository": "https://github.com/fuzdev/zap",
   "bugs": "https://github.com/fuzdev/zap/issues",
