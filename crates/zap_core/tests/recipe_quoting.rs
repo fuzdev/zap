@@ -78,10 +78,11 @@ export default (zap) => {
     zap.target({local: true});
     const email = env_ref('EMAIL');
     const deploy_hook = {path: '/etc/letsencrypt/renewal-hooks/deploy/reload-nginx'};
+    const host = [env_ref('DEPLOY_HOST')];
     for (const name of ['RUNS_CODE', 'PASSES_THE_CHECK', 'HOLDS_A_QUOTE']) {
         const domain = env_ref(name);
-        zap.script({id: `issue-${name}`, ...debian_certbot_standalone_issue({domain, email})});
-        zap.script({id: `webroot-${name}`, ...certbot_webroot_switch({domain, email, deploy_hook})});
+        zap.script({id: `issue-${name}`, ...debian_certbot_standalone_issue({domain, email, expected_addresses: host})});
+        zap.script({id: `webroot-${name}`, ...certbot_webroot_switch({domain, email, deploy_hook, expected_addresses: host})});
     }
     const domain = env_ref('GOOD_DOMAIN');
     for (const address of ['GOOD_ADDRESS', 'ADDRESS_RUNS_CODE']) {

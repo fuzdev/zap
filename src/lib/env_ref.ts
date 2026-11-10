@@ -47,3 +47,15 @@ export function env_ref(name: string): string {
 	}
 	return `\uFDD0aZ:${name}\uFDD1`;
 }
+
+/**
+ * Whether `value` carries a reference, whole or interpolated: the one question a
+ * recipe may ask of a value a caller passes, which is otherwise opaque. It reads the
+ * marker's opening delimiter, which no text a config writes out holds.
+ *
+ * @param value - a value a recipe was given
+ * @returns whether a reference is in it
+ */
+export function carries_reference(value: string): boolean {
+	return value.includes('\uFDD0');
+}

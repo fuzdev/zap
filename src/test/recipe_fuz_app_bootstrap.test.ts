@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { assert, test } from 'vitest';
 
 import { env_ref } from '#lib/env_ref.ts';
-import { fuz_app_bootstrap_token } from '#lib/recipe_bootstrap.ts';
+import { fuz_app_bootstrap_token } from '#lib/recipe_fuz_app_bootstrap.ts';
 
 const options = {
 	user: 'app',

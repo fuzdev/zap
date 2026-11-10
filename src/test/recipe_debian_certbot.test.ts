@@ -7,9 +7,16 @@ import {
 } from '#lib/recipe_debian_certbot.ts';
 
 const domain = env_ref('DEPLOY_DOMAIN');
+const email = env_ref('DEPLOY_CERTBOT_EMAIL');
+const expected_addresses = [env_ref('DEPLOY_HOST')];
 
 test('debian_certbot_standalone_issue stops nginx via systemd, then issues', () => {
-	const script = debian_certbot_standalone_issue({ domain, extra_domains: ['www.example.org'] });
+	const script = debian_certbot_standalone_issue({
+		domain,
+		email,
+		expected_addresses,
+		extra_domains: ['www.example.org']
+	});
 
 	assert.equal(script.check, `sudo test -f '/etc/letsencrypt/live/${domain}/fullchain.pem'`);
 	const call = script.run.slice(script.run.lastIndexOf('\n}\n') + 3);
@@ -17,13 +24,6 @@ test('debian_certbot_standalone_issue stops nginx via systemd, then issues', () 
 	assert.equal(
 		call,
 		`zap_certbot_dns_preflight 1 '${env_ref('DEPLOY_HOST')}' '${domain}' 'www.example.org' && { sudo systemctl stop nginx || true; } && sudo certbot certonly --standalone -d '${domain}' -d 'www.example.org' --non-interactive --agree-tos --email '${env_ref('DEPLOY_CERTBOT_EMAIL')}'`
-	);
-});
-
-test('debian_certbot_standalone_issue defaults the domain to the deferred reference', () => {
-	assert.equal(
-		debian_certbot_standalone_issue().check,
-		`sudo test -f '/etc/letsencrypt/live/${domain}/fullchain.pem'`
 	);
 });
 

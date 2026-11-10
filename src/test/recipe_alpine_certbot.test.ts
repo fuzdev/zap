@@ -9,9 +9,16 @@ import {
 } from '#lib/recipe_alpine_certbot.ts';
 
 const domain = env_ref('DEPLOY_DOMAIN');
+const email = env_ref('DEPLOY_CERTBOT_EMAIL');
+const expected_addresses = [env_ref('DEPLOY_HOST')];
 
 test('alpine_certbot_standalone_issue stops nginx via OpenRC, then issues', () => {
-	const script = alpine_certbot_standalone_issue({ domain, extra_domains: ['www.example.org'] });
+	const script = alpine_certbot_standalone_issue({
+		domain,
+		email,
+		expected_addresses,
+		extra_domains: ['www.example.org']
+	});
 
 	assert.equal(script.check, `sudo test -f '/etc/letsencrypt/live/${domain}/fullchain.pem'`);
 	const call = script.run.slice(script.run.lastIndexOf('\n}\n') + 3);

@@ -11,15 +11,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assert, describe, test } from 'vitest';
 
+import { env_ref } from '#lib/env_ref.ts';
 import {
 	hardened_openrc_service,
 	type HardenedOpenrcServiceOptions
 } from '#lib/recipe_alpine_openrc.ts';
 import { alpine_postgres_setup } from '#lib/recipe_alpine_postgres.ts';
-import { fuz_app_bootstrap_token } from '#lib/recipe_bootstrap.ts';
+import { fuz_app_bootstrap_token } from '#lib/recipe_fuz_app_bootstrap.ts';
 import { certbot_webroot_switch } from '#lib/recipe_certbot.ts';
 import { debian_certbot_standalone_issue } from '#lib/recipe_debian_certbot.ts';
-import { fuz_app_env_base, fuz_app_trusted_proxies } from '#lib/recipe_env.ts';
+import { fuz_app_env_base, fuz_app_trusted_proxies } from '#lib/recipe_fuz_app_env.ts';
 import { nginx_remove_default_core } from '#lib/recipe_nginx.ts';
 import { ssh_hardening_verify } from '#lib/recipe_ssh.ts';
 import { single_quote } from '#lib/shell.ts';
@@ -110,14 +111,24 @@ const create_shell = (): Shell => {
 describe('script recipes pass each value as one word', () => {
 	test('certbot', () => {
 		const { run } = create_shell();
-		const issue = debian_certbot_standalone_issue({ domain: HOSTILE, email: HOSTILE });
+		const issue = debian_certbot_standalone_issue({
+			domain: HOSTILE,
+			email: HOSTILE,
+			expected_addresses: [GETENT_ADDRESS]
+		});
 		const live = ['sudo', 'test', '-f', `/etc/letsencrypt/live/${HOSTILE}/fullchain.pem`];
 		assert.deepEqual(run(issue.check), [live]);
 		// the DNS preflight refuses a hostile name or address before anything runs
 		assert.deepEqual(run(issue.run), []);
 		const addressed = { domain: 'example.org', expected_addresses: [GETENT_ADDRESS] };
 		assert.deepEqual(
-			run(debian_certbot_standalone_issue({ ...addressed, expected_addresses: [HOSTILE] }).run),
+			run(
+				debian_certbot_standalone_issue({
+					...addressed,
+					email: HOSTILE,
+					expected_addresses: [HOSTILE]
+				}).run
+			),
 			[]
 		);
 		assert.deepEqual(run(debian_certbot_standalone_issue({ ...addressed, email: HOSTILE }).run), [
@@ -138,6 +149,7 @@ describe('script recipes pass each value as one word', () => {
 		const webroot = certbot_webroot_switch({
 			domain: HOSTILE,
 			email: HOSTILE,
+			expected_addresses: [GETENT_ADDRESS],
 			webroot: HOSTILE,
 			deploy_hook: { path: HOSTILE }
 		});
@@ -406,7 +418,7 @@ describe('fuz_app env recipes', () => {
 				service: 'app',
 				config_dir: ENV_HOSTILE,
 				port: '4040',
-				cookie_keys: 'keys'
+				cookie_keys: env_ref('SECRET_FUZ_COOKIE_KEYS')
 			}).template + fuz_app_trusted_proxies({ env_prefix: 'FORGE', value: ENV_HOSTILE })
 		);
 		const init = join(dir, 'init');
@@ -442,7 +454,7 @@ describe('fuz_app env recipes', () => {
 			service: 'app',
 			config_dir: '/home/app/.app',
 			port: '4040',
-			cookie_keys: 'keys'
+			cookie_keys: env_ref('SECRET_FUZ_COOKIE_KEYS')
 		};
 		for (const bad of ["it's", 'two\nlines', 'cr\r', 'nul\0']) {
 			for (const field of ['user', 'service', 'config_dir'] as const) {

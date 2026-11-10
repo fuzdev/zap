@@ -18,7 +18,8 @@ import {
 	type CertbotStandaloneIssueOptions,
 	RELOAD_NGINX_HOOK_NAME,
 	certbot_deploy_hook_core,
-	certbot_standalone_issue_core
+	certbot_standalone_issue_core,
+	validate_certbot_options
 } from './recipe_certbot.ts';
 import type { RunPartsFile } from './run_parts.ts';
 
@@ -31,11 +32,13 @@ import type { RunPartsFile } from './run_parts.ts';
  * port 80, and issues the first certificate. A refusal leaves nginx running.
  *
  * @returns the `script` `check`/`run` pair.
- * @throws when `options.expected_addresses` is empty
+ * @throws Error when `options.domain`, `options.email`, or `options.expected_addresses`
+ *   is missing, or `options.expected_addresses` is empty
  */
 export function debian_certbot_standalone_issue(
-	options?: CertbotStandaloneIssueOptions
+	options: CertbotStandaloneIssueOptions
 ): CertbotScript {
+	validate_certbot_options('debian_certbot_standalone_issue', options);
 	return certbot_standalone_issue_core('sudo systemctl stop nginx', options);
 }
 

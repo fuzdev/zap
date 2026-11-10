@@ -48,13 +48,14 @@
  * (`fgro eval`), which has no network, no writes, and no environment, and where
  * the clock and randomness throw. This module is therefore a set of **pure functions**: each only
  * assembles a string from its arguments — no I/O, no clock, no randomness, no
- * imports beyond types and the pure `single_quote`. The output is deterministic for
+ * imports beyond types and the pure `single_quote` and `carries_reference`. The output is deterministic for
  * given inputs (stable ordering, trailing newline), so it stays a reliable
  * content-addressed plan artifact.
  *
  * @module
  */
 
+import { carries_reference } from './env_ref.ts';
 import type { TemplateContent, TemplateKind } from './schema.ts';
 import { single_quote } from './shell.ts';
 
@@ -109,7 +110,9 @@ export interface FuzAppEnvBaseOptions {
 	/**
 	 * The cookie-signing keys, `{{cookie_keys}}`'s value (`SECRET_FUZ_COOKIE_KEYS`) —
 	 * a reference, `zap.env('SECRET_FUZ_COOKIE_KEYS')`. Held to `env_value`: it sits
-	 * inside single quotes.
+	 * inside single quotes. A value that carries no reference is refused: the keys
+	 * would be written into the plan, the lock, and the last-run report, where a
+	 * reference's value never is.
 	 */
 	cookie_keys: string;
 	/** The caller's own lines, appended after the base, with their variables. */
@@ -154,8 +157,8 @@ const ENV_BASE_KINDS = { port: 'port', cookie_keys: 'env_value' } as const;
  *
  * @returns the `template` content: the header (ending in a newline) and `extra`'s
  * lines, the variables of both, and their kinds.
- * @throws when `user`, `service`, or `config_dir` can't be written as they must be, or
- * `extra` names a variable of the base's
+ * @throws Error when `user`, `service`, or `config_dir` can't be written as they must be,
+ * `cookie_keys` carries no reference, or `extra` names a variable of the base's
  */
 export function fuz_app_env_base(options: FuzAppEnvBaseOptions): TemplateContent {
 	const { user, service, config_dir, port, cookie_keys, extra } = options;
@@ -170,6 +173,11 @@ export function fuz_app_env_base(options: FuzAppEnvBaseOptions): TemplateContent
 				);
 			}
 		}
+	}
+	if (!carries_reference(cookie_keys)) {
+		throw new Error(
+			"fuz_app_env_base: cookie_keys must carry a reference, such as zap.env('SECRET_FUZ_COOKIE_KEYS'): a value written out would be the secret itself, in the plan and the lock"
+		);
 	}
 	env_file_value('fuz_app_env_base', 'user', user);
 	env_file_value('fuz_app_env_base', 'service', service);

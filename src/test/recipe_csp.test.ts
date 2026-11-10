@@ -2,12 +2,12 @@ import { assert, test } from 'vitest';
 
 import { spa_csp } from '#lib/recipe_csp.ts';
 
-test('reproduces the locked-down fuz_app CSP byte-for-byte', () => {
+test('reproduces the baseline CSP byte-for-byte', () => {
 	const csp = spa_csp();
 
 	const expected =
 		`default-src 'self'; ` +
-		`script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; ` +
+		`script-src 'self' 'unsafe-inline'; ` +
 		`style-src 'self' 'unsafe-inline'; ` +
 		`img-src 'self' data:; ` +
 		`font-src 'self'; ` +
@@ -52,4 +52,12 @@ test('worker_src_extra emits a worker-src directive after connect-src', () => {
 		csp.includes("connect-src 'self' wss://{{domain}}; worker-src 'self' blob:;"),
 		"worker-src is placed right after connect-src with 'self' implied"
 	);
+});
+
+test('wasm_unsafe_eval adds the source to script-src only', () => {
+	const csp = spa_csp({ wasm_unsafe_eval: true });
+	assert.include(csp, "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; ");
+	assert.equal(csp.split('wasm-unsafe-eval').length - 1, 1);
+	assert.notInclude(spa_csp(), 'wasm-unsafe-eval');
+	assert.equal(spa_csp({ wasm_unsafe_eval: false }), spa_csp());
 });

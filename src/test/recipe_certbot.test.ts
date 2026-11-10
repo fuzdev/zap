@@ -26,6 +26,7 @@ const deploy_hook = certbot_deploy_hook_core(
 );
 const reload = ` && sudo -- '/etc/letsencrypt/renewal-hooks/deploy/reload-nginx'`;
 const host = env_ref('DEPLOY_HOST');
+const expected_addresses = [host];
 
 /** A guarded `run`'s last line: the preflight's call, then the command it guards. */
 const call_line = (run: string): string => {
@@ -43,14 +44,14 @@ const preflight = (names: Array<string>, addresses: Array<string> = [host]): str
 const STOP = 'sudo service-stop nginx';
 
 /** The issuance core with `STOP`. */
-const issue = (options?: CertbotStandaloneIssueOptions) =>
+const issue = (options: CertbotStandaloneIssueOptions) =>
 	certbot_standalone_issue_core(STOP, options);
 
 /** What the issuance runs after the preflight: the best-effort stop, then certbot. */
 const stopped = `{ ${STOP} || true; } && sudo certbot certonly --standalone`;
 
 test('certbot_standalone_issue_core stops nginx, then issues, after the preflight', () => {
-	const script = issue({ domain, email });
+	const script = issue({ domain, email, expected_addresses });
 
 	assert.equal(script.check, `sudo test -f '/etc/letsencrypt/live/${domain}/fullchain.pem'`);
 	assert.equal(
@@ -60,7 +61,7 @@ test('certbot_standalone_issue_core stops nginx, then issues, after the prefligh
 });
 
 test('certbot_webroot_switch reproduces the reference certbot-renewal-webroot script byte-for-byte', () => {
-	const script = certbot_webroot_switch({ domain, email, deploy_hook });
+	const script = certbot_webroot_switch({ domain, email, deploy_hook, expected_addresses });
 
 	assert.equal(
 		script.check,
@@ -72,21 +73,49 @@ test('certbot_webroot_switch reproduces the reference certbot-renewal-webroot sc
 	);
 });
 
-test('certbot defaults fall back to the deferred references and the standard webroot', () => {
-	assert.equal(
-		call_line(issue().run),
-		`${preflight([domain])}${stopped} -d '${domain}' --non-interactive --agree-tos --email '${email}'`,
-		'standalone_issue_core defaults domain + email'
-	);
-	assert.equal(
-		call_line(certbot_webroot_switch({ deploy_hook }).run),
-		`${preflight([domain])}sudo certbot certonly --webroot -w '/var/www/certbot' -d '${domain}' --cert-name '${domain}' --non-interactive --agree-tos --email '${email}' --force-renewal${reload}`,
-		'webroot_switch defaults domain + email + webroot'
+test('the certbot scripts refuse a missing domain, email, or expected_addresses', () => {
+	const options = { domain, email, expected_addresses };
+	for (const missing of ['domain', 'email', 'expected_addresses'] as const) {
+		const partial: Record<string, unknown> = { ...options, deploy_hook };
+		delete partial[missing];
+		const pattern = new RegExp(`: ${missing} is required`);
+		// as a config evaluated as JavaScript, with no type check, would pass them
+		const loose = partial as unknown as Parameters<typeof certbot_webroot_switch>[0];
+		assert.throws(() => issue(loose), pattern, missing);
+		assert.throws(() => certbot_webroot_switch(loose), pattern, missing);
+		// a wrapper's refusal names the wrapper, the function the config called
+		assert.throws(
+			() => debian_certbot_standalone_issue(loose),
+			new RegExp(`^debian_certbot_standalone_issue: ${missing} is required`),
+			missing
+		);
+		assert.throws(
+			() => alpine_certbot_standalone_issue(loose),
+			new RegExp(`^alpine_certbot_standalone_issue: ${missing} is required`),
+			missing
+		);
+	}
+	assert.throws(() => issue({ ...options, domain: '' }), /: domain is required/);
+	assert.throws(() => issue({ ...options, email: '' }), /: email is required/);
+	const none = undefined as unknown as CertbotStandaloneIssueOptions;
+	assert.throws(() => issue(none), /: domain is required/);
+	assert.throws(() => debian_certbot_standalone_issue(none), /: domain is required/);
+});
+
+test('the webroot switch defaults the standard webroot', () => {
+	assert.include(
+		certbot_webroot_switch({ domain, email, deploy_hook, expected_addresses }).run,
+		` --webroot -w '/var/www/certbot' `
 	);
 });
 
 test('certbot_webroot_switch runs the deploy hook only after certonly succeeds, quoted', () => {
-	const script = certbot_webroot_switch({ domain, email, deploy_hook: { path: "/etc/hook's" } });
+	const script = certbot_webroot_switch({
+		domain,
+		email,
+		expected_addresses,
+		deploy_hook: { path: "/etc/hook's" }
+	});
 	assert.ok(script.run.endsWith(`--force-renewal && sudo -- '/etc/hook'\\''s'`), script.run);
 });
 
@@ -94,18 +123,20 @@ test('extra_domains add a -d each after the primary domain', () => {
 	const extra_domains = [`www.${domain}`];
 
 	assert.equal(
-		call_line(issue({ domain, email, extra_domains }).run),
+		call_line(issue({ domain, email, extra_domains, expected_addresses }).run),
 		`${preflight([domain, `www.${domain}`])}${stopped} -d '${domain}' -d 'www.${domain}' --non-interactive --agree-tos --email '${email}'`
 	);
 	assert.equal(
-		call_line(certbot_webroot_switch({ domain, email, extra_domains, deploy_hook }).run),
+		call_line(
+			certbot_webroot_switch({ domain, email, extra_domains, deploy_hook, expected_addresses }).run
+		),
 		`${preflight([domain, `www.${domain}`])}sudo certbot certonly --webroot -w '/var/www/certbot' -d '${domain}' -d 'www.${domain}' --cert-name '${domain}' --non-interactive --agree-tos --email '${email}' --force-renewal${reload}`
 	);
 });
 
 test('extra_domains leave the standalone check on cert existence alone', () => {
 	assert.equal(
-		issue({ domain, email, extra_domains: ['www.example.org'] }).check,
+		issue({ domain, email, extra_domains: ['www.example.org'], expected_addresses }).check,
 		`sudo test -f '/etc/letsencrypt/live/${domain}/fullchain.pem'`
 	);
 });
@@ -115,7 +146,8 @@ test('extra_domains extend the webroot check with an exact SAN match per name', 
 		domain,
 		email,
 		extra_domains: ['www.example.org', 'old.example.org'],
-		deploy_hook
+		deploy_hook,
+		expected_addresses
 	});
 
 	const san = (name: string) =>
@@ -133,9 +165,10 @@ test('every guarded run carries the same preflight, with the declared addresses'
 	const runs = [
 		issue({ domain, email, expected_addresses }).run,
 		certbot_webroot_switch({ domain, email, deploy_hook, expected_addresses }).run,
-		debian_certbot_standalone_issue({ domain, expected_addresses }).run,
+		debian_certbot_standalone_issue({ domain, email, expected_addresses }).run,
 		alpine_certbot_standalone_issue({
 			domain,
+			email,
 			extra_domains: ['www.example.org'],
 			expected_addresses
 		}).run
@@ -157,16 +190,20 @@ test('every guarded run carries the same preflight, with the declared addresses'
 
 test('an empty expected_addresses throws, since it would refuse every name', () => {
 	assert.throws(
-		() => issue({ expected_addresses: [] }),
+		() => issue({ domain, email, expected_addresses: [] }),
 		/certbot_standalone_issue_core: expected_addresses is empty/
 	);
 	assert.throws(
-		() => certbot_webroot_switch({ deploy_hook, expected_addresses: [] }),
+		() => certbot_webroot_switch({ domain, email, deploy_hook, expected_addresses: [] }),
 		/certbot_webroot_switch: expected_addresses is empty/
 	);
 	assert.throws(
-		() => alpine_certbot_standalone_issue({ expected_addresses: [] }),
-		/certbot_standalone_issue_core: expected_addresses is empty/
+		() => alpine_certbot_standalone_issue({ domain, email, expected_addresses: [] }),
+		/^alpine_certbot_standalone_issue: expected_addresses is empty/
+	);
+	assert.throws(
+		() => debian_certbot_standalone_issue({ domain, email, expected_addresses: [] }),
+		/^debian_certbot_standalone_issue: expected_addresses is empty/
 	);
 });
 
@@ -205,4 +242,15 @@ test('the reload-nginx hooks share one default name', () => {
 		alpine_certbot_reload_nginx_hook().path,
 		`${CERTBOT_DEPLOY_HOOKS_DIR}/${RELOAD_NGINX_HOOK_NAME}`
 	);
+});
+
+test('the issuance core refuses a missing or empty stop_command', () => {
+	const options = { domain, email, expected_addresses };
+	for (const stop_command of [undefined, '', '  ']) {
+		assert.throws(
+			() => certbot_standalone_issue_core(stop_command as unknown as string, options),
+			/^certbot_standalone_issue_core: stop_command is required/,
+			String(stop_command)
+		);
+	}
 });

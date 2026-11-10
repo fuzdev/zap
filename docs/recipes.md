@@ -40,20 +40,20 @@ carry the family in the artifact's own name (`hardened_systemd_unit`,
 | `recipe_nginx.ts` | `security_header_directives` | those lines without the CSP, for a block that sets a policy of its own |
 | `recipe_nginx.ts` | `NGINX_VALIDATE` | `sudo nginx -t`, for a `file`'s `validate` |
 | `recipe_nginx.ts` | `nginx_config_verify` | a `verify` payload that re-checks the config every plan |
-| `recipe_csp.ts` | `spa_csp` | a `Content-Security-Policy` value for a single-page app, with hooks for a websocket origin and extra `connect-src`, `img-src`, `worker-src` entries; pass it to the site recipe's `csp` |
+| `recipe_csp.ts` | `spa_csp` | a `Content-Security-Policy` value for a single-page app, with hooks for a websocket origin, `'wasm-unsafe-eval'` (`wasm_unsafe_eval: true`, for an app that compiles WebAssembly), and extra `connect-src`, `img-src`, `worker-src` entries; pass it to the site recipe's `csp`. It allows `'unsafe-inline'` scripts and styles, which a prerendered SvelteKit build needs, so it limits where code loads from but doesn't stop an injected inline script |
 | `recipe_ssh.ts` | `ssh_hardening` | an `sshd_config.d` drop-in (key-only, no root login, `AllowUsers` the given user, an account name and never an sshd pattern, tightened auth tries and grace time); name it to sort first, such as `00-hardened.conf`, since sshd keeps the first value it reads |
 | `recipe_ssh.ts` | `SSHD_VALIDATE`, `ssh_hardening_verify` | `sudo sshd -t`, for the drop-in's `validate`, and a `verify` payload that asserts the hardening in the config sshd applies to the given user's login (`Match` blocks included) every plan, `AllowUsers` (the given user and no other, since sshd adds up `AllowUsers` across files) and the tunables included; give it the options `ssh_hardening` got |
 | `recipe_ssh.ts` | `SshPortOptions`, `DEFAULT_SSH_PORT`, `to_ssh_port` | the port sshd listens on, `ssh_port` (default 22), which the verify, `fail2ban_jail`, and the web firewall recipes take; [one value for all three](#design-rules) |
 | `recipe_ssh.ts` | `ssh_service_core` | the sshd `service` core: enabled, running, reloaded when its `reload_on` ids change |
-| `recipe_certbot.ts` | `certbot_standalone_issue_core`, `certbot_webroot_switch` | the first-issue (standalone) core, which stops nginx with the stop command it is given and then requests the certificate, and the renewal (webroot) `script` payload, for the site's domain and any alias names. The webroot switch re-issues the certificate and then runs the deploy hook it is given, since certbot before 5.3 runs deploy hooks only on `renew`. Both run the [DNS preflight](#the-certbot-dns-preflight) first |
+| `recipe_certbot.ts` | `certbot_standalone_issue_core`, `certbot_webroot_switch`, `validate_certbot_options` | the first-issue (standalone) core, which stops nginx with the stop command it is given and then requests the certificate, and the renewal (webroot) `script` payload, for the site's domain and any alias names. The webroot switch re-issues the certificate and then runs the deploy hook it is given, since certbot before 5.3 runs deploy hooks only on `renew`. Both take the certificate's `domain`, the registration `email`, and the `expected_addresses` (required; typically `zap.env('DEPLOY_DOMAIN')`, `zap.env('DEPLOY_CERTBOT_EMAIL')`, `[zap.env('DEPLOY_HOST')]`), run the [DNS preflight](#the-certbot-dns-preflight) first, and pass certbot `--non-interactive --agree-tos`, so running either agrees for `email` to the ACME server's terms (Let's Encrypt's subscriber agreement). `validate_certbot_options` is the one check of those options, which each recipe and distro wrapper runs under its own name |
 | `recipe_certbot.ts` | `certbot_deploy_hook_core`, `CERTBOT_DEPLOY_HOOKS_DIR`, `RELOAD_NGINX_HOOK_NAME` | the deploy-hook `file` core: an executable in `/etc/letsencrypt/renewal-hooks/deploy` that certbot runs after each renewal, whatever scheduled it, and the reload-nginx hooks' default file name |
 | `recipe_certbot.ts` | `letsencrypt_live_path` | where certbot keeps a certificate's chain and key, `/etc/letsencrypt/live/<domain>/`; the nginx site and the certbot scripts both read it |
 | `run_parts.ts` | `validate_run_parts_name`, `RunPartsFile` | the one check of a hook or job file name: letters, digits, `_` and `-` only, the names `run-parts` runs; and the spreadable `file` fields the hook and job builders return |
 | `recipe_fail2ban.ts` | `fail2ban_jail` | `/etc/fail2ban/jail.local` with an sshd jail. It defaults to Debian's journal and a ufw host's `iptables-multiport` ban action; on Alpine set `sshd_logpath: '/var/log/messages'` and `banaction: 'nftables'`. The jail bans on `ssh_port`. |
 | `recipe_sysctl.ts` | `LINK_PROTECTION_SYSCTLS`, `LINK_PROTECTION_SYSCTL_PATH`, `sysctl_conf`, `sysctl_apply` | the kernel's hard-link, symlink, FIFO and regular-file protections (systemd sets them on Debian; Alpine sets only the first two), as a `sysctl.d` file and a `script` that loads it when a live value differs |
 | `recipe_firewall.ts` | `WEB_FIREWALL_ALLOW`, `web_firewall_allow_rules` | the SSH + HTTP + HTTPS allow set as port rules, so both backends read the same rules; the constant has SSH on 22, the builder on `ssh_port` |
-| `recipe_env.ts` | `fuz_app_env_base`, `fuz_app_trusted_proxies` | the `.env.production` content and trusted-proxies stanza for a server built on `fuz_app`: the header as whole `template` content (`port` held to `port`, `cookie_keys` to `env_value`), your own lines appended through `extra` with their variables and kinds; its `DATABASE_URL` reaches PostgreSQL over the Unix socket as the service's own account (`peer`) |
-| `recipe_bootstrap.ts` | `fuz_app_bootstrap_token` | the one-shot first-admin bootstrap token `script` for a `fuz_app` server |
+| `recipe_fuz_app_env.ts` | `fuz_app_env_base`, `fuz_app_trusted_proxies` | the `.env.production` content and trusted-proxies stanza for a server built on `fuz_app`: the header as whole `template` content (`port` held to `port`, `cookie_keys` to `env_value` and refused unless it carries a reference, so the keys never land in the plan), your own lines appended through `extra` with their variables and kinds; its `DATABASE_URL` reaches PostgreSQL over the Unix socket as the service's own account (`peer`) |
+| `recipe_fuz_app_bootstrap.ts` | `fuz_app_bootstrap_token` | the one-shot first-admin bootstrap token `script` for a `fuz_app` server |
 
 ## Debian and Ubuntu (apt, systemd, ufw)
 
@@ -120,7 +120,8 @@ needs a reference of its own (a default domain, say) makes it with
 `env_ref('NAME')` from `@fuzdev/zap/env_ref.ts`, which returns what
 `zap.env('NAME')` does. A value a caller passes in may be a reference too, so a
 recipe splices values into strings and never inspects them beyond whether one
-carries a reference: one that validates or slices an option fails on a reference. A value that ends up in a `file`'s
+carries a reference (`carries_reference`, beside `env_ref`): one that validates or
+slices an option fails on a reference. A value that ends up in a `file`'s
 inline content can't be a reference; a recipe that takes a per-environment
 value emits a `{{placeholder}}` for it and returns the whole `template`
 content, the value in `vars` and its kind in `kinds`.
@@ -197,11 +198,11 @@ resolves only to `expected_addresses`. The `check`s are unchanged.
   `getent hosts` still prints them. glibc prints every one, musl only the
   first, so on a musl host with IPv6 disabled a name with several AAAA, the
   first of them declared, passes with the others unseen.
-- `expected_addresses` defaults to a reference to `DEPLOY_HOST`, the target's
-  host. Each value is an IP literal or a reference resolving to one; the target
-  checks it when the script runs and refuses anything else, asking for
-  `expected_addresses`. A `DEPLOY_HOST` holding a host name rather than an IP
-  literal refuses until `expected_addresses` is declared; declare the set too
+- `expected_addresses` is required. Each value is an IP literal or a reference
+  resolving to one, such as `[zap.env('DEPLOY_HOST')]` for the target's host;
+  the target checks it when the script runs and refuses anything else, asking
+  for `expected_addresses`. A reference holding a host name rather than an IP
+  literal refuses, so list the addresses when the host is reached by name, and
   when the names carry an AAAA. An IPv6 address is compared as lowercase text:
   write it as `getent` prints it, compressed.
 - The issuance stops nginx to free port 80 inside the same `run`, after the

@@ -2,14 +2,22 @@
  * Recipe for a single-page app's Content-Security-Policy.
  *
  * `spa_csp` builds the `Content-Security-Policy` header value for a prerendered
- * SvelteKit SPA behind nginx. The
- * baseline is fixed and security-sensitive — `script-src`/`style-src` permit
- * `'unsafe-inline'` because adapter-static emits inline bootstrap scripts whose
- * content changes every build (a strict nonce/hash CSP would need SvelteKit's
- * build-time `csp`, not an nginx header), `'wasm-unsafe-eval'` is for the blake3
- * WASM, and everything else is locked down. What varies per app is a handful of
- * extra sources (a site that uses `blob:` images + web workers), so those are
- * options defaulting to the locked-down baseline.
+ * SvelteKit SPA behind nginx. What it allows:
+ *
+ * - `script-src` and `style-src` allow `'self'` and `'unsafe-inline'`, because
+ *   adapter-static emits inline bootstrap scripts whose content changes every build
+ *   (a strict nonce/hash CSP would need SvelteKit's build-time `csp`, not an nginx
+ *   header). `'unsafe-inline'` lets any inline script run, so the policy does not
+ *   stop an injected `<script>`: it limits where code and data load from and connect
+ *   to, not whether injected inline code runs. An app that can drop it is better
+ *   served by a policy of its own.
+ * - Everything else is held to `'self'`, plus `data:` images and the WebSocket
+ *   endpoint in `connect-src`, with `object-src 'none'` and framing by the same
+ *   origin only.
+ *
+ * What varies per app is opt-in: `'wasm-unsafe-eval'` for an app that compiles
+ * WebAssembly, and a handful of extra sources (a site that uses `blob:` images and
+ * web workers).
  *
  * The value is consumed as the `csp` option of the site recipes
  * (`{debian,alpine}_nginx_spa_site`), which interpolate it into the
@@ -30,11 +38,16 @@
 /**
  * Options for `spa_csp`.
  *
- * Every field defaults to the locked-down baseline, so `spa_csp()` with no
- * argument is the locked-down baseline; pass sources to widen a single directive
- * (a site that uses `blob:` images and a web worker).
+ * Every field defaults to the baseline the module doc describes, so `spa_csp()`
+ * with no argument is that baseline; pass sources to widen a single directive (a site
+ * that uses `blob:` images and a web worker).
  */
 export interface SpaCspOptions {
+	/**
+	 * Add `'wasm-unsafe-eval'` to `script-src`, which an app needs to compile
+	 * WebAssembly (`WebAssembly.instantiate` and the like). Defaults to `false`.
+	 */
+	wasm_unsafe_eval?: boolean;
 	/**
 	 * The `connect-src` WebSocket endpoint, appended after `'self'`. Defaults to
 	 * the zap template placeholder `wss://{{domain}}` (substituted at apply time).
@@ -67,6 +80,7 @@ export interface SpaCspOptions {
  */
 export function spa_csp(options?: SpaCspOptions): string {
 	const {
+		wasm_unsafe_eval = false,
 		websocket = 'wss://{{domain}}',
 		connect_src_extra = [],
 		img_src_extra = [],
@@ -78,7 +92,7 @@ export function spa_csp(options?: SpaCspOptions): string {
 
 	const directives = [
 		`default-src 'self'`,
-		`script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'`,
+		`script-src 'self' 'unsafe-inline'${wasm_unsafe_eval ? ` 'wasm-unsafe-eval'` : ''}`,
 		`style-src 'self' 'unsafe-inline'`,
 		`img-src ${img_src}`,
 		`font-src 'self'`,

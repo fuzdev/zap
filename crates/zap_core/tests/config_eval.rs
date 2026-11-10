@@ -1956,7 +1956,11 @@ export default (zap) => {
     }
     zap.target({local: true});
     zap.script({id: 'recipe', check: 'true', run: `echo ${env_ref('FROM_RECIPE')}`});
-    zap.script({id: 'ssl', ...debian_certbot_standalone_issue()});
+    zap.script({id: 'ssl', ...debian_certbot_standalone_issue({
+        domain: env_ref('DEPLOY_DOMAIN'),
+        email: env_ref('DEPLOY_CERTBOT_EMAIL'),
+        expected_addresses: [env_ref('DEPLOY_HOST')],
+    })});
 };
 ",
     )

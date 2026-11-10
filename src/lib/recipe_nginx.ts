@@ -65,7 +65,8 @@
  * (`fgro eval`), which has no network, no writes, and no environment, and where
  * the clock and randomness throw. This module is therefore a set of **pure functions**: each only
  * assembles a string from its arguments — no I/O, no clock, no randomness, no
- * imports beyond types and the pure `single_quote` and `letsencrypt_live_path`. The
+ * imports beyond types and the pure `single_quote`, `carries_reference`, and
+ * `letsencrypt_live_path`. The
  * output is deterministic for given inputs (stable ordering, trailing newline), so it
  * stays a reliable content-addressed plan artifact.
  *
@@ -76,6 +77,7 @@
  * @module
  */
 
+import { carries_reference } from './env_ref.ts';
 import { letsencrypt_live_path } from './recipe_certbot.ts';
 import type { FileResource, ScriptResource, TemplateContent, VerifyResource } from './schema.ts';
 import { single_quote } from './shell.ts';
@@ -384,9 +386,6 @@ export interface NginxSiteContent extends TemplateContent {
 	vars: { domain: string; port: string | number } & Record<NginxRedirectDomainVar, string>;
 	kinds: typeof NGINX_SITE_KINDS & Record<NginxRedirectDomainVar, 'hostname'>;
 }
-
-/** Whether `value` carries a reference: a reference marker's opening delimiter. */
-const carries_reference = (value: string): boolean => value.includes('\uFDD0');
 
 /** The `redirect_domains` names as the template writes them, and the variables they add. */
 interface NginxRedirectNames {

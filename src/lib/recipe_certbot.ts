@@ -20,8 +20,7 @@
  *
  * Both scripts that lead to a request to the CA — the first issuance and the
  * webroot switch — run a DNS preflight before they change anything: each name the
- * certificate covers must resolve, on the target, only to `expected_addresses` (by
- * default the target's `DEPLOY_HOST`). A name that doesn't resolve, or resolves
+ * certificate covers must resolve, on the target, only to `expected_addresses`. A name that doesn't resolve, or resolves
  * anywhere else, refuses the script with the reason on stderr, so a host whose DNS
  * isn't pointed at it yet doesn't spend Let's Encrypt's failed-validation limit. The
  * issuance stops nginx inside the same `run`, after the preflight passes, so a
@@ -40,32 +39,35 @@
  * wrappers (`debian_certbot_reload_nginx_hook`, `alpine_certbot_reload_nginx_hook`)
  * pass the reload command.
  *
- * The scripts embed references to `DEPLOY_DOMAIN` / `DEPLOY_CERTBOT_EMAIL`
- * (`env_ref`) that stay inert in the plan and are resolved in zap's Rust parent
- * at apply time. The `domain`/`email` options default to those references so the
- * typical caller passes nothing. Every value is one single-quoted word of the
- * command (`single_quote`), so a value — a reference's or a literal — can't change
- * what the command runs.
+ * The caller passes the certificate's `domain`, the registration `email`, and the
+ * `expected_addresses`, each written out or a reference
+ * (`zap.env('DEPLOY_DOMAIN')`), which stays inert in the plan and is resolved by zap
+ * at apply time. Every value is one single-quoted word of the command
+ * (`single_quote`), so a value — a reference's or a literal — can't change what the
+ * command runs. Both requests pass `--non-interactive --agree-tos`: running either
+ * script agrees, for `email`, to the ACME server's terms (Let's Encrypt's subscriber
+ * agreement) without asking.
  *
  * Recipes are imported at config eval time inside zap's sandboxed config eval
  * (`fgro eval`), which has no network, no writes, and no environment, and where
  * the clock and randomness throw. This module is therefore a set of **pure functions**: each only
  * assembles strings from its arguments — no I/O, no clock, no randomness, and no
- * import beyond types, `env_ref`, `single_quote` and `validate_run_parts_name`,
- * themselves pure. The output is deterministic for given inputs, so it
+ * import beyond types, `single_quote` and `validate_run_parts_name`, themselves pure. The output is deterministic for given inputs, so it
  * stays a reliable content-addressed plan artifact.
  *
  * The caller spreads each script result into a `script` resource, e.g.
- * `zap.script({id: 'ssl-certificate', name: '...', ...debian_certbot_standalone_issue(), depends_on: [...]})`,
+ * `zap.script({id: 'ssl-certificate', name: '...', ...debian_certbot_standalone_issue({domain, email, expected_addresses}), depends_on: [...]})`
+ * with `domain: zap.env('DEPLOY_DOMAIN')`, `email: zap.env('DEPLOY_CERTBOT_EMAIL')` and
+ * `expected_addresses: [zap.env('DEPLOY_HOST')]`,
  * and a deploy hook into a `file`, e.g.
  * `zap.file({id: 'certbot-deploy-hook', name: '...', ...hook, depends_on: ['certbot']})` with
  * `const hook = debian_certbot_reload_nginx_hook()`, which the webroot switch also takes
- * (`certbot_webroot_switch({deploy_hook: hook})`, its `script` depending on the hook's `file`).
+ * (`certbot_webroot_switch({domain, email, expected_addresses, deploy_hook: hook})`, its
+ * `script` depending on the hook's `file`).
  *
  * @module
  */
 
-import { env_ref } from './env_ref.ts';
 import type { ScriptResource } from './schema.ts';
 import { type RunPartsFile, validate_run_parts_name } from './run_parts.ts';
 import { single_quote } from './shell.ts';
@@ -187,14 +189,8 @@ const dns_guarded = (
 	command: string,
 	domain: string,
 	extra_domains: ReadonlyArray<string>,
-	expected_addresses: ReadonlyArray<string>,
-	recipe: string
+	expected_addresses: ReadonlyArray<string>
 ): string => {
-	if (expected_addresses.length === 0) {
-		throw new Error(
-			`${recipe}: expected_addresses is empty, so every name would be refused; list the IP addresses the certificate names resolve to`
-		);
-	}
 	const args = [
 		String(expected_addresses.length),
 		...expected_addresses.map(single_quote),
@@ -203,8 +199,40 @@ const dns_guarded = (
 	return `${DNS_PREFLIGHT_FUNCTION}zap_certbot_dns_preflight ${args.join(' ')} && ${command}`;
 };
 
-/** The default `expected_addresses`: the target's `DEPLOY_HOST`, by reference. */
-const default_expected_addresses = (): Array<string> => [env_ref('DEPLOY_HOST')];
+/**
+ * Refuse certbot options missing a required value, or with no expected address: the
+ * one check of them, which each certbot recipe runs under its own name, so a refusal
+ * names the function the config called. A config evaluated as JavaScript has no type
+ * check to catch a missing value, which would reach the command as `undefined`.
+ *
+ * @param recipe - the recipe asking, named in the error
+ * @param options - the options the recipe was given
+ * @throws Error when `domain`, `email`, or `expected_addresses` is missing, or
+ * `expected_addresses` is empty, which would refuse every name
+ */
+export function validate_certbot_options(
+	recipe: string,
+	options: Partial<CertbotStandaloneIssueOptions> | undefined
+): void {
+	for (const field of ['domain', 'email'] as const) {
+		const value = options?.[field];
+		if (typeof value !== 'string' || value === '') {
+			throw new Error(
+				`${recipe}: ${field} is required, e.g. zap.env('${field === 'domain' ? 'DEPLOY_DOMAIN' : 'DEPLOY_CERTBOT_EMAIL'}')`
+			);
+		}
+	}
+	if (!Array.isArray(options?.expected_addresses)) {
+		throw new Error(
+			`${recipe}: expected_addresses is required: the IP addresses the certificate names must resolve to, e.g. [zap.env('DEPLOY_HOST')]`
+		);
+	}
+	if (options.expected_addresses.length === 0) {
+		throw new Error(
+			`${recipe}: expected_addresses is empty, so every name would be refused; list the IP addresses the certificate names resolve to`
+		);
+	}
+}
 
 /** The shared "certificate already issued" guard — `test -f <live>/fullchain.pem`. */
 const cert_exists_check = (domain: string): string =>
@@ -238,11 +266,12 @@ export interface CertbotDnsPreflightOptions {
 	 * Each value is an IP literal, or a reference resolving to one at apply time; the
 	 * target checks it and refuses anything else (a host name, say), asking for this
 	 * option. An IPv6 address is compared as text, lowercased, so write it as
-	 * `getent` prints it (the compressed form). Defaults to a reference to
-	 * `DEPLOY_HOST`, the target's host; declare the addresses when the host is
-	 * reached by name or the names also carry an AAAA.
+	 * `getent` prints it (the compressed form). A reference to the target's host
+	 * (`[zap.env('DEPLOY_HOST')]`) serves when that is an IP literal; list the
+	 * addresses when the host is reached by name or the names also carry an AAAA.
+	 * Required, and not empty.
 	 */
-	expected_addresses?: ReadonlyArray<string>;
+	expected_addresses: ReadonlyArray<string>;
 }
 
 /**
@@ -308,22 +337,25 @@ export interface CertbotReloadNginxHookOptions {
  * service-manager stop command.
  */
 export interface CertbotStandaloneIssueOptions extends CertbotDnsPreflightOptions {
-	/** The certificate domain. Defaults to a reference to `DEPLOY_DOMAIN`. */
-	domain?: string;
+	/** The certificate domain, e.g. `zap.env('DEPLOY_DOMAIN')`. */
+	domain: string;
 	/**
 	 * Further names the certificate covers beside `domain`, one `-d` each — e.g.
 	 * the `www.` name a site's `redirect_domains` 301s to `domain`. The cert stays
 	 * named for `domain`. Defaults to none.
 	 */
 	extra_domains?: ReadonlyArray<string>;
-	/** The registration email. Defaults to a reference to `DEPLOY_CERTBOT_EMAIL`. */
-	email?: string;
+	/**
+	 * The registration email, e.g. `zap.env('DEPLOY_CERTBOT_EMAIL')`. The request passes
+	 * `--agree-tos` for it: running the script agrees to the ACME server's terms.
+	 */
+	email: string;
 }
 
 /** Options for `certbot_webroot_switch`. */
 export interface CertbotWebrootSwitchOptions extends CertbotDnsPreflightOptions {
-	/** The certificate domain. Defaults to a reference to `DEPLOY_DOMAIN`. */
-	domain?: string;
+	/** The certificate domain, e.g. `zap.env('DEPLOY_DOMAIN')`. */
+	domain: string;
 	/**
 	 * Further names the certificate covers beside `domain` (see
 	 * `CertbotStandaloneIssueOptions.extra_domains`). When set, the `check` also
@@ -331,8 +363,11 @@ export interface CertbotWebrootSwitchOptions extends CertbotDnsPreflightOptions 
 	 * host whose cert predates it re-issues the cert to cover it. Defaults to none.
 	 */
 	extra_domains?: ReadonlyArray<string>;
-	/** The registration email. Defaults to a reference to `DEPLOY_CERTBOT_EMAIL`. */
-	email?: string;
+	/**
+	 * The registration email, e.g. `zap.env('DEPLOY_CERTBOT_EMAIL')`. The request passes
+	 * `--agree-tos` for it, as the first issuance does.
+	 */
+	email: string;
 	/** The ACME challenge webroot. Defaults to `/var/www/certbot`. */
 	webroot?: string;
 	/**
@@ -360,18 +395,20 @@ export interface CertbotWebrootSwitchOptions extends CertbotDnsPreflightOptions 
  * @param options - the certificate's names, its registration email, and the addresses
  *   the names must resolve to
  * @returns the `script` `check`/`run` pair.
- * @throws when `options.expected_addresses` is empty
+ * @throws Error when `stop_command`, `options.domain`, `options.email`, or
+ *   `options.expected_addresses` is missing, or `options.expected_addresses` is empty
  */
 export function certbot_standalone_issue_core(
 	stop_command: string,
-	options?: CertbotStandaloneIssueOptions
+	options: CertbotStandaloneIssueOptions
 ): CertbotScript {
-	const {
-		domain = env_ref('DEPLOY_DOMAIN'),
-		extra_domains = [],
-		email = env_ref('DEPLOY_CERTBOT_EMAIL'),
-		expected_addresses = default_expected_addresses()
-	} = options ?? {};
+	validate_certbot_options('certbot_standalone_issue_core', options);
+	if (typeof stop_command !== 'string' || stop_command.trim() === '') {
+		throw new Error(
+			"certbot_standalone_issue_core: stop_command is required, the service manager's command that stops nginx"
+		);
+	}
+	const { domain, extra_domains = [], email, expected_addresses } = options;
 
 	return {
 		check: cert_exists_check(domain),
@@ -382,8 +419,7 @@ export function certbot_standalone_issue_core(
 			)} --non-interactive --agree-tos --email ${single_quote(email)}`,
 			domain,
 			extra_domains,
-			expected_addresses,
-			'certbot_standalone_issue_core'
+			expected_addresses
 		)
 	};
 }
@@ -398,16 +434,18 @@ export function certbot_standalone_issue_core(
  * passes the DNS preflight first.
  *
  * @returns the `script` `check`/`run` pair.
- * @throws when `options.expected_addresses` is empty
+ * @throws Error when `options.domain`, `options.email`, or `options.expected_addresses`
+ *   is missing, or `options.expected_addresses` is empty
  */
 export function certbot_webroot_switch(options: CertbotWebrootSwitchOptions): CertbotScript {
+	validate_certbot_options('certbot_webroot_switch', options);
 	const {
-		domain = env_ref('DEPLOY_DOMAIN'),
+		domain,
 		extra_domains = [],
-		email = env_ref('DEPLOY_CERTBOT_EMAIL'),
+		email,
 		webroot = '/var/www/certbot',
 		deploy_hook,
-		expected_addresses = default_expected_addresses()
+		expected_addresses
 	} = options;
 
 	const webroot_check = `sudo grep -q 'authenticator = webroot' ${single_quote(
@@ -433,8 +471,7 @@ export function certbot_webroot_switch(options: CertbotWebrootSwitchOptions): Ce
 			)} --force-renewal && sudo -- ${single_quote(deploy_hook.path)}`,
 			domain,
 			extra_domains,
-			expected_addresses,
-			'certbot_webroot_switch'
+			expected_addresses
 		)
 	};
 }

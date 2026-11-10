@@ -5,9 +5,11 @@ import {
 	type FuzAppEnvExtra,
 	fuz_app_env_base,
 	fuz_app_trusted_proxies
-} from '#lib/recipe_env.ts';
+} from '#lib/recipe_fuz_app_env.ts';
+import { env_ref } from '#lib/env_ref.ts';
 
-const VALUES = { port: '4040', cookie_keys: 'keys' };
+const KEYS = env_ref('SECRET_FUZ_COOKIE_KEYS');
+const VALUES = { port: '4040', cookie_keys: KEYS };
 
 /** The env file text `fuz_app_env_base` gives for `options`, with stand-in values. */
 const env_text = (
@@ -120,7 +122,7 @@ test('fuz_app_env_base returns the template content, the kinds of its values its
 		service: 'app',
 		config_dir: '/home/app/.app',
 		port: 4040,
-		cookie_keys: 'keys',
+		cookie_keys: KEYS,
 		extra: {
 			template: "FUZ_ALLOWED_ORIGINS='https://{{domain}}'\nPORT_AGAIN={{port}}\n",
 			vars: { domain: 'app.example.com' },
@@ -131,7 +133,7 @@ test('fuz_app_env_base returns the template content, the kinds of its values its
 	assert.ok(
 		content.template.endsWith("FUZ_ALLOWED_ORIGINS='https://{{domain}}'\nPORT_AGAIN={{port}}\n")
 	);
-	assert.deepEqual(content.vars, { port: 4040, cookie_keys: 'keys', domain: 'app.example.com' });
+	assert.deepEqual(content.vars, { port: 4040, cookie_keys: KEYS, domain: 'app.example.com' });
 	assert.deepEqual(content.kinds, { port: 'port', cookie_keys: 'env_value', domain: 'hostname' });
 	// every placeholder has a var, and every var a placeholder
 	const placeholders = new Set([...content.template.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
@@ -156,4 +158,18 @@ test("fuz_app_env_base refuses extra vars or kinds that name the base's own", ()
 	for (const extra of extras) {
 		assert.throws(() => fuz_app_env_base({ ...base, extra }), /is the base's own/);
 	}
+});
+
+test('fuz_app_env_base refuses a cookie_keys written out, which would put the secret in the plan', () => {
+	const base = { user: 'app', service: 'app', config_dir: '/home/app/.app', port: 4040 };
+	for (const cookie_keys of ['keys', '', 'a__b']) {
+		assert.throws(
+			() => fuz_app_env_base({ ...base, cookie_keys }),
+			/fuz_app_env_base: cookie_keys must carry a reference/,
+			cookie_keys
+		);
+	}
+	// a reference, whole or interpolated
+	fuz_app_env_base({ ...base, cookie_keys: KEYS });
+	fuz_app_env_base({ ...base, cookie_keys: `${KEYS}__${env_ref('OLD_KEYS')}` });
 });
