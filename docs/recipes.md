@@ -18,6 +18,20 @@ Import each by its full module path. Resolving the imports:
 [install.md](./install.md#types-and-recipes-for-your-config). The generated API
 reference on the site documents every option; this page is the map.
 
+Every recipe takes one options object (a few take none), and returns one of two
+things: the value of one field, such as a file's `content` (a string, or the
+`template` content the nginx site and env recipes return whole), or the subset
+of one resource's payload you spread into one builder call, typed as a `Pick` of
+that payload (`ScriptCommands`, a script's `check` and `run`, is the common
+one). A recipe that sets up a pair of resources, such as `alpine_web_firewall`
+or the nginx catch-all, returns one such subset per resource, each spread into
+its own call. The small helpers beside the recipes take their values directly:
+`env_ref(name)` makes a reference and `carries_reference(value)` recognizes one,
+`single_quote(value)` and `letsencrypt_live_path(domain, file)` each build one
+string, and the checks a recipe composes (`sudo_as_user`, `to_ssh_port`,
+`validate_run_parts_name`, `validate_certbot_options`) take the name of the
+recipe asking first, then what they check.
+
 ## Host families
 
 Recipes that differ by distro come in symmetric `debian_*` / `alpine_*` pairs
@@ -50,7 +64,7 @@ carry the family in the artifact's own name (`hardened_systemd_unit`,
 | `recipe_certbot.ts` | `letsencrypt_live_path` | where certbot keeps a certificate's chain and key, `/etc/letsencrypt/live/<domain>/`; the nginx site and the certbot scripts both read it |
 | `run_parts.ts` | `validate_run_parts_name`, `RunPartsFile` | the one check of a hook or job file name: letters, digits, `_` and `-` only, the names `run-parts` runs; and the spreadable `file` fields the hook and job builders return |
 | `recipe_fail2ban.ts` | `fail2ban_jail` | `/etc/fail2ban/jail.local` with an sshd jail. It defaults to Debian's journal and a ufw host's `iptables-multiport` ban action; on Alpine set `sshd_logpath: '/var/log/messages'` and `banaction: 'nftables'`. The jail bans on `ssh_port`. |
-| `recipe_sysctl.ts` | `LINK_PROTECTION_SYSCTLS`, `LINK_PROTECTION_SYSCTL_PATH`, `sysctl_conf`, `sysctl_apply` | the kernel's hard-link, symlink, FIFO and regular-file protections (systemd sets them on Debian; Alpine sets only the first two), as a `sysctl.d` file and a `script` that loads it when a live value differs |
+| `recipe_sysctl.ts` | `LINK_PROTECTION_SYSCTLS`, `LINK_PROTECTION_SYSCTL_PATH`, `sysctl_conf`, `sysctl_apply` | the kernel's hard-link, symlink, FIFO and regular-file protections (systemd sets them on Debian; Alpine sets only the first two), as a `sysctl.d` file and a `script` that loads it when a live value differs; give both the same `{path, values}` object |
 | `recipe_firewall.ts` | `WEB_FIREWALL_ALLOW`, `web_firewall_allow_rules` | the SSH + HTTP + HTTPS allow set as port rules, so both backends read the same rules; the constant has SSH on 22, the builder on `ssh_port` |
 | `recipe_fuz_app_env.ts` | `fuz_app_env_base`, `fuz_app_trusted_proxies` | the `.env.production` content and trusted-proxies stanza for a server built on `fuz_app`: the header as whole `template` content (`port` held to `port`, `cookie_keys` to `env_value` and refused unless it carries a reference, so the keys never land in the plan), your own lines appended through `extra` with their variables and kinds; its `DATABASE_URL` reaches PostgreSQL over the Unix socket as the service's own account (`peer`) |
 | `recipe_fuz_app_bootstrap.ts` | `fuz_app_bootstrap_token` | the one-shot first-admin bootstrap token `script` for a `fuz_app` server |
@@ -103,12 +117,13 @@ browser that has seen it, so a subdomain served over HTTP alone stops loading
 there; set it only when every name under the domain serves HTTPS. `{max_age: 0}`
 is how a browser forgets the policy, and `false` sends no header. A block of
 your own with its own `add_header` repeats the set with
-`site_security_header_directives(csp, hsts)`, the same `hsts` the site got.
+`site_security_header_directives({csp, hsts})`, the same `hsts` the site got:
+it takes no default, so a block can't send a different policy than the site's.
 
 Every value the recipe interpolates as text is refused when it could change the
 config's structure: `root`, `acme_webroot`, `spa_try_files`, and
-`error_page_404` hold no `;`, `{`, `}`, quote, `#`, `\`, tab, line break, or NUL (and
-the first two no blank), `client_max_body_size` is a size such as `4m`,
+`error_page_404` hold no `;`, `{`, `}`, quote, `#`, `\`, tab, line break, or NUL
+(and the first two no blank), `client_max_body_size` is a size such as `4m`,
 `api_burst` a whole number, a literal `redirect_domains` entry a host name, and
 `client_max_body_size_comment` one line. `extra_locations` is nginx config by
 design and goes in as written.
@@ -120,11 +135,11 @@ needs a reference of its own (a default domain, say) makes it with
 `env_ref('NAME')` from `@fuzdev/zap/env_ref.ts`, which returns what
 `zap.env('NAME')` does. A value a caller passes in may be a reference too, so a
 recipe splices values into strings and never inspects them beyond whether one
-carries a reference (`carries_reference`, beside `env_ref`): one that validates or
-slices an option fails on a reference. A value that ends up in a `file`'s
-inline content can't be a reference; a recipe that takes a per-environment
-value emits a `{{placeholder}}` for it and returns the whole `template`
-content, the value in `vars` and its kind in `kinds`.
+carries a reference (`carries_reference`, beside `env_ref`): one that validates
+or slices an option fails on a reference. A value that ends up in a `file`'s
+inline content can't be a reference; a recipe that takes a per-environment value
+emits a `{{placeholder}}` for it and returns the whole `template` content, the
+value in `vars` and its kind in `kinds`.
 
 ### Design rules
 
@@ -146,9 +161,12 @@ The shipped recipes follow these, and they keep your own composable too.
   flagged in the [catalog](#neutral): `fail2ban_jail`'s `sshd_logpath` and
   `banaction`.
 - **Big divergence, two functions.** A one-verb or one-path difference shares a
-  `*_core` with thin wrappers (the nginx catch-all, the sshd
-  service). A whole-artifact difference (a systemd unit versus an OpenRC script)
-  is two functions sharing only an options shape.
+  `*_core` with thin wrappers (the nginx catch-all, the sshd service). The core
+  is public, the portable layer: it takes the wrapper's options plus the
+  distro's values (`nginx_catch_all_core`'s `default_path` and `catch_all_path`,
+  `ssh_service_core`'s `service`) in one object. A whole-artifact difference (a
+  systemd unit versus an OpenRC script) is two functions sharing only an options
+  shape.
 - **Pure.** No `fetch`, no file reads beyond imports, no clock. A recipe's
   output depends on its arguments alone, so the plan does too.
 - **Every value a shell reads is one single-quoted word.** A recipe that splices

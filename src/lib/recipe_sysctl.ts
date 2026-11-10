@@ -20,15 +20,17 @@
  * Pure functions evaluated in zap's sandboxed config eval (`fgro eval`: no I/O,
  * clock, or randomness); the output is deterministic.
  *
- * The caller writes the file and orders the script after it, e.g.
- * `zap.file({id: 'sysctl-links', path: LINK_PROTECTION_SYSCTL_PATH, content: {type: 'inline', content: sysctl_conf(LINK_PROTECTION_SYSCTLS)}})`
+ * The caller writes the file and orders the script after it, both from one options
+ * object, e.g. with
+ * `const link = {path: LINK_PROTECTION_SYSCTL_PATH, values: LINK_PROTECTION_SYSCTLS}`:
+ * `zap.file({id: 'sysctl-links', path: link.path, content: {type: 'inline', content: sysctl_conf(link)}})`
  * and
- * `zap.script({id: 'sysctl-links-applied', ...sysctl_apply(LINK_PROTECTION_SYSCTL_PATH, LINK_PROTECTION_SYSCTLS), depends_on: ['sysctl-links']})`.
+ * `zap.script({id: 'sysctl-links-applied', ...sysctl_apply(link), depends_on: ['sysctl-links']})`.
  *
  * @module
  */
 
-import type { ScriptResource } from './schema.ts';
+import type { ScriptCommands } from './schema.ts';
 import { single_quote } from './shell.ts';
 
 /** Kernel parameters by `sysctl` name, each with the value it is set to. */
@@ -75,19 +77,33 @@ const checked = (recipe: string, values: SysctlValues): Array<[string, string]> 
 	return entries;
 };
 
+/** Options for `sysctl_conf`. */
+export interface SysctlConfOptions {
+	/** The parameters, e.g. `LINK_PROTECTION_SYSCTLS`. */
+	values: SysctlValues;
+}
+
+/**
+ * Options for `sysctl_apply`: the file's parameters and where it is. One object of
+ * these suits both recipes, so the file and the script that loads it can't hold
+ * different values: `const link = {path: LINK_PROTECTION_SYSCTL_PATH, values: LINK_PROTECTION_SYSCTLS}`.
+ */
+export interface SysctlApplyOptions extends SysctlConfOptions {
+	/** The absolute path of the `sysctl.d` file. */
+	path: string;
+}
+
 /**
  * Build the `sysctl.d` file text for `values`, one `name = value` line each, in the
  * order given.
  *
  * @returns the file text, terminated by a trailing newline.
+ * @throws Error if `values` is empty or holds a name or value out of its form
  */
-export function sysctl_conf(values: SysctlValues): string {
-	const lines = checked('sysctl_conf', values).map(([name, value]) => `${name} = ${value}`);
+export function sysctl_conf(options: SysctlConfOptions): string {
+	const lines = checked('sysctl_conf', options.values).map(([name, value]) => `${name} = ${value}`);
 	return `# Managed by zap\n${lines.join('\n')}\n`;
 }
-
-/** The `check`/`run` `sysctl_apply` returns (caller supplies `id`/`name`/`depends_on`). */
-export type SysctlApplyScript = Pick<ScriptResource, 'check' | 'run'>;
 
 /**
  * Build the `script` that puts `values` in force from the file at `path`.
@@ -96,14 +112,15 @@ export type SysctlApplyScript = Pick<ScriptResource, 'check' | 'run'>;
  * account, with its tabs and runs of blanks read as one space (a multi-value
  * parameter such as `net.ipv4.ip_local_port_range` reads `32768<tab>60999` there),
  * and passes when every one is the declared value; `run` loads the file
- * with `sysctl -p` and fails when a value still differs. Pass the same `values` the
- * file was written from.
+ * with `sysctl -p` and fails when a value still differs. Pass the options
+ * `sysctl_conf` was given.
  *
- * @param path - the absolute path of the `sysctl.d` file
- * @param values - the parameters the file holds
  * @returns the `script` `check`/`run` pair.
+ * @throws Error if `values` is empty or holds a name or value out of its form, or
+ * `path` is not absolute
  */
-export function sysctl_apply(path: string, values: SysctlValues): SysctlApplyScript {
+export function sysctl_apply(options: SysctlApplyOptions): ScriptCommands {
+	const { path, values } = options;
 	const entries = checked('sysctl_apply', values);
 	if (!path.startsWith('/')) {
 		throw new Error(`sysctl_apply: path ${JSON.stringify(path)} must be absolute`);

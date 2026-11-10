@@ -68,12 +68,9 @@
  * @module
  */
 
-import type { ScriptResource } from './schema.ts';
+import type { ScriptCommands } from './schema.ts';
 import { type RunPartsFile, validate_run_parts_name } from './run_parts.ts';
 import { single_quote } from './shell.ts';
-
-/** The `check`/`run` pair the certbot recipes return (caller supplies `id`/`name`/`depends_on`). */
-export type CertbotScript = Pick<ScriptResource, 'check' | 'run'>;
 
 /** The `-d` arguments: `domain` first, so certbot names the cert for it, then each extra name. */
 const domain_args = (domain: string, extra_domains: ReadonlyArray<string>): string =>
@@ -286,6 +283,20 @@ export const CERTBOT_DEPLOY_HOOKS_DIR = '/etc/letsencrypt/renewal-hooks/deploy';
 /** The default file name of the distro `*_certbot_reload_nginx_hook` hooks. */
 export const RELOAD_NGINX_HOOK_NAME = 'reload-nginx';
 
+/** Options for `certbot_deploy_hook_core`. */
+export interface CertbotDeployHookCoreOptions {
+	/**
+	 * The command the hook runs, as shell words by design (the hook is a shell script);
+	 * the caller's own literal, never a value from elsewhere.
+	 */
+	command: string;
+	/**
+	 * The hook's file name: letters, digits, `_` and `-` only, so `run-parts`-style
+	 * runners don't skip it and it can't leave the directory.
+	 */
+	name: string;
+}
+
 /**
  * Build the `path` / `mode` / `content` of a certbot deploy hook, ready to spread
  * into a `zap.file({...})`: an executable `#!/bin/sh` script at
@@ -299,15 +310,12 @@ export const RELOAD_NGINX_HOOK_NAME = 'reload-nginx';
  * wrappers' commands do. A failing hook is reported by certbot but doesn't undo the
  * renewal.
  *
- * @param command - the command the hook runs, as shell words by design (the hook is a
- *   shell script); the caller's own literal, never a value from elsewhere
- * @param name - the hook's file name: letters, digits, `_` and `-` only, so
- *   `run-parts`-style runners don't skip it and it can't leave the directory
  * @returns a spreadable `{path, mode, content}` for an inline `file` resource.
- * @throws when `name` holds any other character
+ * @throws Error when `name` holds any other character
  */
-export function certbot_deploy_hook_core(command: string, name: string): RunPartsFile {
-	validate_run_parts_name(name, 'certbot_deploy_hook_core');
+export function certbot_deploy_hook_core(options: CertbotDeployHookCoreOptions): RunPartsFile {
+	const { command, name } = options;
+	validate_run_parts_name('certbot_deploy_hook_core', name);
 
 	return {
 		path: `${CERTBOT_DEPLOY_HOOKS_DIR}/${name}`,
@@ -352,6 +360,18 @@ export interface CertbotStandaloneIssueOptions extends CertbotDnsPreflightOption
 	email: string;
 }
 
+/**
+ * Options for `certbot_standalone_issue_core`: the issuance's, plus the stop command
+ * the distro wrappers supply.
+ */
+export interface CertbotStandaloneIssueCoreOptions extends CertbotStandaloneIssueOptions {
+	/**
+	 * The service manager's command that stops nginx, as shell words by design; the
+	 * caller's own literal, never a value from elsewhere.
+	 */
+	stop_command: string;
+}
+
 /** Options for `certbot_webroot_switch`. */
 export interface CertbotWebrootSwitchOptions extends CertbotDnsPreflightOptions {
 	/** The certificate domain, e.g. `zap.env('DEPLOY_DOMAIN')`. */
@@ -390,25 +410,20 @@ export interface CertbotWebrootSwitchOptions extends CertbotDnsPreflightOptions 
  * the one `options`, and a refusal stops nothing. The `check` short-circuits once
  * the cert exists.
  *
- * @param stop_command - the service manager's stop command, as shell words by design;
- *   the caller's own literal, never a value from elsewhere
- * @param options - the certificate's names, its registration email, and the addresses
- *   the names must resolve to
  * @returns the `script` `check`/`run` pair.
- * @throws Error when `stop_command`, `options.domain`, `options.email`, or
- *   `options.expected_addresses` is missing, or `options.expected_addresses` is empty
+ * @throws Error when `stop_command`, `domain`, `email`, or `expected_addresses` is
+ *   missing, or `expected_addresses` is empty
  */
 export function certbot_standalone_issue_core(
-	stop_command: string,
-	options: CertbotStandaloneIssueOptions
-): CertbotScript {
+	options: CertbotStandaloneIssueCoreOptions
+): ScriptCommands {
 	validate_certbot_options('certbot_standalone_issue_core', options);
+	const { stop_command, domain, extra_domains = [], email, expected_addresses } = options;
 	if (typeof stop_command !== 'string' || stop_command.trim() === '') {
 		throw new Error(
 			"certbot_standalone_issue_core: stop_command is required, the service manager's command that stops nginx"
 		);
 	}
-	const { domain, extra_domains = [], email, expected_addresses } = options;
 
 	return {
 		check: cert_exists_check(domain),
@@ -437,7 +452,7 @@ export function certbot_standalone_issue_core(
  * @throws Error when `options.domain`, `options.email`, or `options.expected_addresses`
  *   is missing, or `options.expected_addresses` is empty
  */
-export function certbot_webroot_switch(options: CertbotWebrootSwitchOptions): CertbotScript {
+export function certbot_webroot_switch(options: CertbotWebrootSwitchOptions): ScriptCommands {
 	validate_certbot_options('certbot_webroot_switch', options);
 	const {
 		domain,

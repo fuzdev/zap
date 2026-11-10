@@ -51,9 +51,9 @@ export function debian_nginx_spa_site(options: NginxSpaSiteOptions): NginxSiteCo
  * @returns the removal `script` payload and the catch-all `file` payload.
  */
 export function debian_nginx_catch_all(options?: NginxCatchAllOptions): NginxCatchAll {
-	return nginx_catch_all_core(
-		'/etc/nginx/sites-enabled/default',
-		'/etc/nginx/conf.d/00-catch-all.conf',
-		options
-	);
+	return nginx_catch_all_core({
+		...options,
+		default_path: '/etc/nginx/sites-enabled/default',
+		catch_all_path: '/etc/nginx/conf.d/00-catch-all.conf'
+	});
 }

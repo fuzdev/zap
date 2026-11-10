@@ -22,7 +22,7 @@ test('the link protections are the four systemd ships', () => {
 
 test('sysctl_conf writes one line per parameter, persisted under sysctl.d', () => {
 	assert.equal(
-		sysctl_conf(LINK_PROTECTION_SYSCTLS),
+		sysctl_conf({ values: LINK_PROTECTION_SYSCTLS }),
 		`# Managed by zap
 fs.protected_hardlinks = 1
 fs.protected_symlinks = 1
@@ -33,9 +33,12 @@ fs.protected_regular = 2
 });
 
 test('sysctl_apply checks the live values and loads the file when one differs', () => {
-	const script = sysctl_apply(LINK_PROTECTION_SYSCTL_PATH, {
-		'fs.protected_hardlinks': '1',
-		'fs.protected_regular': '2'
+	const script = sysctl_apply({
+		path: LINK_PROTECTION_SYSCTL_PATH,
+		values: {
+			'fs.protected_hardlinks': '1',
+			'fs.protected_regular': '2'
+		}
 	});
 	const check =
 		"test \"$(tr -s '\\t ' '  ' < '/proc/sys/fs/protected_hardlinks')\" = '1' && test \"$(tr -s '\\t ' '  ' < '/proc/sys/fs/protected_regular')\" = '2'";
@@ -57,10 +60,13 @@ test('refuses a parameter or value that is not one', () => {
 		{ 'fs.protected_hardlinks': "1'" }
 	];
 	for (const values of cases) {
-		assert.throws(() => sysctl_conf(values), /sysctl_conf/, JSON.stringify(values));
-		assert.throws(() => sysctl_apply('/etc/sysctl.d/x.conf', values), /sysctl_apply/);
+		assert.throws(() => sysctl_conf({ values }), /sysctl_conf/, JSON.stringify(values));
+		assert.throws(() => sysctl_apply({ path: '/etc/sysctl.d/x.conf', values }), /sysctl_apply/);
 	}
-	assert.throws(() => sysctl_apply('x.conf', LINK_PROTECTION_SYSCTLS), /must be absolute/);
+	assert.throws(
+		() => sysctl_apply({ path: 'x.conf', values: LINK_PROTECTION_SYSCTLS }),
+		/must be absolute/
+	);
 });
 
 /** Whether `check` passes in a real shell, against this machine's `/proc/sys`. */
@@ -81,11 +87,23 @@ test('the check passes against the live value, a multi-value one read with its t
 		`/proc/sys separates the values with a tab: ${JSON.stringify(raw)}`
 	);
 	const live = raw.trim().split(/\s+/).join(' ');
-	assert.ok(passes(sysctl_apply('/etc/sysctl.d/x.conf', { [key]: live }).check), live);
+	assert.ok(
+		passes(sysctl_apply({ path: '/etc/sysctl.d/x.conf', values: { [key]: live } }).check),
+		live
+	);
 	const [low, high] = live.split(' ').map(Number);
-	assert.ok(!passes(sysctl_apply('/etc/sysctl.d/x.conf', { [key]: `${low! + 1} ${high}` }).check));
+	assert.ok(
+		!passes(
+			sysctl_apply({ path: '/etc/sysctl.d/x.conf', values: { [key]: `${low! + 1} ${high}` } }).check
+		)
+	);
 	const hardlinks = readFileSync('/proc/sys/fs/protected_hardlinks', 'utf8').trim();
 	assert.ok(
-		passes(sysctl_apply('/etc/sysctl.d/x.conf', { 'fs.protected_hardlinks': hardlinks }).check)
+		passes(
+			sysctl_apply({
+				path: '/etc/sysctl.d/x.conf',
+				values: { 'fs.protected_hardlinks': hardlinks }
+			}).check
+		)
 	);
 });

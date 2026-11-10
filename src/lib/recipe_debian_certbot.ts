@@ -14,7 +14,6 @@
 
 import {
 	type CertbotReloadNginxHookOptions,
-	type CertbotScript,
 	type CertbotStandaloneIssueOptions,
 	RELOAD_NGINX_HOOK_NAME,
 	certbot_deploy_hook_core,
@@ -22,6 +21,7 @@ import {
 	validate_certbot_options
 } from './recipe_certbot.ts';
 import type { RunPartsFile } from './run_parts.ts';
+import type { ScriptCommands } from './schema.ts';
 
 /**
  * Build the `ssl-certificate` bootstrap script for Debian (fresh-host bootstrap
@@ -37,9 +37,9 @@ import type { RunPartsFile } from './run_parts.ts';
  */
 export function debian_certbot_standalone_issue(
 	options: CertbotStandaloneIssueOptions
-): CertbotScript {
+): ScriptCommands {
 	validate_certbot_options('debian_certbot_standalone_issue', options);
-	return certbot_standalone_issue_core('sudo systemctl stop nginx', options);
+	return certbot_standalone_issue_core({ ...options, stop_command: 'sudo systemctl stop nginx' });
 }
 
 /**
@@ -56,5 +56,5 @@ export function debian_certbot_reload_nginx_hook(
 	options?: CertbotReloadNginxHookOptions
 ): RunPartsFile {
 	const { name = RELOAD_NGINX_HOOK_NAME } = options ?? {};
-	return certbot_deploy_hook_core('systemctl try-reload-or-restart nginx', name);
+	return certbot_deploy_hook_core({ command: 'systemctl try-reload-or-restart nginx', name });
 }

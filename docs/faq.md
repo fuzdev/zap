@@ -90,7 +90,7 @@ fleet with parallel execution, Zap is the wrong tool; see
 
 **Does Zap work on macOS, Arch, Fedora, Windows?** No. Debian/Ubuntu and
 Alpine. `pacman`, `brew`, and `launchd` parse in the schema but have no backend,
-so their resources read undetermined. Running Zap _from_ macOS against a Linux
+so their resources read undetermined, and the TypeScript types leave them out. Running Zap _from_ macOS against a Linux
 host is unsupported: `fgro`'s sandbox needs Linux, so your side does too.
 
 **Is Zap stable?** No: pre-alpha, one maintainer, and the schema and CLI change

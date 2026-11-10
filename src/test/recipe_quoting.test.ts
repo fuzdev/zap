@@ -229,7 +229,7 @@ describe('script recipes pass each value as one word', () => {
 
 	test('nginx_remove_default_core', () => {
 		const { run } = create_shell();
-		const script = nginx_remove_default_core(HOSTILE);
+		const script = nginx_remove_default_core({ default_path: HOSTILE });
 		assert.deepEqual(run(script.check), []);
 		assert.deepEqual(run(script.run), [
 			['sudo', 'rm', '-f', '--', HOSTILE],

@@ -15,7 +15,7 @@
  * @module
  */
 
-import type { ScriptResource } from './schema.ts';
+import type { ScriptCommands } from './schema.ts';
 import { single_quote } from './shell.ts';
 
 /** Options for `alpine_postgres_setup`. */
@@ -27,9 +27,6 @@ export interface AlpinePostgresSetupOptions {
 	 */
 	version: number | string;
 }
-
-/** The `check`/`run` pair `alpine_postgres_setup` returns (caller supplies `id`/`name`/`depends_on`). */
-export type AlpinePostgresSetupScript = Pick<ScriptResource, 'check' | 'run'>;
 
 /**
  * The `grep -E` pattern for a `trust` rule in a `pg_hba.conf`: a line that isn't a
@@ -68,9 +65,7 @@ const TRUST_RULE = "'^[[:space:]]*[^#[:space:]].*[[:space:]]trust([[:space:]]|$)
  *
  * @returns the `script` `check`/`run` pair.
  */
-export function alpine_postgres_setup(
-	options: AlpinePostgresSetupOptions
-): AlpinePostgresSetupScript {
+export function alpine_postgres_setup(options: AlpinePostgresSetupOptions): ScriptCommands {
 	const { version } = options;
 	if (!/^[0-9]+$/.test(String(version))) {
 		throw new Error(

@@ -23,5 +23,5 @@ import { type SshService, type SshServiceOptions, ssh_service_core } from './rec
  * @returns the `service` payload.
  */
 export function debian_ssh_service(options: SshServiceOptions): SshService {
-	return ssh_service_core('ssh', options);
+	return ssh_service_core({ ...options, service: 'ssh' });
 }

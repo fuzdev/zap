@@ -218,7 +218,7 @@ test('ssh_hardening leaves UsePAM to the distro', () => {
 });
 
 test('ssh_service_core keeps sshd enabled and running, reloading on the given ids', () => {
-	assert.deepEqual(ssh_service_core('sshd', { reload_on: ['a', 'b'] }), {
+	assert.deepEqual(ssh_service_core({ service: 'sshd', reload_on: ['a', 'b'] }), {
 		service: 'sshd',
 		enabled: true,
 		running: true,

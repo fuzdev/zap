@@ -64,9 +64,9 @@ export function alpine_nginx_spa_site(options: NginxSpaSiteOptions): NginxSiteCo
  * @returns the removal `script` payload and the catch-all `file` payload.
  */
 export function alpine_nginx_catch_all(options?: NginxCatchAllOptions): NginxCatchAll {
-	return nginx_catch_all_core(
-		'/etc/nginx/http.d/default.conf',
-		'/etc/nginx/http.d/00-catch-all.conf',
-		options
-	);
+	return nginx_catch_all_core({
+		...options,
+		default_path: '/etc/nginx/http.d/default.conf',
+		catch_all_path: '/etc/nginx/http.d/00-catch-all.conf'
+	});
 }

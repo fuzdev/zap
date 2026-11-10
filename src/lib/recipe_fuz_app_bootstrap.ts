@@ -50,11 +50,8 @@
  * @module
  */
 
-import type { ScriptResource } from './schema.ts';
+import type { ScriptCommands } from './schema.ts';
 import { single_quote, sudo_as_user } from './shell.ts';
-
-/** The `check`/`run` `fuz_app_bootstrap_token` returns (caller supplies `id`/`name`/`depends_on`). */
-export type FuzAppBootstrapTokenScript = Pick<ScriptResource, 'check' | 'run'>;
 
 /** Options for `fuz_app_bootstrap_token`. */
 export interface FuzAppBootstrapTokenOptions {
@@ -96,9 +93,7 @@ export interface FuzAppBootstrapTokenOptions {
  * @returns the `script` `check`/`run` payload, ready to spread.
  * @throws Error if `user` is empty, starts with `#`, or is a reference, or `config_dir` isn't absolute
  */
-export function fuz_app_bootstrap_token(
-	options: FuzAppBootstrapTokenOptions
-): FuzAppBootstrapTokenScript {
+export function fuz_app_bootstrap_token(options: FuzAppBootstrapTokenOptions): ScriptCommands {
 	const { user, service, config_dir, psql_args = `-d ${single_quote(service)}` } = options;
 
 	const as_user = sudo_as_user('fuz_app_bootstrap_token', user);

@@ -8,11 +8,12 @@
  * by `schema.ts`); the builder shim injects each resource's `type` discriminant,
  * so authors never write `type`.
  *
- * Resource payload types are imported from `schema.ts` and re-exported here, so a
- * config can pull everything it needs from one module.
+ * The builder's types live here; the payload types it takes live in `schema.ts`,
+ * each imported from its own module:
  *
  * ```ts
- * import type {ZapBuilder, FileResource} from '@fuzdev/zap/zap.ts';
+ * import type {ZapBuilder} from '@fuzdev/zap/zap.ts';
+ * import type {FileResource} from '@fuzdev/zap/schema.ts';
  * ```
  *
  * @module
@@ -38,8 +39,6 @@ import type {
 	PipelineResource,
 	BuildResource
 } from './schema.ts';
-
-export type * from './schema.ts';
 
 /**
  * Plan-time inputs to a config's default export. There are none, so it is empty:

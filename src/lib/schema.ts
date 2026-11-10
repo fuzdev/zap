@@ -25,11 +25,19 @@
 
 // --- Manager / closed-set enums --------------------------------------------
 
-/** Package managers a `target` may declare. Mirrors the Rust `PackageManager`. */
-export type PackageManager = 'apt' | 'pacman' | 'brew' | 'apk';
+/**
+ * Package managers a `target` may declare: the ones with a backend. The Rust
+ * `PackageManager` also parses `pacman` and `brew`, which have none (their packages
+ * detect as undetermined), so the authoring type leaves them out.
+ */
+export type PackageManager = 'apt' | 'apk';
 
-/** Service managers a `target` may declare. Mirrors the Rust `ServiceManager`. */
-export type ServiceManager = 'systemd' | 'launchd' | 'openrc';
+/**
+ * Service managers a `target` may declare: the ones with a backend. The Rust
+ * `ServiceManager` also parses `launchd`, which has none (its services detect as
+ * undetermined), so the authoring type leaves it out.
+ */
+export type ServiceManager = 'systemd' | 'openrc';
 
 /** Database engine for a `database` resource (only `postgresql`). */
 export type DatabaseEngine = 'postgresql';
@@ -494,19 +502,22 @@ export interface PipelineStep {
 	run: string;
 	/**
 	 * Working directory for this step. Rejected by the structural gate — the
-	 * sequential executor doesn't apply it; inline a `cd` into `run`.
+	 * sequential executor doesn't apply it; inline a `cd` into `run`. The engine parses
+	 * a string here, and the authoring type admits none.
 	 */
-	cwd?: string;
+	cwd?: never;
 	/**
 	 * Environment variables for this step. Rejected by the structural gate — the
-	 * sequential executor doesn't apply it; inline the vars into `run`.
+	 * sequential executor doesn't apply it; inline the vars into `run`. The engine
+	 * parses a map here, and the authoring type admits none.
 	 */
-	env?: Record<string, string>;
+	env?: never;
 	/**
 	 * Step ids this depends on (within the pipeline). Rejected by the structural
-	 * gate: steps run sequentially in declaration order.
+	 * gate: steps run sequentially in declaration order. The engine parses a list here,
+	 * and the authoring type admits none.
 	 */
-	depends_on?: string[];
+	depends_on?: never;
 }
 
 // --- Resource payloads ------------------------------------------------------
@@ -595,6 +606,13 @@ export interface ScriptResource {
 	 */
 	env?: Record<string, string>;
 }
+
+/**
+ * The `check` and `run` of a `script`, the part a script recipe returns for a config
+ * to spread into `zap.script({id, name, ...commands, depends_on})`. A derived
+ * authoring type, not a wire type: the engine reads `ScriptResource`.
+ */
+export type ScriptCommands = Pick<ScriptResource, 'check' | 'run'>;
 
 /** `installer` resource payload — software via a curl-piped script. */
 export interface InstallerResource {
@@ -777,16 +795,17 @@ export interface PipelineResource {
 	/**
 	 * Environment variables shared across all steps. Rejected by the structural
 	 * gate — the sequential executor doesn't apply it; inline the vars into each
-	 * step's `run`.
+	 * step's `run`. The engine parses a map here, and the authoring type admits none.
 	 */
-	env?: Record<string, string>;
+	env?: never;
 	/** The pipeline steps. */
 	steps: PipelineStep[];
 	/**
-	 * Max steps to run concurrently, at least 1. Any value above `1` is rejected by
-	 * the structural gate: steps run sequentially.
+	 * Max steps to run concurrently. The engine parses any whole number from 1, and
+	 * the structural gate rejects any value above `1`: steps run sequentially. So
+	 * `1`, the only value that passes, is the only one the authoring type admits.
 	 */
-	max_concurrency?: number;
+	max_concurrency?: 1;
 }
 
 /** `build` resource payload — fetch a verified source, build it, install to `output`. */

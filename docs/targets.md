@@ -31,8 +31,8 @@ zap.target({
 | `port` | rejected | optional | SSH port, 1 to 65535. Unset (or 22), `ssh`'s own choice applies, your `~/.ssh/config` included |
 | `key_path` | rejected | optional | an SSH private key, passed to `ssh -i` |
 | `home` | rejected | optional | the remote home that `~` and `$HOME` in paths resolve against |
-| `package_manager` | `apt`, `apk` | same | selects the `package` backend. `pacman` and `brew` parse but have no backend. |
-| `service_manager` | `systemd`, `openrc` | same | required whenever the config has service intent (a `service`, a `file` with `triggers`, or `deploy.service`); `launchd` parses but has no backend |
+| `package_manager` | `apt`, `apk` | same | selects the `package` backend. `pacman` and `brew` parse but have no backend, and the TypeScript types leave them out. |
+| `service_manager` | `systemd`, `openrc` | same | required whenever the config has service intent (a `service`, a `file` with `triggers`, or `deploy.service`); `launchd` parses but has no backend, and the TypeScript types leave it out |
 
 A local target with any remote field is rejected at parse. A remote path that
 uses `~` or `$HOME` with no `home` declared is `undetermined`: Zap never guesses

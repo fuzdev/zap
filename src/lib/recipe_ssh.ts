@@ -245,6 +245,12 @@ export interface SshServiceOptions {
 	reload_on: Array<string>;
 }
 
+/** Options for `ssh_service_core`: the wrappers', plus the service manager's name for sshd. */
+export interface SshServiceCoreOptions extends SshServiceOptions {
+	/** The service manager's name for sshd: systemd's `ssh`, OpenRC's `sshd`. */
+	service: string;
+}
+
 /** The `service` fields the `*_ssh_service` recipes return (caller supplies `id`/`name`/`depends_on`). */
 export type SshService = Required<
 	Pick<ServiceResource, 'service' | 'enabled' | 'running' | 'reload_on'>
@@ -259,10 +265,9 @@ export type SshService = Required<
  * `rc-service --ifstarted <name> reload` on OpenRC. Both distros' sshd reload runs
  * `sshd -t` first and leaves the running sshd untouched when the config is invalid.
  *
- * @param service - the service manager's name for sshd
- * @param options - the ids that reload sshd (`reload_on`)
  * @returns the `service` payload.
  */
-export function ssh_service_core(service: string, options: SshServiceOptions): SshService {
-	return { service, enabled: true, running: true, reload_on: options.reload_on };
+export function ssh_service_core(options: SshServiceCoreOptions): SshService {
+	const { service, reload_on } = options;
+	return { service, enabled: true, running: true, reload_on };
 }

@@ -79,7 +79,7 @@
 
 import { carries_reference } from './env_ref.ts';
 import { letsencrypt_live_path } from './recipe_certbot.ts';
-import type { FileResource, ScriptResource, TemplateContent, VerifyResource } from './schema.ts';
+import type { FileResource, ScriptCommands, TemplateContent, VerifyResource } from './schema.ts';
 import { single_quote } from './shell.ts';
 
 /**
@@ -325,7 +325,7 @@ export interface NginxSpaSiteOptions {
 	 * (already indented to the server-block level, no leading/trailing blank
 	 * lines), placed just before the `/_app` static block. A block with no
 	 * `add_header` inherits the server's security headers and CSP; one with its own
-	 * inherits none, so it renders `site_security_header_directives(csp, hsts)` beside them,
+	 * inherits none, so it renders `site_security_header_directives({csp, hsts})` beside them,
 	 * or a `Content-Security-Policy` of its own. A block (a `location`, or an `if` in
 	 * one) that sets `add_header` with no `Content-Security-Policy` is refused.
 	 */
@@ -440,7 +440,7 @@ export type NginxHsts = NginxHstsOptions | false;
  *
  * @throws Error if `max_age` is not a whole number
  */
-const hsts_directives = (hsts: NginxHsts, recipe: string): Array<string> => {
+const hsts_directives = (recipe: string, hsts: NginxHsts): Array<string> => {
 	if (hsts === false) return [];
 	if (hsts === null || typeof hsts !== 'object') {
 		throw new Error(
@@ -455,6 +455,24 @@ const hsts_directives = (hsts: NginxHsts, recipe: string): Array<string> => {
 	return [`add_header Strict-Transport-Security "${value}" always;`];
 };
 
+/** Options for `security_header_directives`. */
+export interface SecurityHeaderDirectivesOptions {
+	/**
+	 * The site's `hsts`, the one its site recipe is given. Required, with no default:
+	 * a block that repeats the set sends this header on its paths, so a value that
+	 * differed from the site's (a default without `includeSubDomains` where the site
+	 * sends it) would change the policy a browser holds for the domain from the
+	 * pages it visits there.
+	 */
+	hsts: NginxHsts;
+}
+
+/** Options for `site_security_header_directives`: the set's, plus the site's CSP. */
+export interface SiteSecurityHeaderDirectivesOptions extends SecurityHeaderDirectivesOptions {
+	/** The site's `Content-Security-Policy` value, the `csp` its site recipe is given. */
+	csp: string;
+}
+
 /**
  * The site-independent security-header `add_header … always;` directives: HSTS as
  * `hsts` gives it, `X-Frame-Options`, `nosniff`, and `Referrer-Policy`, in render
@@ -464,17 +482,24 @@ const hsts_directives = (hsts: NginxHsts, recipe: string): Array<string> => {
  * nginx drops inherited `add_header` directives in any block that sets its own,
  * so the set can't be declared once at the server level. A block that sets its
  * own headers repeats the whole set, the CSP included, or it serves without them:
- * an `extra_locations` block renders `site_security_header_directives(csp, hsts)`. A
- * block with a policy of its own (a sandboxing CSP for user-uploaded bytes) renders
+ * an `extra_locations` block renders `site_security_header_directives({csp, hsts})`.
+ * A block with a policy of its own (a sandboxing CSP for user-uploaded bytes) renders
  * these and its own `Content-Security-Policy` instead.
  *
- * @param hsts - the site's `hsts`; defaults to the site recipe's default
  * @returns the directives, one per entry.
- * @throws Error if `hsts.max_age` is not a whole number
+ * @throws Error if `hsts` is missing or `hsts.max_age` is not a whole number
  */
-export function security_header_directives(hsts: NginxHsts = {}): Array<string> {
+export function security_header_directives(
+	options: SecurityHeaderDirectivesOptions
+): Array<string> {
+	const hsts = options?.hsts;
+	if (hsts == null) {
+		throw new Error(
+			"security_header_directives: hsts is required: pass the site's, so the header a block repeats matches the site's"
+		);
+	}
 	return [
-		...hsts_directives(hsts, 'security_header_directives'),
+		...hsts_directives('security_header_directives', hsts),
 		'add_header X-Frame-Options "SAMEORIGIN" always;',
 		'add_header X-Content-Type-Options "nosniff" always;',
 		'add_header Referrer-Policy "strict-origin-when-cross-origin" always;'
@@ -483,20 +508,21 @@ export function security_header_directives(hsts: NginxHsts = {}): Array<string> 
 
 /**
  * The full security-header set a site's server block declares, as the directives a
- * block that sets its own `add_header` repeats: `security_header_directives(hsts)` and
- * the site's `Content-Security-Policy`, in render order, unindented.
+ * block that sets its own `add_header` repeats: `security_header_directives({hsts})`
+ * and the site's `Content-Security-Policy`, in render order, unindented.
  *
- * @param csp - the site's `Content-Security-Policy` value, the `csp` the site recipe is given
- * @param hsts - the site's `hsts`, the one the site recipe is given; defaults to its default
  * @returns the directives, one per entry.
  * @throws Error if `csp` is missing or holds a `"`, a `\`, a `$`, a line break, or a NUL,
- * if `hsts` is neither options nor `false`, or `hsts.max_age`
- * is not a whole number
+ * or `hsts` is missing, neither options nor `false`, or has a `max_age` that is not a
+ * whole number
  */
-export function site_security_header_directives(csp: string, hsts: NginxHsts = {}): Array<string> {
-	assert_csp('site_security_header_directives', csp);
+export function site_security_header_directives(
+	options: SiteSecurityHeaderDirectivesOptions
+): Array<string> {
+	assert_csp('site_security_header_directives', options?.csp);
+	const { csp, hsts } = options;
 	return [
-		...security_header_directives(hsts),
+		...security_header_directives({ hsts }),
 		`add_header Content-Security-Policy "${csp}" always;`
 	];
 }
@@ -609,22 +635,22 @@ const assert_extra_locations_keep_csp = (extra_locations: string): void => {
 			continue;
 		}
 		throw new Error(
-			`nginx_site_core: the extra_locations block \`${block.head}\` sets add_header but no non-empty Content-Security-Policy, and nginx gives a block with any add_header none of the server's, so it would serve without the site's CSP; render site_security_header_directives(csp, hsts) in it, or a Content-Security-Policy of its own`
+			`nginx_site_core: the extra_locations block \`${block.head}\` sets add_header but no non-empty Content-Security-Policy, and nginx gives a block with any add_header none of the server's, so it would serve without the site's CSP; render site_security_header_directives({csp, hsts}) in it, or a Content-Security-Policy of its own`
 		);
 	}
 };
 
 /**
- * The security-header block at `indent`: `site_security_header_directives(csp, hsts)`,
- * or `security_header_directives(hsts)` alone where `csp` is omitted (a redirect-only
+ * The security-header block at `indent`: `site_security_header_directives({csp, hsts})`,
+ * or `security_header_directives({hsts})` alone where `csp` is omitted (a redirect-only
  * server). Lines are joined by newlines with no trailing newline — the caller's
  * template supplies the surrounding lines.
  */
 function security_headers(indent: string, hsts: NginxHsts, csp?: string): string {
 	const directives =
 		csp === undefined
-			? security_header_directives(hsts)
-			: site_security_header_directives(csp, hsts);
+			? security_header_directives({ hsts })
+			: site_security_header_directives({ csp, hsts });
 	return directives.map((directive) => `${indent}${directive}`).join('\n');
 }
 
@@ -688,9 +714,9 @@ const assert_redirect_name = (name: string, i: number): void => {
  * and DH parameters (`'certbot'`).
  */
 function ssl_params_lines(
+	recipe: string,
 	ssl: 'snippet' | 'certbot',
-	ssl_snippet_path: string,
-	recipe: string
+	ssl_snippet_path: string
 ): string {
 	if (ssl === 'snippet') assert_nginx_word(recipe, 'ssl_snippet_path', ssl_snippet_path);
 	return ssl === 'certbot'
@@ -766,7 +792,7 @@ export function nginx_site_core(options: NginxSiteCoreOptions): NginxSiteContent
 
 	// every value spliced into the config as text is held to what can't change its
 	// structure; `domain` and `port` are variables, held to their kinds
-	hsts_directives(hsts, 'nginx_site_core');
+	hsts_directives('nginx_site_core', hsts);
 	assert_csp('nginx_site_core', csp);
 	assert_nginx_word('nginx_site_core', 'root', root);
 	assert_nginx_word('nginx_site_core', 'acme_webroot', acme_webroot);
@@ -793,7 +819,7 @@ export function nginx_site_core(options: NginxSiteCoreOptions): NginxSiteContent
 	// the one that runs on every supported host.
 	const http2_param = http2 ? ' http2' : '';
 
-	const ssl_include = ssl_params_lines(ssl, ssl_snippet_path, 'nginx_site_core');
+	const ssl_include = ssl_params_lines('nginx_site_core', ssl, ssl_snippet_path);
 
 	// Server-level body-size cap: its own paragraph with a leading blank line
 	// when present (an optional app-specific comment above the directive),
@@ -1032,8 +1058,14 @@ const assert_redirect_placeholders_own = (
  */
 const NGINX_CONF_PATH = '/etc/nginx/nginx.conf';
 
-/** The `check`/`run` pair of the stock-default removal `nginx_catch_all_core` returns. */
-export type NginxRemoveDefaultScript = Pick<ScriptResource, 'check' | 'run'>;
+/** Options for `nginx_remove_default_core`. */
+export interface NginxRemoveDefaultCoreOptions {
+	/**
+	 * The stock default site's path: Debian's `sites-enabled/default` symlink, Alpine's
+	 * `http.d/default.conf`.
+	 */
+	default_path: string;
+}
 
 /**
  * The neutral core of the stock-default removal: remove the default-site file at
@@ -1048,7 +1080,8 @@ export type NginxRemoveDefaultScript = Pick<ScriptResource, 'check' | 'run'>;
  *
  * @returns the `script` `check`/`run` pair.
  */
-export function nginx_remove_default_core(default_path: string): NginxRemoveDefaultScript {
+export function nginx_remove_default_core(options: NginxRemoveDefaultCoreOptions): ScriptCommands {
+	const { default_path } = options;
 	return {
 		check: `test ! -e ${single_quote(default_path)} && test ! -L ${single_quote(default_path)} && test -e ${single_quote(NGINX_CONF_PATH)}`,
 		run: `set -e
@@ -1081,9 +1114,25 @@ export interface NginxCatchAllOptions {
 /** The two payloads the `*_nginx_catch_all` recipes return, each spread into its resource. */
 export interface NginxCatchAll {
 	/** The stock-default removal, for a `zap.script`. */
-	remove_default: NginxRemoveDefaultScript;
+	remove_default: ScriptCommands;
 	/** The catch-all server, for a `zap.file` ordered after the removal. */
 	catch_all: Required<Pick<FileResource, 'path' | 'content' | 'validate'>>;
+}
+
+/** Options for `nginx_catch_all_server`: the catch-all's, plus where the SSL snippet is. */
+export interface NginxCatchAllServerOptions extends NginxCatchAllOptions {
+	/** Where the `'snippet'` SSL parameters are, as the site recipe takes it. */
+	ssl_snippet_path: string;
+}
+
+/**
+ * Options for `nginx_catch_all_core`: the catch-all's, plus the two paths the distro
+ * wrappers supply.
+ */
+export interface NginxCatchAllCoreOptions
+	extends NginxCatchAllOptions, NginxRemoveDefaultCoreOptions {
+	/** Where the catch-all server file goes, in a directory nginx's `http` block includes. */
+	catch_all_path: string;
 }
 
 /**
@@ -1096,9 +1145,7 @@ export interface NginxCatchAll {
  *
  * @returns the server block text, terminated by a trailing newline.
  */
-export function nginx_catch_all_server(
-	options: NginxCatchAllOptions & { ssl_snippet_path: string }
-): string {
+export function nginx_catch_all_server(options: NginxCatchAllServerOptions): string {
 	const { http2 = true, ssl = 'snippet', ssl_snippet_path } = options;
 	const http2_param = http2 ? ' http2' : '';
 	return `# Managed by zap: any host name no site serves gets no answer
@@ -1108,7 +1155,7 @@ server {
     listen 443 ssl${http2_param} default_server;
     listen [::]:443 ssl${http2_param} default_server;
     server_name _;
-${ssl_params_lines(ssl, ssl_snippet_path, 'nginx_catch_all_server')}
+${ssl_params_lines('nginx_catch_all_server', ssl, ssl_snippet_path)}
     ssl_reject_handshake on;
     return 444;
 }
@@ -1129,14 +1176,11 @@ ${ssl_params_lines(ssl, ssl_snippet_path, 'nginx_catch_all_server')}
  *
  * @returns the removal `script` payload and the catch-all `file` payload.
  */
-export function nginx_catch_all_core(
-	default_path: string,
-	catch_all_path: string,
-	options?: NginxCatchAllOptions
-): NginxCatchAll {
-	const content = nginx_catch_all_server({ ...options, ssl_snippet_path: SSL_PARAMS_PATH });
+export function nginx_catch_all_core(options: NginxCatchAllCoreOptions): NginxCatchAll {
+	const { default_path, catch_all_path, http2, ssl } = options;
+	const content = nginx_catch_all_server({ http2, ssl, ssl_snippet_path: SSL_PARAMS_PATH });
 	return {
-		remove_default: nginx_remove_default_core(default_path),
+		remove_default: nginx_remove_default_core({ default_path }),
 		catch_all: {
 			path: catch_all_path,
 			content: { type: 'inline', content },

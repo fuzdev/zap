@@ -21,7 +21,6 @@
 
 import {
 	type CertbotReloadNginxHookOptions,
-	type CertbotScript,
 	type CertbotStandaloneIssueOptions,
 	RELOAD_NGINX_HOOK_NAME,
 	certbot_deploy_hook_core,
@@ -29,6 +28,7 @@ import {
 	validate_certbot_options
 } from './recipe_certbot.ts';
 import { type RunPartsFile, validate_run_parts_name } from './run_parts.ts';
+import type { ScriptCommands } from './schema.ts';
 
 /**
  * Build the `ssl-certificate` bootstrap script for Alpine (fresh-host bootstrap
@@ -44,9 +44,9 @@ import { type RunPartsFile, validate_run_parts_name } from './run_parts.ts';
  */
 export function alpine_certbot_standalone_issue(
 	options: CertbotStandaloneIssueOptions
-): CertbotScript {
+): ScriptCommands {
 	validate_certbot_options('alpine_certbot_standalone_issue', options);
-	return certbot_standalone_issue_core('sudo rc-service nginx stop', options);
+	return certbot_standalone_issue_core({ ...options, stop_command: 'sudo rc-service nginx stop' });
 }
 
 /**
@@ -84,7 +84,7 @@ export function alpine_certbot_reload_nginx_hook(
 	options?: CertbotReloadNginxHookOptions
 ): RunPartsFile {
 	const { name = RELOAD_NGINX_HOOK_NAME } = options ?? {};
-	return certbot_deploy_hook_core('/sbin/rc-service --ifstarted nginx reload', name);
+	return certbot_deploy_hook_core({ command: '/sbin/rc-service --ifstarted nginx reload', name });
 }
 
 /** The BusyBox `crond` daily-jobs directory — every executable here runs once a day. */
@@ -113,7 +113,7 @@ export interface AlpinePeriodicDailyFileOptions {
  */
 export function alpine_periodic_daily_file(options: AlpinePeriodicDailyFileOptions): RunPartsFile {
 	const { name, body } = options;
-	validate_run_parts_name(name, 'alpine_periodic_daily_file');
+	validate_run_parts_name('alpine_periodic_daily_file', name);
 
 	return {
 		path: `${ALPINE_PERIODIC_DAILY}/${name}`,

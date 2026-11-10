@@ -7,16 +7,16 @@
  * @module
  */
 
+import type { FileContent, FileResource } from './schema.ts';
+
 /**
  * The spreadable `file` fields of an executable placed in a `run-parts`-style
  * directory — a certbot deploy hook, a BusyBox `crond` daily job — ready to spread
- * into a `zap.file({...})`.
+ * into a `zap.file({...})`: its `path` and `mode`, and inline `content`.
  */
-export interface RunPartsFile {
-	path: string;
-	mode: string;
-	content: { type: 'inline'; content: string };
-}
+export type RunPartsFile = Required<Pick<FileResource, 'path' | 'mode'>> & {
+	content: Extract<FileContent, { type: 'inline' }>;
+};
 
 /**
  * Throw unless `name` is a file name a `run-parts`-style runner runs: letters, digits,
@@ -24,11 +24,11 @@ export interface RunPartsFile {
  * name, so a `.sh` job would never run, and a `/` would leave the directory. The one
  * check for the hook and job file names the recipes place in such a directory.
  *
- * @param name - the file name
  * @param recipe - the recipe asking, named in the error
- * @throws when `name` holds any other character, or is empty
+ * @param name - the file name
+ * @throws Error when `name` holds any other character, or is empty
  */
-export function validate_run_parts_name(name: string, recipe: string): void {
+export function validate_run_parts_name(recipe: string, name: string): void {
 	if (!/^[A-Za-z0-9_-]+$/.test(name)) {
 		throw new Error(
 			`${recipe}: name ${JSON.stringify(name)} must be letters, digits, \`_\` and \`-\` only (run-parts skips any other name)`

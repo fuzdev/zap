@@ -20,10 +20,10 @@ import {
 
 const domain = env_ref('DEPLOY_DOMAIN');
 const email = env_ref('DEPLOY_CERTBOT_EMAIL');
-const deploy_hook = certbot_deploy_hook_core(
-	'systemctl try-reload-or-restart nginx',
-	'reload-nginx'
-);
+const deploy_hook = certbot_deploy_hook_core({
+	command: 'systemctl try-reload-or-restart nginx',
+	name: 'reload-nginx'
+});
 const reload = ` && sudo -- '/etc/letsencrypt/renewal-hooks/deploy/reload-nginx'`;
 const host = env_ref('DEPLOY_HOST');
 const expected_addresses = [host];
@@ -45,7 +45,7 @@ const STOP = 'sudo service-stop nginx';
 
 /** The issuance core with `STOP`. */
 const issue = (options: CertbotStandaloneIssueOptions) =>
-	certbot_standalone_issue_core(STOP, options);
+	certbot_standalone_issue_core({ ...options, stop_command: STOP });
 
 /** What the issuance runs after the preflight: the best-effort stop, then certbot. */
 const stopped = `{ ${STOP} || true; } && sudo certbot certonly --standalone`;
@@ -208,24 +208,27 @@ test('an empty expected_addresses throws, since it would refuse every name', () 
 });
 
 test('certbot_deploy_hook_core writes an executable hook that execs the command', () => {
-	assert.deepEqual(certbot_deploy_hook_core('service-reload app', 'reload-app'), {
-		path: `${CERTBOT_DEPLOY_HOOKS_DIR}/reload-app`,
-		mode: '755',
-		content: {
-			type: 'inline',
-			content: `#!/bin/sh
+	assert.deepEqual(
+		certbot_deploy_hook_core({ command: 'service-reload app', name: 'reload-app' }),
+		{
+			path: `${CERTBOT_DEPLOY_HOOKS_DIR}/reload-app`,
+			mode: '755',
+			content: {
+				type: 'inline',
+				content: `#!/bin/sh
 # Managed by zap — certbot runs this after it renews a certificate.
 exec service-reload app
 `
+			}
 		}
-	});
+	);
 	assert.equal(CERTBOT_DEPLOY_HOOKS_DIR, '/etc/letsencrypt/renewal-hooks/deploy');
 });
 
 test('certbot_deploy_hook_core refuses a name a hook runner would skip or that leaves the directory', () => {
 	for (const name of ['', 'a/b', '../x', '.hidden', 'reload.sh', 'a b', 'x~']) {
 		assert.throws(
-			() => certbot_deploy_hook_core('true', name),
+			() => certbot_deploy_hook_core({ command: 'true', name }),
 			/certbot_deploy_hook_core: name .* letters, digits/,
 			name
 		);
@@ -248,7 +251,10 @@ test('the issuance core refuses a missing or empty stop_command', () => {
 	const options = { domain, email, expected_addresses };
 	for (const stop_command of [undefined, '', '  ']) {
 		assert.throws(
-			() => certbot_standalone_issue_core(stop_command as unknown as string, options),
+			() =>
+				certbot_standalone_issue_core({ ...options, stop_command } as unknown as Parameters<
+					typeof certbot_standalone_issue_core
+				>[0]),
 			/^certbot_standalone_issue_core: stop_command is required/,
 			String(stop_command)
 		);

@@ -462,7 +462,7 @@ test('every HTTPS location that sets its own headers carries the full set, the C
 		const body = block.slice(0, block.indexOf('\n    }'));
 		if (!body.includes('add_header')) continue;
 		checked++;
-		for (const directive of site_security_header_directives(CSP)) {
+		for (const directive of site_security_header_directives({ csp: CSP, hsts: {} })) {
 			assert.ok(body.includes(directive), `${body.split('\n', 1)[0]}: ${directive}`);
 		}
 	}
@@ -470,26 +470,31 @@ test('every HTTPS location that sets its own headers carries the full set, the C
 });
 
 test('site_security_header_directives is the base set plus the site CSP', () => {
-	assert.deepEqual(site_security_header_directives(CSP), [
-		...security_header_directives(),
+	assert.deepEqual(site_security_header_directives({ csp: CSP, hsts: {} }), [
+		...security_header_directives({ hsts: {} }),
 		`add_header Content-Security-Policy "${CSP}" always;`
 	]);
 	const hsts = { include_subdomains: true };
-	assert.deepEqual(site_security_header_directives(CSP, hsts), [
-		...security_header_directives(hsts),
+	assert.deepEqual(site_security_header_directives({ csp: CSP, hsts }), [
+		...security_header_directives({ hsts }),
 		`add_header Content-Security-Policy "${CSP}" always;`
 	]);
 	assert.ok(
-		!security_header_directives().some((directive) => directive.includes('Content-Security'))
+		!security_header_directives({ hsts: {} }).some((directive) =>
+			directive.includes('Content-Security')
+		)
 	);
-	assert.throws(() => site_security_header_directives('a"; add_header X y'), /must hold no/);
-	assert.throws(() => site_security_header_directives('a\nb'), /must hold no/);
+	assert.throws(
+		() => site_security_header_directives({ csp: 'a"; add_header X y', hsts: {} }),
+		/must hold no/
+	);
+	assert.throws(() => site_security_header_directives({ csp: 'a\nb', hsts: {} }), /must hold no/);
 });
 
 test('refuses an extra_locations block that sets a header but no CSP', () => {
 	const site = (extra_locations: string) =>
 		build_site({ root: '/srv/app/build', csp: CSP, extra_locations });
-	const headers = site_security_header_directives(CSP)
+	const headers = site_security_header_directives({ csp: CSP, hsts: {} })
 		.map((d) => `        ${d}`)
 		.join('\n');
 	// none set: the block inherits the server's set
@@ -518,7 +523,7 @@ test('refuses an extra_locations block that sets a header but no CSP', () => {
 	]) {
 		assert.throws(
 			() => site(extra),
-			/sets add_header but no non-empty Content-Security-Policy.*site_security_header_directives\(csp, hsts\)/,
+			/sets add_header but no non-empty Content-Security-Policy.*site_security_header_directives\(\{csp, hsts\}\)/,
 			extra
 		);
 	}
@@ -526,7 +531,7 @@ test('refuses an extra_locations block that sets a header but no CSP', () => {
 
 test('refuses a CSP that would end or escape its quoted value', () => {
 	for (const csp of ['a"b', 'a\\', "default-src 'self' $host", 'a\rb']) {
-		assert.throws(() => site_security_header_directives(csp), /must hold no/, csp);
+		assert.throws(() => site_security_header_directives({ csp, hsts: {} }), /must hold no/, csp);
 	}
 });
 
@@ -741,12 +746,16 @@ test('hsts sets the Strict-Transport-Security header of every HTTPS server alike
 			);
 		}
 		assert.deepEqual(
-			security_header_directives(hsts).filter((d) => d.includes('Strict-Transport-Security')),
+			security_header_directives({ hsts: hsts ?? {} }).filter((d) =>
+				d.includes('Strict-Transport-Security')
+			),
 			[`add_header Strict-Transport-Security ${value} always;`]
 		);
 	}
 	assert.ok(
-		!security_header_directives(false).some((d) => d.includes('Strict-Transport-Security'))
+		!security_header_directives({ hsts: false }).some((d) =>
+			d.includes('Strict-Transport-Security')
+		)
 	);
 });
 
@@ -758,7 +767,7 @@ test('refuses an hsts max_age that is not a whole number of seconds', () => {
 			String(max_age)
 		);
 		assert.throws(
-			() => security_header_directives({ max_age }),
+			() => security_header_directives({ hsts: { max_age } }),
 			/security_header_directives: hsts\.max_age/,
 			String(max_age)
 		);
@@ -869,18 +878,54 @@ test('refuses a missing or empty csp, and an hsts that is neither options nor fa
 	for (const csp of [undefined, null, '', '  ', 42]) {
 		assert.throws(() => site({ csp }), /^nginx_site_core: csp is required/, String(csp));
 		assert.throws(
-			() => site_security_header_directives(csp as string),
+			() => site_security_header_directives({ csp: csp as string, hsts: {} }),
 			/^site_security_header_directives: csp is required/,
 			String(csp)
 		);
 	}
 	assert.throws(() => site({ csp: 'a\0b' }), /^nginx_site_core: csp .* must hold no/);
-	assert.throws(() => site_security_header_directives('a\0b'), /must hold no/);
+	assert.throws(() => site_security_header_directives({ csp: 'a\0b', hsts: {} }), /must hold no/);
 	for (const hsts of [null, 'on', 1, true]) {
 		assert.throws(() => site({ hsts }), /^nginx_site_core: hsts must be the header's options/);
 		assert.throws(
-			() => security_header_directives(hsts as never),
-			/^security_header_directives: hsts must be the header's options/
+			() => security_header_directives({ hsts: hsts as never }),
+			// `null` reads as missing, the rest as not options
+			/^security_header_directives: hsts (is required|must be the header's options)/
 		);
+	}
+});
+
+test('the header helpers take the site hsts with no default, so a block matches the site', () => {
+	const hsts = { include_subdomains: true };
+	assert.include(
+		security_header_directives({ hsts }),
+		'add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;'
+	);
+	// a config evaluated as JavaScript can leave it out, pass null, or pass nothing at all
+	for (const loose of [{}, { hsts: null }, undefined, null]) {
+		assert.throws(
+			() => security_header_directives(loose as never),
+			/^security_header_directives: hsts is required/,
+			JSON.stringify(loose)
+		);
+	}
+	for (const loose of [{ csp: CSP }, { csp: CSP, hsts: null }]) {
+		assert.throws(
+			() => site_security_header_directives(loose as never),
+			/^security_header_directives: hsts is required/,
+			JSON.stringify(loose)
+		);
+	}
+	for (const loose of [undefined, null, { hsts: {} }]) {
+		assert.throws(
+			() => site_security_header_directives(loose as never),
+			/^site_security_header_directives: csp is required/,
+			JSON.stringify(loose)
+		);
+	}
+	// the site's own blocks repeat exactly the set a block of the caller's gets
+	const site = build_site({ root: '/srv/build', csp: CSP, hsts });
+	for (const directive of site_security_header_directives({ csp: CSP, hsts })) {
+		assert.include(site, `        ${directive}\n`);
 	}
 });

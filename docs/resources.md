@@ -101,7 +101,8 @@ paths, where a stray character would break out of the form.
 
 An OS package, installed through the target's package manager: **apt**
 (Debian/Ubuntu) or **apk** (Alpine). The other managers (`pacman`, `brew`) parse
-but have no backend, so their packages detect as undetermined.
+but have no backend, so their packages detect as undetermined; the TypeScript
+types (`PackageManager`) name only `apt` and `apk`.
 
 ```ts
 zap.pkg({id: 'ripgrep', from: {apt: 'ripgrep'}});
@@ -798,7 +799,8 @@ and doesn't guess `systemctl` on a host that may run OpenRC. Service intent is a
 - `deploy.service`.
 
 A declared manager with no backend (`launchd`) parses. Its services detect as
-`undetermined`, and their verbs plan as notes, not commands.
+`undetermined`, and their verbs plan as notes, not commands. The TypeScript types
+(`ServiceManager`) name only `systemd` and `openrc`.
 
 ### Pending triggers
 
@@ -1111,7 +1113,8 @@ zap.pipeline({
 Steps run in declared order. Concurrent execution and dependencies between steps
 aren't supported, so a pipeline-level `env`, a `max_concurrency` above 1, or a
 step's `cwd`, `env`, or `depends_on` is **rejected by the structural gate** and
-not silently ignored. Order steps by position, and inline any per-step environment or working
+not silently ignored; the TypeScript types admit none of them (`max_concurrency`
+only as `1`). Order steps by position, and inline any per-step environment or working
 directory into the step's `run` (`cd … && FOO=bar cmd`).
 
 ## `build`

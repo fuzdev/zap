@@ -15,6 +15,10 @@
  *      `ResourceType` variant is present — so the hand-written TS types stay
  *      honest against the serde schema.
  *
+ * A few fields the engine parses but always refuses, or a manager it parses but has
+ * no backend for, carry `@ts-expect-error`: the types refuse them on purpose, and the
+ * fixture still round-trips them through the serde schema, so both halves stay pinned.
+ *
  * The `import type` is erased at runtime, so the evaluator needs no module
  * resolution. Pure literals only: no `Date.now()`, no bare `new Date()`, no
  * `Math.random()`, no `crypto.randomUUID()` — the eval wrapper's determinism
@@ -38,6 +42,7 @@ export default (zap: ZapBuilder): void => {
 	zap.pkg({
 		id: 'curl',
 		name: 'curl',
+		// @ts-expect-error `brew` parses but has no backend, so the type leaves it out
 		from: { apt: 'curl', brew: 'curl' },
 		check: '/usr/bin/curl'
 	});
@@ -219,21 +224,27 @@ export default (zap: ZapBuilder): void => {
 	zap.pipeline({
 		id: 'build-pipeline',
 		name: 'build pipeline',
+		// @ts-expect-error the structural gate refuses a pipeline `env`
 		env: { CI: 'true' },
+		// @ts-expect-error the structural gate refuses a `max_concurrency` above 1
 		max_concurrency: 2,
 		steps: [
 			{
 				id: 'fetch',
 				name: 'fetch sources',
 				run: 'git fetch --all',
+				// @ts-expect-error the structural gate refuses a step `cwd`
 				cwd: '/srv/src'
 			},
 			{
 				id: 'compile',
 				name: 'compile',
 				run: 'make',
+				// @ts-expect-error the structural gate refuses a step `cwd`
 				cwd: '/srv/src',
+				// @ts-expect-error the structural gate refuses a step `env`
 				env: { OPTIMIZE: 'release' },
+				// @ts-expect-error the structural gate refuses a step `depends_on`
 				depends_on: ['fetch']
 			}
 		]
