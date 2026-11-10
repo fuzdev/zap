@@ -8,7 +8,7 @@
 	import type { Snippet } from 'svelte';
 	import pkg_json from 'virtual:pkg.json';
 
-	import { logo_zap } from '#lib/logos.ts';
+	import { logo_zap } from '#routes/logos.ts';
 
 	const {
 		children

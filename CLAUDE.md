@@ -125,8 +125,7 @@ was last installed; `cargo build` doesn't update it. After any engine change run
 `cargo xtask install`, or a consumer config fails or mis-plans against a stale binary
 in ways that look like config bugs. Recipe edits need no build: the package `exports`
 carry a `gro` condition pointing at `src/lib/*.ts`, which `fgro` resolves a config's
-recipe imports through (a `deno` condition beside it serves Deno tooling that reads
-the package); run `gro build` for the types.
+recipe imports through; run `gro build` for the types.
 `ZAP_FGRO` names a copy of `fgro` updated deliberately (`docs/install.md`), and
 each consumer's `zap.lock` pins it: after updating the copy, `zap lock` re-pins.
 

@@ -2,7 +2,7 @@
 	import { resolve } from '$app/paths';
 	import Svg from '@fuzdev/fuz_ui/Svg.svelte';
 	import Code from '@fuzdev/fuz_code/Code.svelte';
-	import { logo_zap } from '#lib/logos.ts';
+	import { logo_zap } from '#routes/logos.ts';
 
 	const phases = [
 		{ name: 'describe', text: 'declare what should be true of the machine, in TypeScript' },
