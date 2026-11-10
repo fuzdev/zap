@@ -49,7 +49,6 @@ carry the family in the artifact's own name (`hardened_systemd_unit`,
 | `recipe_certbot.ts` | `letsencrypt_live_path` | where certbot keeps a certificate's chain and key, `/etc/letsencrypt/live/<domain>/`; the nginx site and the certbot scripts both read it |
 | `run_parts.ts` | `validate_run_parts_name`, `RunPartsFile` | the one check of a hook or job file name: letters, digits, `_` and `-` only, the names `run-parts` runs; and the spreadable `file` fields the hook and job builders return |
 | `recipe_fail2ban.ts` | `fail2ban_jail` | `/etc/fail2ban/jail.local` with an sshd jail. It defaults to Debian's journal and a ufw host's `iptables-multiport` ban action; on Alpine set `sshd_logpath: '/var/log/messages'` and `banaction: 'nftables'`. |
-| `recipe_deno.ts` | `deno_install` | a pinned Deno install `script`, system-wide or into a user's home. Its `target` triple defaults to glibc; set it on Alpine. |
 | `recipe_sysctl.ts` | `LINK_PROTECTION_SYSCTLS`, `LINK_PROTECTION_SYSCTL_PATH`, `sysctl_conf`, `sysctl_apply` | the kernel's hard-link, symlink, FIFO and regular-file protections (systemd sets them on Debian; Alpine sets only the first two), as a `sysctl.d` file and a `script` that loads it when a live value differs |
 | `recipe_firewall.ts` | `WEB_FIREWALL_ALLOW`, `web_firewall_allow_rules` | the SSH + HTTP + HTTPS allow set as port rules, so both backends read the same rules |
 | `recipe_env.ts` | `fuz_app_env_base`, `fuz_app_trusted_proxies` | the `.env.production` content and trusted-proxies stanza for a server built on `fuz_app`: the header as whole `template` content (`port` held to `port`, `cookie_keys` to `env_value`), your own lines appended through `extra` with their variables and kinds; its `DATABASE_URL` reaches PostgreSQL over the Unix socket as the service's own account (`peer`) |
@@ -102,7 +101,7 @@ The shipped recipes follow these, and they keep your own composable too.
   differs by family either forces the `debian_*` / `alpine_*` split or becomes a
   required option. The neutral recipes that still carry a Debian default are
   flagged in the [catalog](#neutral): `fail2ban_jail`'s `sshd_logpath` and
-  `banaction`, and `deno_install`'s `target`.
+  `banaction`.
 - **Big divergence, two functions.** A one-verb or one-path difference shares a
   `*_core` with thin wrappers (the nginx catch-all, the sshd
   service). A whole-artifact difference (a systemd unit versus an OpenRC script)
@@ -136,10 +135,6 @@ The shipped recipes follow these, and they keep your own composable too.
   command as a declared user refuses an empty one, one starting with `#`, and a
   reference, whose value it can't see (`sudo_as_user` in
   `@fuzdev/zap/shell.ts`).
-- **A binary a service user owns runs as that user.** `deno_install` into a
-  user's home runs its `check` and its closing `--version` as that user, never
-  as the connecting user: the account could replace the binary, and the
-  connecting user has `sudo`.
 
 ## The certbot DNS preflight
 

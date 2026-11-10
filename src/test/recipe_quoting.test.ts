@@ -19,7 +19,6 @@ import { alpine_postgres_setup } from '#lib/recipe_alpine_postgres.ts';
 import { fuz_app_bootstrap_token } from '#lib/recipe_bootstrap.ts';
 import { certbot_webroot_switch } from '#lib/recipe_certbot.ts';
 import { debian_certbot_standalone_issue } from '#lib/recipe_debian_certbot.ts';
-import { deno_install } from '#lib/recipe_deno.ts';
 import { fuz_app_env_base, fuz_app_trusted_proxies } from '#lib/recipe_env.ts';
 import { nginx_remove_default_core } from '#lib/recipe_nginx.ts';
 import { ssh_hardening_verify } from '#lib/recipe_ssh.ts';
@@ -44,9 +43,6 @@ const STAND_INS = [
 	'chown',
 	'rm',
 	'nginx',
-	'curl',
-	'unzip',
-	'install',
 	'mktemp',
 	'grep',
 	'rc-service',
@@ -264,33 +260,6 @@ describe('script recipes pass each value as one word', () => {
 		// A failing `openssl` stops the run before anything is written.
 		assert.deepEqual(run(script.run, 1), [['openssl', 'rand', '-hex', '32']]);
 	});
-
-	test('deno_install', () => {
-		const { run } = create_shell();
-		const bin_path = `/opt/${HOSTILE}/deno`;
-		const script = deno_install({ version: HOSTILE, bin_path, user: HOSTILE });
-		// the two sides of the check's pipe start together, so either may record first
-		assert.sameDeepMembers(run(script.check), [
-			['sudo', '-u', HOSTILE, bin_path, '--version'],
-			['grep', '-q', `^deno ${HOSTILE} `]
-		]);
-		const calls = run(script.run);
-		assert.deepEqual(calls.at(-2), ['sudo', '-u', HOSTILE, bin_path, '--version']);
-		assert.deepEqual(calls.slice(0, 2), [
-			['mktemp', '-d'],
-			[
-				'curl',
-				'-fsSL',
-				'-o',
-				'/deno.zip',
-				`https://github.com/denoland/deno/releases/download/v${HOSTILE}/deno-x86_64-unknown-linux-gnu.zip`
-			]
-		]);
-		assert.deepEqual(
-			calls.find((call) => call.includes('install')),
-			['sudo', '-u', HOSTILE, 'install', '-D', '-m', '755', '/deno', bin_path]
-		);
-	});
 });
 
 describe('hardened_openrc_service', () => {
@@ -417,16 +386,6 @@ describe('hardened_openrc_service', () => {
 		const parsed = spawnSync('sh', ['-n', '-c', script], { encoding: 'utf8' });
 		assert.equal(parsed.status, 0, parsed.stderr);
 	});
-});
-
-test('deno_install refuses a bin_path that is not absolute', () => {
-	for (const bin_path of ['deno', '~/.deno/bin/deno', '$HOME/.deno/bin/deno', '']) {
-		assert.throws(
-			() => deno_install({ version: '2.8.2', bin_path }),
-			/deno_install: bin_path .* must be an absolute path/,
-			bin_path
-		);
-	}
 });
 
 describe('fuz_app env recipes', () => {
