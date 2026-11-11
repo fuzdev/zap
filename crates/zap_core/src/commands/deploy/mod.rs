@@ -109,10 +109,10 @@ use crate::lock::{LockStanding, inspect_lock};
 use crate::progress::{Notice, ProgressSink, count};
 use crate::resolve::env_var;
 
-use checkout::{git_uncommitted, git_version};
+use checkout::{Shipped, git_shipped, git_uncommitted};
 use live::{LiveReadError, live_release_present, server_version};
 pub use render::render_deploy;
-use walk::{AppLive, ReleaseArchive, Stopped, execute_deploy_plan};
+use walk::{AppWalk, ReleaseArchive, Stopped, execute_deploy_plan};
 
 /// Knobs for a deploy run (mirrors [`ApplyOptions`](super::apply::ApplyOptions)).
 ///
@@ -319,8 +319,6 @@ pub struct DeployReport {
     /// The release version (short git hash, possibly `-dirty-<id>`), as computed. The render
     /// reads the plan's.
     pub version: String,
-    /// The version previously on the server, if any.
-    pub previous_version: Option<String>,
     /// The deploy plan (previewed on a dry-run, executed on a wetrun), as rendered: any
     /// registered secret value in its text is masked ([`DeployPlan::map_text`]). Every
     /// plan-derived line of the render is read from here.
@@ -641,7 +639,7 @@ async fn deploy_unmasked(
     if dirty && options.force {
         warnings.push("deploying with uncommitted changes or untracked files (--force)".to_owned());
     }
-    let version = git_version(local, dirty && options.force, masker).await?;
+    let Shipped { version, subject } = git_shipped(local, dirty && options.force, masker).await?;
     // A failed read is reported now, not folded into "not deployed yet": `previous` is
     // the auto-rollback's only target, so losing it silently disarms the post-swap net.
     //
@@ -666,9 +664,9 @@ async fn deploy_unmasked(
 
     // Every return below funnels through `finish`, which masks what the report renders
     // at the consumption boundary: its narrative (a rollback warning quotes a failed
-    // remote command's stderr, a held reason a seam-resolved path), the version read
-    // off the target, and its plan, whose script carries the resolved connecting user
-    // and operator identity. The step outcomes and the event stream are masked where
+    // remote command's stderr, a held reason a seam-resolved path), and its plan, which
+    // carries the version read off the target, the resolved connecting user, and the
+    // operator identity. The step outcomes and the event stream are masked where
     // they are produced. The plan is masked last, so what executes and what `plan_hash`
     // addresses is the plan as computed — and through its typed text map, which has no
     // serialized form in between to fail and hand the plan back unmasked.
@@ -680,9 +678,6 @@ async fn deploy_unmasked(
             *reason = masker.mask(reason);
         }
         super::mask_diagnostics(masker, &mut report.warnings, &mut report.held);
-        report.previous_version = report
-            .previous_version
-            .map(|previous| masker.mask(&previous));
         if let DeployOutcome::Deployed(run) | DeployOutcome::Failed { run, .. } =
             &mut report.outcome
         {
@@ -722,9 +717,10 @@ async fn deploy_unmasked(
         &config.target,
         &DeployContext {
             version: version.clone(),
+            subject,
             target_user: target_conn.user().to_owned(),
             deployed_by: deployed_by(local).await,
-            previous_version: previous_version.clone(),
+            previous_version,
             target_host,
             health_domain,
             dirty,
@@ -739,7 +735,6 @@ async fn deploy_unmasked(
         wetrun: options.wetrun,
         outcome: DeployOutcome::DryRun,
         version,
-        previous_version,
         plan,
         plan_hash,
         step_outcomes: Vec::new(),
@@ -756,7 +751,7 @@ async fn deploy_unmasked(
     // a redeploy, whose script recovers what was moved aside.
     // A dirty tree's dry run is not short-circuited: the tree is not what the live
     // release holds, and the preview says what a wetrun needs.
-    if report.previous_version.as_deref() == Some(report.version.as_str())
+    if report.plan.previous.as_deref() == Some(report.version.as_str())
         && !options.force
         && !dirty_unforced
     {
@@ -905,9 +900,9 @@ async fn deploy_unmasked(
     let walked = execute_deploy_plan(
         local,
         target_conn,
-        AppLive {
+        AppWalk {
             app: &deploy.path,
-            previous: report.previous_version.as_deref(),
+            swap_script: &DeployPlan::swap_script,
         },
         &report.plan,
         ReleaseArchive::under(scratch),
@@ -941,8 +936,6 @@ async fn deploy_unmasked(
                 target_conn,
                 &deploy.path,
                 &report.plan,
-                report.previous_version.as_deref(),
-                &report.version,
                 &handler,
                 &mut report.warnings,
             )

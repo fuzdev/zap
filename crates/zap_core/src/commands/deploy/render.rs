@@ -2,12 +2,16 @@
 //! run or a refusal shows, the outcome lines of a wetrun, and the banners and warnings
 //! under them.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::time::Duration;
 
-use zap_types::deploy::{ARCHIVE_ENV, DeployAction, DeployPlan, DeployStepId, DriftPreflight};
+use zap_types::deploy::{
+    ARCHIVE_ENV, DeployAction, DeployPlan, DeployStepId, DriftPreflight, ReleaseSwap,
+};
 use zap_types::event::StepOutcome;
 use zap_types::last_run::PlanUnreviewed;
+use zap_types::plan::Machine;
 
 use super::{
     DIRTY_NEEDS_FORCE, DeployOutcome, DeployReport, DeployRun, FailureState, Rollback,
@@ -22,8 +26,16 @@ use crate::progress::count;
 ///
 /// Every plan-derived line is read from the report's plan, and the `plan_hash` is
 /// printed only under a render that lists the whole of it — so what the hash covers is
-/// what was shown — and never for a plan that names no one machine. Text that came from the config, the environment, the command line,
-/// or the target is escaped on its way out (`escape_line`).
+/// what was shown — and never for a plan that names no one machine. Text that came from
+/// the config, the environment, the command line, the checkout, or the target is
+/// escaped on its way out (`escape_line`).
+///
+/// A preview of the plan — a dry run, or a refusal or question in its place — comes in
+/// groups a blank line apart: what is shipped where and by whom, the two gates (the tree
+/// and the drift preflight), the steps, and what the run does with the plan (its
+/// footer, or the refusal banner). Its last block restates the lines that tell one
+/// deploy of an app from the next (`render_recap`), so the `plan_hash` and a question
+/// under it are read beside them rather than a script's length below them.
 #[must_use]
 pub fn render_deploy(report: &DeployReport) -> String {
     let mut out = String::new();
@@ -43,16 +55,12 @@ pub fn render_deploy(report: &DeployReport) -> String {
         "deploy — target {} ({mode})",
         escape_line(&report.target)
     );
-    let _ = writeln!(
-        out,
-        "  version: {} (previous: {})",
-        escape_line(&plan.version),
-        escape_line(report.previous_version.as_deref().unwrap_or("none"))
-    );
+    let _ = writeln!(out, "  version: {}", version_text(plan));
 
-    match &report.outcome {
+    let previewed = match &report.outcome {
         DeployOutcome::PreflightDrift => {
             let _ = writeln!(out, "  preflight: drift detected — nothing deployed");
+            false
         }
         DeployOutcome::PreflightUndetermined => {
             let _ = writeln!(
@@ -60,50 +68,56 @@ pub fn render_deploy(report: &DeployReport) -> String {
                 "  preflight: incomplete — nothing deployed (the drift gate could not probe \
                  every resource, so \"no drift\" was never established)"
             );
+            false
         }
         DeployOutcome::AlreadyDeployed => {
             let _ = writeln!(
                 out,
                 "  server already at this version (use --force to redeploy)"
             );
+            false
         }
         DeployOutcome::DryRun => {
-            render_plan_preview(&mut out, plan);
+            render_plan_preview(&mut out, &report.target, plan);
             // A bare wetrun binds only to a preview that was recorded.
             let _ = if report.recorded.is_some() {
-                writeln!(out, "  (dry-run — re-run with --wetrun to deploy)")
+                writeln!(out, "\n  (dry-run — re-run with --wetrun to deploy)")
             } else {
                 writeln!(
                     out,
-                    "  (dry-run — re-run with --wetrun --expect-plan {} to deploy)",
+                    "\n  (dry-run — re-run with --wetrun --expect-plan {} to deploy)",
                     report.plan_hash
                 )
             };
+            true
         }
         DeployOutcome::DryRunUnbindable(reason) => {
-            render_plan_preview(&mut out, plan);
+            render_plan_preview(&mut out, &report.target, plan);
             let _ = writeln!(
                 out,
-                "  (dry-run — a wetrun of this config is refused, so this plan has no \
+                "\n  (dry-run — a wetrun of this config is refused, so this plan has no \
                  plan_hash and is not recorded as a preview)"
             );
             render_block(&mut out, "  UNBINDABLE — ", reason);
+            true
         }
         DeployOutcome::DryRunDirty => {
-            render_plan_preview(&mut out, plan);
+            render_plan_preview(&mut out, &report.target, plan);
             let _ = writeln!(
                 out,
-                "  (dry-run — a wetrun of this tree is refused, so this plan has no \
+                "\n  (dry-run — a wetrun of this tree is refused, so this plan has no \
                  plan_hash and is not recorded as a preview)"
             );
             render_block(&mut out, "  DIRTY — ", DIRTY_NEEDS_FORCE);
+            true
         }
         DeployOutcome::Refused(reason) if report.confirmation == Some(Confirmation::Asking) => {
-            render_plan_preview(&mut out, plan);
+            render_plan_preview(&mut out, &report.target, plan);
             crate::commands::render_refused(&mut out, reason, &DEPLOY_REFUSAL, report.confirmation);
+            true
         }
         DeployOutcome::Refused(reason) => {
-            render_plan_preview(&mut out, plan);
+            render_plan_preview(&mut out, &report.target, plan);
             crate::commands::render_refused(&mut out, reason, &DEPLOY_REFUSAL, report.confirmation);
             let hash = &report.plan_hash;
             // Only a render that was recorded can be bound to without the hash.
@@ -125,8 +139,12 @@ pub fn render_deploy(report: &DeployReport) -> String {
                     )
                 }
             };
+            true
         }
-        DeployOutcome::Deployed(run) => render_run(&mut out, report, run, None),
+        DeployOutcome::Deployed(run) => {
+            render_run(&mut out, report, run, None);
+            false
+        }
         DeployOutcome::Failed { run, left } => {
             render_run(&mut out, report, run, Some(left));
             let _ = writeln!(
@@ -134,8 +152,9 @@ pub fn render_deploy(report: &DeployReport) -> String {
                 "  this deploy spent its review: before re-running, preview again with \
                  `zap deploy` (or pass --expect-plan with the hash that preview prints)"
             );
+            false
         }
-    }
+    };
 
     crate::commands::render_lock_standing(
         &mut out,
@@ -146,6 +165,9 @@ pub fn render_deploy(report: &DeployReport) -> String {
     crate::commands::render_warnings(&mut out, &plan.warnings);
     crate::commands::render_warnings(&mut out, &report.warnings);
     render_verdict(&mut out, report);
+    if previewed {
+        render_recap(&mut out, plan);
+    }
     if report.outcome.shows_hash() {
         let _ = writeln!(out, "plan_hash: {}", report.plan_hash);
     }
@@ -162,46 +184,130 @@ pub(super) const DEPLOY_REFUSAL: RefusalText = RefusalText {
             environment its host, user, or health domain resolve from",
 };
 
+/// The version line's text: the version, then what it replaces ([`replaces_text`]).
+fn version_text(plan: &DeployPlan) -> String {
+    format!("{} ({})", escape_line(&plan.version), replaces_text(plan))
+}
+
+/// What a release replaces, as the version line and a deploy's closing line say it:
+/// `previous: <release>`, or `first release` when nothing was live.
+fn replaces_text(plan: &DeployPlan) -> String {
+    plan.previous.as_deref().map_or_else(
+        || "first release".to_owned(),
+        |previous| format!("previous: {}", escape_line(previous)),
+    )
+}
+
+/// The commit line's text: the commit's subject, under a key that says whose it is —
+/// for a dirty tree the commit under the uncommitted changes, which the key says before
+/// the subject's own text can — or, in words no subject's line begins with, that it has
+/// none.
+fn commit_text(plan: &DeployPlan) -> String {
+    let key = if plan.dirty {
+        "commit (under uncommitted changes)"
+    } else {
+        "commit"
+    };
+    let subject = escape_line(&plan.subject);
+    if subject.is_empty() {
+        format!("{key} has no subject line")
+    } else {
+        format!("{key}: {subject}")
+    }
+}
+
+/// The tree line's text.
+const fn tree_text(plan: &DeployPlan) -> &'static str {
+    if plan.dirty {
+        "uncommitted changes or untracked files — the artifacts ship as the tree has them"
+    } else {
+        "clean"
+    }
+}
+
+/// What the drift preflight does, as a sentence; `with_digest` closes one that checks
+/// with the digest it checks against.
+fn preflight_text(plan: &DeployPlan, with_digest: bool) -> String {
+    match &plan.preflight {
+        DriftPreflight::Checks { resources, digest } => {
+            let checks = format!(
+                "checks {} for drift before the steps",
+                count(
+                    *resources,
+                    "apply-managed resource",
+                    "apply-managed resources"
+                )
+            );
+            if with_digest {
+                format!("{checks} — digest {}", escape_line(digest))
+            } else {
+                checks
+            }
+        }
+        DriftPreflight::Skipped => "skipped (--skip-preflight)".to_owned(),
+        DriftPreflight::NothingDeclared => {
+            "no apply-managed resources declared — nothing to check".to_owned()
+        }
+    }
+}
+
 /// Preview body: the whole plan — everything `plan_hash` covers beyond the version line
-/// above it and the plan's warnings below. The resolved host and the declared target,
-/// the tree and preflight facts, then each step with its action in full.
-fn render_plan_preview(out: &mut String, plan: &DeployPlan) {
-    let _ = writeln!(out, "  host: {}", escape_line(&plan.host));
+/// above it and the plan's warnings below — in three groups a blank line apart.
+///
+/// First what is shipped where: the commit's subject ([`commit_text`]), the machine — the resolved host
+/// where the header's declared one (`declared`) doesn't already say it, and the
+/// connecting user ([`render_machine`](crate::commands::render_machine), as the
+/// convergence previews print it) — the operator recorded as deploying, the declared
+/// target, and the values of the references the plan uses. Then the gates: the tree,
+/// and what the drift preflight checks. Then each step with its action in full.
+fn render_plan_preview(out: &mut String, declared: &str, plan: &DeployPlan) {
+    let _ = writeln!(out, "  {}", commit_text(plan));
+    crate::commands::render_machine(
+        out,
+        declared,
+        &Machine::Remote {
+            host: plan.host.clone(),
+            user: plan.user.clone(),
+        },
+    );
+    let _ = writeln!(out, "  deployed by: {}", escape_line(&plan.deployed_by));
     crate::commands::render_target(out, &plan.target);
     crate::commands::render_references(out, &plan.references);
-    let _ = writeln!(
-        out,
-        "  tree: {}",
-        if plan.dirty {
-            "uncommitted changes or untracked files — the artifacts ship as the tree has them"
-        } else {
-            "clean"
-        }
-    );
-    let _ = writeln!(
-        out,
-        "  preflight: {}",
-        match &plan.preflight {
-            DriftPreflight::Checks { resources, digest } => format!(
-                "{resources} apply-managed resource(s), digest {}, are checked for drift \
-                 before the steps",
-                escape_line(digest)
-            ),
-            DriftPreflight::Skipped => "skipped (--skip-preflight)".to_owned(),
-            DriftPreflight::NothingDeclared =>
-                "no apply-managed resources declared — nothing to check".to_owned(),
-        }
-    );
+
+    let _ = writeln!(out, "\n  tree: {}", tree_text(plan));
+    let _ = writeln!(out, "  preflight: {}", preflight_text(plan, true));
+
+    let _ = writeln!(out);
     for step in &plan.steps {
         let _ = writeln!(out, "  - {} ({})", escape_line(&step.name), step.id);
-        render_action(out, &step.action);
+        render_action(out, plan, &step.action);
     }
+}
+
+/// The closing block of a preview: the lines that tell one deploy of an app from the
+/// next — the commit, the version and the release it replaces, the host and the connecting user,
+/// the tree, and what the preflight checks — restated from the plan with the text the
+/// lines above it print, last before the `plan_hash` and any question under it.
+fn render_recap(out: &mut String, plan: &DeployPlan) {
+    let _ = writeln!(out, "\n  in short:");
+    let _ = writeln!(out, "    {}", commit_text(plan));
+    let _ = writeln!(out, "    version: {}", version_text(plan));
+    let _ = writeln!(out, "    host: {}", escape_line(&plan.host));
+    let _ = writeln!(
+        out,
+        "    user: {}",
+        plan.user
+            .as_deref()
+            .map_or(Cow::Borrowed(crate::commands::NO_USER), escape_line)
+    );
+    let _ = writeln!(out, "    tree: {}", tree_text(plan));
+    let _ = writeln!(out, "    preflight: {}", preflight_text(plan, false));
 }
 
 /// One step's action under its name, every field of it: the command, script, paths, or
 /// URL it holds. Each variant reads differently, so two actions that differ in kind
 /// alone don't render alike.
-fn render_action(out: &mut String, action: &DeployAction) {
+fn render_action(out: &mut String, plan: &DeployPlan, action: &DeployAction) {
     const INDENT: &str = "      ";
     match action {
         DeployAction::Build { command } => {
@@ -223,13 +329,7 @@ fn render_action(out: &mut String, action: &DeployAction) {
                 escape_line(remote)
             );
         }
-        DeployAction::ExtractSwap { script } => {
-            let _ = writeln!(
-                out,
-                "{INDENT}target script (its stdin: the archive's SHA-512):"
-            );
-            render_block(out, &format!("{INDENT}  "), script);
-        }
+        DeployAction::ExtractSwap(swap) => render_swap(out, plan, swap),
         DeployAction::Restart { command } => {
             render_block(out, &format!("{INDENT}target$ "), command);
         }
@@ -238,48 +338,158 @@ fn render_action(out: &mut String, action: &DeployAction) {
             url_label,
             attempts,
             interval_ms,
+            timeout_ms,
         } => render_poll(
             out,
             "healthy on 2xx",
-            url,
-            url_label,
-            *attempts,
-            *interval_ms,
+            &Poll {
+                url,
+                url_label,
+                attempts: *attempts,
+                interval_ms: *interval_ms,
+                timeout_ms: *timeout_ms,
+            },
         ),
         DeployAction::Readiness {
             url,
             url_label,
             attempts,
             interval_ms,
+            timeout_ms,
         } => render_poll(
             out,
             "ready on 2xx, unserved on 404",
-            url,
-            url_label,
-            *attempts,
-            *interval_ms,
+            &Poll {
+                url,
+                url_label,
+                attempts: *attempts,
+                interval_ms: *interval_ms,
+                timeout_ms: *timeout_ms,
+            },
         ),
     }
 }
 
-/// A polled URL: as declared, how it is read, its budget, and — where a reference in it
-/// resolves — the URL the plan names.
-fn render_poll(
-    out: &mut String,
-    reads: &str,
-    url: &str,
-    url_label: &str,
-    attempts: u32,
-    interval_ms: u64,
-) {
+/// The extract-and-swap step: the values of the config's and the run's that its script
+/// embeds, one labelled line each — the app it works in, the release `current` must
+/// still name, each shared file it links, each `prepare` command, how many releases it
+/// keeps — then the script in full ([`DeployPlan::swap_script`], built from those same
+/// values and the plan's).
+///
+/// Each line leads at the column the step's other lines do; the script's lines stand
+/// further in, so none of its text stands where one of these does.
+fn render_swap(out: &mut String, plan: &DeployPlan, swap: &ReleaseSwap) {
+    const INDENT: &str = "      ";
+    let _ = writeln!(out, "{INDENT}app: {}", escape_line(&swap.app));
+    let _ = match &plan.previous {
+        Some(previous) => writeln!(
+            out,
+            "{INDENT}replaces: {} — `current` must still name it",
+            escape_line(previous)
+        ),
+        None => writeln!(
+            out,
+            "{INDENT}replaces: none — nothing may be at `current` yet"
+        ),
+    };
+    for file in &swap.shared {
+        let _ = writeln!(out, "{INDENT}links: shared/{}", escape_line(file));
+    }
+    for command in &swap.prepare {
+        render_block(out, &format!("{INDENT}prepare: "), command);
+    }
+    let keeps = count(swap.keep as usize, "release", "releases");
+    let _ = match &plan.previous {
+        Some(previous) => writeln!(
+            out,
+            "{INDENT}keeps: {keeps}, counting this one and {}",
+            escape_line(previous)
+        ),
+        None => writeln!(out, "{INDENT}keeps: {keeps}, counting this one"),
+    };
     let _ = writeln!(
         out,
-        "      GET {} — {reads}; up to {attempts} attempt(s), {interval_ms} ms apart",
-        escape_line(url)
+        "{INDENT}target script (its stdin: the archive's SHA-512):"
     );
-    if url_label != url {
-        let _ = writeln!(out, "      polls {}", escape_line(url_label));
+    render_block(out, &format!("{INDENT}  "), &plan.swap_script(swap));
+}
+
+/// A polled URL and its budget, as a step holds them.
+struct Poll<'a> {
+    /// As declared: a reference in it resolves when it is polled.
+    url: &'a str,
+    /// With its references resolved, as the plan names it.
+    url_label: &'a str,
+    /// How many attempts.
+    attempts: u32,
+    /// The wait between two attempts, in milliseconds.
+    interval_ms: u64,
+    /// How long one attempt may take, in milliseconds.
+    timeout_ms: u64,
+}
+
+/// A polled URL: one line that says the whole of what is done — the URL it polls, how
+/// an answer is read (`reads`), and its budget ([`poll_budget`]) — and, where a
+/// reference in it resolves, a second with the URL as declared, which names where its
+/// domain comes from.
+fn render_poll(out: &mut String, reads: &str, poll: &Poll<'_>) {
+    let _ = writeln!(
+        out,
+        "      GET {} — {reads}; {}",
+        escape_line(poll.url_label),
+        poll_budget(poll)
+    );
+    if poll.url_label != poll.url {
+        let _ = writeln!(out, "      declared as {}", escape_line(poll.url));
     }
+}
+
+/// How long a poll may run: its attempts, the wait between two, the time each is
+/// given, and the most all of it takes — every wait and every attempt run to its limit.
+fn poll_budget(poll: &Poll<'_>) -> String {
+    let each = format_millis(poll.timeout_ms);
+    if poll.attempts <= 1 {
+        return format!(
+            "{}, {each} at most",
+            count(poll.attempts as usize, "attempt", "attempts")
+        );
+    }
+    let total = u64::from(poll.attempts - 1)
+        .saturating_mul(poll.interval_ms)
+        .saturating_add(u64::from(poll.attempts).saturating_mul(poll.timeout_ms));
+    format!(
+        "up to {}, {} apart, {each} each ({} at most)",
+        count(poll.attempts as usize, "attempt", "attempts"),
+        format_millis(poll.interval_ms),
+        format_millis(total)
+    )
+}
+
+/// A plan's milliseconds as a preview states them: in hours, minutes and seconds, the
+/// seconds with as many decimals as the value needs (`2s`, `1.5s`, `0.25s`, `1m 43s`,
+/// `1m 32.5s`, `1h 5s`), so the value is stated exactly.
+///
+/// The wetrun's own durations ([`format_elapsed`]) are measured, so they round to a
+/// tenth and pad their minutes; a plan's are declared, and a rounded one would misstate
+/// what the poll does.
+pub(super) fn format_millis(ms: u64) -> String {
+    let (hours, rest) = (ms / 3_600_000, ms % 3_600_000);
+    let (minutes, rest) = (rest / 60_000, rest % 60_000);
+    let (seconds, millis) = (rest / 1000, rest % 1000);
+    let mut parts = Vec::new();
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+    }
+    if minutes > 0 {
+        parts.push(format!("{minutes}m"));
+    }
+    if millis > 0 {
+        let fraction = format!("{millis:03}");
+        parts.push(format!("{seconds}.{}s", fraction.trim_end_matches('0')));
+    } else if seconds > 0 || parts.is_empty() {
+        parts.push(format!("{seconds}s"));
+    }
+    parts.join(" ")
 }
 
 /// One row of a wetrun's table: its status, what it is, how long it took when it ran,
@@ -357,8 +567,10 @@ fn render_run(
         });
     }
     if let Some(FailureState::AfterSwap(rollback)) = left {
+        // the row's text is escaped as a block when it is written
         let previous = report
-            .previous_version
+            .plan
+            .previous
             .as_deref()
             .unwrap_or("the previous release");
         let (status, took_text, text) = match rollback {
@@ -469,14 +681,14 @@ fn render_summary(summary: &StepSummary) -> String {
 fn render_verdict(out: &mut String, report: &DeployReport) {
     let plan = &report.plan;
     let host = escape_line(&plan.host);
-    let previous = report.previous_version.as_deref().map(escape_line);
+    let previous = plan.previous.as_deref().map(escape_line);
     match &report.outcome {
         DeployOutcome::Deployed(run) => {
             let _ = writeln!(
                 out,
-                "deployed {} to {host} (previous: {}) in {}",
+                "deployed {} to {host} ({}) in {}",
                 escape_line(&plan.version),
-                previous.as_deref().unwrap_or("none"),
+                replaces_text(plan),
                 format_elapsed(run.total)
             );
         }

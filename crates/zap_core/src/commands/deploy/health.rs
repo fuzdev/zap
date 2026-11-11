@@ -7,7 +7,7 @@ use crate::resolve::resolve_env_vars;
 use crate::tls::build_probe_client;
 
 /// Poll `url` over HTTPS until it returns a success status or the attempt budget runs
-/// out — gates deploy completion on the daemon actually serving (a `systemctl
+/// out (`attempts`, `interval_ms` apart, each given `timeout_ms`) — gates deploy completion on the daemon actually serving (a `systemctl
 /// restart` returns at fork, not at ready). `Ok` on the first 2xx; `Err` if the
 /// budget is exhausted. A redirect is not followed: a `3xx` is not healthy, however
 /// healthy the page it points at (a broken release's `302` to a login page).
@@ -19,9 +19,10 @@ pub(super) async fn http_health_check(
     url: &str,
     attempts: u32,
     interval_ms: u64,
+    timeout_ms: u64,
 ) -> Result<String, String> {
     let resolved = resolve_env_vars(url);
-    let client = build_probe_client(Duration::from_secs(5))
+    let client = build_probe_client(Duration::from_millis(timeout_ms))
         .map_err(|error| format!("failed to build HTTP client: {error}"))?;
     // The last attempt's answer, for the failure message: a status, or why none came
     // with the last status any attempt got, which a later transport failure doesn't
@@ -115,9 +116,10 @@ pub(super) async fn http_readiness_check(
     url: &str,
     attempts: u32,
     interval_ms: u64,
+    timeout_ms: u64,
 ) -> ReadinessOutcome {
     let url = &resolve_env_vars(url);
-    let client = match build_probe_client(Duration::from_secs(5)) {
+    let client = match build_probe_client(Duration::from_millis(timeout_ms)) {
         Ok(client) => client,
         Err(error) => {
             return ReadinessOutcome::NotReady(format!("failed to build HTTP client: {error}"));
@@ -172,6 +174,7 @@ fn classify_readiness(last_status: Option<u16>, url: &str, attempts: u32) -> Rea
 #[cfg(test)]
 mod tests {
     use super::{ReadinessOutcome, classify_readiness, http_health_check, http_readiness_check};
+    use zap_types::deploy::PROBE_TIMEOUT_MS;
 
     /// Every poller resolves its own URL, so no call site can forget. The deploy plan
     /// carries the health URL with its domain reference inert, and there is more
@@ -184,7 +187,7 @@ mod tests {
         // Unset reference → resolves to an empty host, which can't be polled. The error
         // must name the *resolved* URL: proof the poll wasn't aimed at the literal.
         let unset = zap_types::var_ref::marker("ZAP_TEST_UNSET_HEALTH_HOST");
-        let error = http_health_check(&format!("https://{unset}/x"), 1, 0)
+        let error = http_health_check(&format!("https://{unset}/x"), 1, 0, PROBE_TIMEOUT_MS)
             .await
             .expect_err("an empty host can't be healthy");
         assert!(error.contains("https:///x"), "{error}");
@@ -210,7 +213,7 @@ mod tests {
             .unwrap();
             // the listener closes here: the next attempt's connection is refused
         });
-        let error = http_health_check(&url, 2, 300)
+        let error = http_health_check(&url, 2, 300, PROBE_TIMEOUT_MS)
             .await
             .expect_err("a 502, then nothing, is not healthy");
         served.join().unwrap();
@@ -254,14 +257,16 @@ mod tests {
     #[tokio::test]
     async fn a_redirect_is_neither_healthy_nor_ready() {
         let url = redirecting_server();
-        let error = http_health_check(&url, 1, 0)
+        let error = http_health_check(&url, 1, 0, PROBE_TIMEOUT_MS)
             .await
             .expect_err("a redirect is not healthy");
         assert!(
             error.ends_with("(last: HTTP 302, a redirect, which a probe doesn't follow)"),
             "{error}"
         );
-        let ReadinessOutcome::NotReady(message) = http_readiness_check(&url, 1, 0).await else {
+        let ReadinessOutcome::NotReady(message) =
+            http_readiness_check(&url, 1, 0, PROBE_TIMEOUT_MS).await
+        else {
             panic!("a redirect is not ready");
         };
         assert!(
@@ -318,5 +323,28 @@ mod tests {
             classify_readiness(None, "https://example.com/ready", 3),
             ReadinessOutcome::NotReady(_)
         ));
+    }
+
+    /// Each attempt is held to the plan's own timeout, the one its preview states: a
+    /// server that accepts and never answers fails a poll given a short one in about that
+    /// long, not in the default's time.
+    #[tokio::test]
+    async fn an_attempt_is_held_to_the_plans_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/health", listener.local_addr().unwrap());
+        // accepts, reads nothing, answers nothing, and keeps the connection open
+        let held = std::thread::spawn(move || listener.accept().map(|(sock, _)| sock));
+        let started = std::time::Instant::now();
+        let error = http_health_check(&url, 1, 0, 300)
+            .await
+            .expect_err("a server that never answers is not healthy");
+        let took = started.elapsed();
+        // well short of the default's time, with room for a loaded machine
+        assert!(
+            took < std::time::Duration::from_millis(PROBE_TIMEOUT_MS - 1_000),
+            "{took:?}: {error}"
+        );
+        assert!(error.contains("timed out"), "{error}");
+        drop(held.join());
     }
 }

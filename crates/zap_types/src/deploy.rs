@@ -7,10 +7,11 @@
 //! *pure plan*, mirroring Describe → Plan → Apply: [`plan_deploy`] turns the declared
 //! [`DeploySpec`] plus IO-resolved inputs (the version, the resolved host, what the
 //! invocation chose, …) into an ordered [`DeployPlan`]. The remote extract-and-swap
-//! **script is generated here, purely** — so it is golden-testable, and the dry run
-//! renders every command, script, path, and URL the plan holds: what its hash covers is
-//! what the preview shows. The IO that executes the plan (build / scp / ssh / HTTP)
-//! lives in `zap_core`.
+//! **script is generated here, purely** ([`DeployPlan::swap_script`]), from the values
+//! the plan holds — so it is golden-testable, the values it embeds are the ones the
+//! dry run shows beside it, and the dry run renders every command, script, path, and URL
+//! the plan holds: what its hash covers is what the preview shows. The IO that executes
+//! the plan (build / scp / ssh / HTTP) lives in `zap_core`.
 //!
 //! App-specific steps are declarative [`DeploySpec`] fields — `shared` (files symlinked
 //! from `shared/` into each release), `prepare` (post-extract commands), and `health`
@@ -106,17 +107,31 @@ impl std::fmt::Display for DeployStepId {
 ///
 /// The plan names the machine it is for, so its hash can't stand for the same release on
 /// another one: [`target`](Self::target) is the declared descriptor, as the convergence
-/// plan carries it, and [`host`](Self::host) the host that descriptor resolves to — a
-/// referenced host is one declaration for as many machines as there are values. It also
-/// holds the two facts of the run that change what a wetrun does without changing a
-/// step: a dirty tree ([`dirty`](Self::dirty)) and what the drift preflight
-/// does — whether it runs, and over which declared resources
+/// plan carries it, [`host`](Self::host) the host that descriptor resolves to — a
+/// referenced host is one declaration for as many machines as there are values — and
+/// [`user`](Self::user) who it connects as. It names the release: its
+/// [`version`](Self::version), the commit's [`subject`](Self::subject), the release it
+/// replaces ([`previous`](Self::previous)), and who ships it
+/// ([`deployed_by`](Self::deployed_by)); the extract-and-swap script is built from these
+/// ([`swap_script`](Self::swap_script)), so what a preview shows of them is what the
+/// script embeds. It also holds the two facts of the run that change what a wetrun does
+/// without changing a step: a dirty tree ([`dirty`](Self::dirty)) and what the drift
+/// preflight does — whether it runs, and over which declared resources
 /// ([`preflight`](Self::preflight)).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeployPlan {
     /// The release version (short git hash, with `-dirty-<8 hex>` for a forced dirty
     /// tree).
     pub version: String,
+    /// The subject line of the commit the version names ([`DeployContext::subject`]).
+    /// For a dirty tree it is still that commit's: it says nothing of the uncommitted
+    /// changes.
+    pub subject: String,
+    /// The release live on the target when the plan was made
+    /// ([`DeployContext::previous_version`]), `None` when nothing was: the release the
+    /// script requires `current` to name, records in `deploy_info.json`, keeps from the
+    /// prune, and a failure after the swap rolls back to.
+    pub previous: Option<String>,
     /// The declared target, its references inert.
     pub target: Target,
     /// The host the target resolves to ([`DeployContext::target_host`]): the name, not
@@ -124,6 +139,13 @@ pub struct DeployPlan {
     // TODO: binding the machine to a reviewed plan would fold its host key's
     // fingerprint here (read where the connection checks it), not `ssh -G`'s output.
     pub host: String,
+    /// The user the run connects as ([`DeployContext::target_user`]), by value; `None`
+    /// when the target declares none, and `ssh` picks it. The uploaded archive is named
+    /// for it, and the steps on the target run as it.
+    pub user: Option<String>,
+    /// `user@host` of the operator machine ([`DeployContext::deployed_by`]), which the
+    /// script records in `deploy_info.json`.
+    pub deployed_by: String,
     /// The working tree held uncommitted changes or untracked files: the artifacts
     /// packed are the tree's, not the commit's. Only a forced plan of one runs, and its
     /// [`version`](Self::version) names the tree (`-dirty-<8 hex>`); without `--force`
@@ -146,10 +168,13 @@ pub struct DeployPlan {
 }
 
 impl DeployPlan {
-    /// This plan with every free-text field passed through `f`: the version, the host,
-    /// the declared target's text, each reference's value, each step's name and its
-    /// action's commands, script, paths and URLs, and the warnings. The closed-set fields — step ids, action tags,
-    /// the preflight (its digest is a hash, not text), counts — are kept as they are.
+    /// This plan with every free-text field passed through `f`: the version, the commit's
+    /// subject, the previous release, the host, the connecting user, the operator, the
+    /// declared target's text, each reference's value, each step's name and its action's
+    /// commands, paths, names and URLs, and the warnings. The closed-set fields — step
+    /// ids, action tags, the preflight (its digest is a hash, not text), counts — are
+    /// kept as they are. The extract-and-swap script is built from the mapped values
+    /// ([`swap_script`](Self::swap_script)).
     ///
     /// How a plan is masked for display: a typed map with no serialized form in between,
     /// so there is nothing that can fail and hand back the plan unmapped, and a field
@@ -158,8 +183,12 @@ impl DeployPlan {
     pub fn map_text(&self, f: impl Fn(&str) -> String) -> Self {
         let Self {
             version,
+            subject,
+            previous,
             target,
             host,
+            user,
+            deployed_by,
             dirty,
             preflight,
             references,
@@ -168,8 +197,12 @@ impl DeployPlan {
         } = self;
         Self {
             version: f(version),
+            subject: f(subject),
+            previous: previous.as_deref().map(&f),
             target: target.map_text(&f),
             host: f(host),
+            user: user.as_deref().map(&f),
+            deployed_by: f(deployed_by),
             dirty: *dirty,
             preflight: preflight.clone(),
             references: references
@@ -186,6 +219,22 @@ impl DeployPlan {
                 .collect(),
             warnings: warnings.iter().map(|warning| f(warning)).collect(),
         }
+    }
+}
+
+impl DeployPlan {
+    /// The script the extract-and-swap step `swap` runs on the target: built from this
+    /// plan's version, previous release, operator and connecting user, and `swap`'s own
+    /// values, and from nothing else, so the same plan always runs the same script and
+    /// the values a preview shows beside it are the ones it embeds
+    /// (`extract_swap_script`).
+    ///
+    /// The plan holds the values, not the text: its address covers the text too
+    /// ([`deploy_plan_hash`](crate::config_hash::deploy_plan_hash)), so a plan reviewed
+    /// under one zap doesn't bind one whose script differs.
+    #[must_use]
+    pub fn swap_script(&self, swap: &ReleaseSwap) -> String {
+        extract_swap_script(self, swap)
     }
 }
 
@@ -297,12 +346,10 @@ pub enum DeployAction {
         /// Where on the target it is installed.
         remote: String,
     },
-    /// Run the remote extract + symlink-swap script on the target. Its stdin is the
-    /// archive's SHA-512 as one line of lowercase hex.
-    ExtractSwap {
-        /// The shell script, run by `sh` on the target.
-        script: String,
-    },
+    /// Run the remote extract + symlink-swap script on the target, which
+    /// [`DeployPlan::swap_script`] builds from these values and the plan's. Its stdin is
+    /// the archive's SHA-512 as one line of lowercase hex.
+    ExtractSwap(ReleaseSwap),
     /// Restart the service on the target after the swap.
     Restart {
         /// The restart command.
@@ -319,6 +366,8 @@ pub enum DeployAction {
         attempts: u32,
         /// Delay between attempts, in milliseconds.
         interval_ms: u64,
+        /// How long one attempt may take, in milliseconds ([`PROBE_TIMEOUT_MS`]).
+        timeout_ms: u64,
     },
     /// Poll the `/ready` schema-drift deploy gate (after liveness). `2xx` → the
     /// live DB schema matches the running code, deploy proceeds; `503` (schema
@@ -334,8 +383,58 @@ pub enum DeployAction {
         attempts: u32,
         /// Delay between attempts, in milliseconds.
         interval_ms: u64,
+        /// How long one attempt may take, in milliseconds ([`PROBE_TIMEOUT_MS`]).
+        timeout_ms: u64,
     },
 }
+
+/// What the extract-and-swap step does with a release on the target, as values.
+///
+/// The app it works in, how many releases it keeps, the shared files it links, and the
+/// commands it prepares the release with.
+/// The script is built from these and the plan's own values — the version, the release
+/// it replaces, the operator, the connecting user — by [`DeployPlan::swap_script`], and
+/// from nothing else, so a preview that shows them shows what the script embeds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseSwap {
+    /// The app path on the target (`deploy.path`): it holds `releases/`, `shared/`,
+    /// `current`, and the uploaded archive.
+    pub app: String,
+    /// How many releases are kept (`deploy.releases`), this one and the one it replaces
+    /// among them.
+    pub keep: u32,
+    /// The files under `<app>/shared/` linked into the release (`deploy.shared`).
+    pub shared: Vec<String>,
+    /// The commands run in the release before the swap (`deploy.prepare`), each in a
+    /// shell of its own.
+    pub prepare: Vec<String>,
+}
+
+impl ReleaseSwap {
+    /// This swap with every free-text field passed through `f` ([`DeployPlan::map_text`]).
+    #[must_use]
+    pub fn map_text(&self, f: impl Fn(&str) -> String) -> Self {
+        let Self {
+            app,
+            keep,
+            shared,
+            prepare,
+        } = self;
+        Self {
+            app: f(app),
+            keep: *keep,
+            shared: shared.iter().map(|file| f(file)).collect(),
+            prepare: prepare.iter().map(|command| f(command)).collect(),
+        }
+    }
+}
+
+/// How long one health or readiness attempt may take, in milliseconds: the whole
+/// request, from connecting to the last byte of the answer.
+///
+/// Each poll in a plan carries it, so the budget a preview states for a poll is the one
+/// the poll runs with.
+pub const PROBE_TIMEOUT_MS: u64 = 5_000;
 
 impl DeployAction {
     /// This action with every free-text field passed through `f`
@@ -352,7 +451,7 @@ impl DeployAction {
                 command: f(command),
             },
             Self::Upload { remote } => Self::Upload { remote: f(remote) },
-            Self::ExtractSwap { script } => Self::ExtractSwap { script: f(script) },
+            Self::ExtractSwap(swap) => Self::ExtractSwap(swap.map_text(&f)),
             Self::Restart { command } => Self::Restart {
                 command: f(command),
             },
@@ -361,22 +460,26 @@ impl DeployAction {
                 url_label,
                 attempts,
                 interval_ms,
+                timeout_ms,
             } => Self::Health {
                 url: map_literals(url, &f),
                 url_label: f(url_label),
                 attempts: *attempts,
                 interval_ms: *interval_ms,
+                timeout_ms: *timeout_ms,
             },
             Self::Readiness {
                 url,
                 url_label,
                 attempts,
                 interval_ms,
+                timeout_ms,
             } => Self::Readiness {
                 url: map_literals(url, &f),
                 url_label: f(url_label),
                 attempts: *attempts,
                 interval_ms: *interval_ms,
+                timeout_ms: *timeout_ms,
             },
         }
     }
@@ -400,9 +503,12 @@ pub struct DeployContext {
     /// Release version (short git hash; `-dirty-<8 hex>`, the tree's id, when forced
     /// over a dirty tree).
     pub version: String,
-    /// The resolved connecting user (`target.user()` with references resolved). It is
-    /// part of the uploaded archive's name (`archive_path`), so the plan names who it
-    /// connects as.
+    /// The subject line of the commit the version names, as `zap_core` read and bounded
+    /// it, with any registered secret already masked out.
+    pub subject: String,
+    /// The resolved connecting user (`target.user()` with references resolved), empty
+    /// when the target declares none. It is part of the uploaded archive's name
+    /// (`archive_path`), and the plan names it ([`DeployPlan::user`]).
     pub target_user: String,
     /// `user@host` of the operator machine (recorded in `deploy_info.json`).
     pub deployed_by: String,
@@ -434,7 +540,7 @@ pub struct DeployContext {
 /// ones [`DeploySpec::for_each_text`] walks: today its health check's domain.
 ///
 /// The target's own references are not among them: the plan carries what its host and
-/// connecting user resolve to ([`DeployPlan::host`], the archive's name).
+/// connecting user resolve to ([`DeployPlan::host`], [`DeployPlan::user`]).
 #[must_use]
 pub fn deploy_references(
     deploy: &DeploySpec,
@@ -527,17 +633,18 @@ pub fn plan_deploy(opts: &DeploySpec, target: &Target, ctx: &DeployContext) -> D
     steps.push(DeployStep {
         id: DeployStepId::Upload,
         name: "Upload tarball".to_owned(),
-        action: DeployAction::Upload {
-            remote: archive.clone(),
-        },
+        action: DeployAction::Upload { remote: archive },
     });
 
     steps.push(DeployStep {
         id: DeployStepId::ExtractSwap,
         name: "Extract and swap release".to_owned(),
-        action: DeployAction::ExtractSwap {
-            script: extract_swap_script(opts, ctx, &archive),
-        },
+        action: DeployAction::ExtractSwap(ReleaseSwap {
+            app: opts.path.clone(),
+            keep: opts.releases,
+            shared: opts.shared.clone(),
+            prepare: opts.prepare.clone(),
+        }),
     });
 
     let mut warnings = Vec::new();
@@ -570,6 +677,7 @@ pub fn plan_deploy(opts: &DeploySpec, target: &Target, ctx: &DeployContext) -> D
                 url_label: format!("https://{}{}", ctx.health_domain, health.path),
                 attempts: health.attempts.get(),
                 interval_ms: health.interval_ms,
+                timeout_ms: PROBE_TIMEOUT_MS,
             },
         });
 
@@ -591,6 +699,7 @@ pub fn plan_deploy(opts: &DeploySpec, target: &Target, ctx: &DeployContext) -> D
                     url_label: format!("https://{}{READINESS_PATH}", ctx.health_domain),
                     attempts: health.attempts.get(),
                     interval_ms: health.interval_ms,
+                    timeout_ms: PROBE_TIMEOUT_MS,
                 },
             });
         }
@@ -598,8 +707,12 @@ pub fn plan_deploy(opts: &DeploySpec, target: &Target, ctx: &DeployContext) -> D
 
     DeployPlan {
         version: ctx.version.clone(),
+        subject: ctx.subject.clone(),
+        previous: ctx.previous_version.clone(),
         target: target.clone(),
         host: ctx.target_host.clone(),
+        user: (!ctx.target_user.is_empty()).then(|| ctx.target_user.clone()),
+        deployed_by: ctx.deployed_by.clone(),
         dirty: ctx.dirty,
         preflight: ctx.preflight.clone(),
         references: ctx.references.clone(),
@@ -939,10 +1052,13 @@ const RECOVER_RELEASES: &str = r#"for zap_e in "$zap_releases"/.zap-stage "$zap_
 done
 "#;
 
-/// Generate the remote extract-and-swap script (pure). App conventions come from the
-/// declared `shared` / `prepare` fields; the target's `date` stamps `deploy_info.json`
-/// (no `jq` dependency), whose other values are written as JSON strings here, so the
-/// file parses whatever a version or an operator's name holds.
+/// Generate the remote extract-and-swap script (pure), from `plan`'s version, previous
+/// release, operator and connecting user, and `swap`'s app path, retention, `shared`
+/// files and `prepare` commands — nothing else ([`DeployPlan::swap_script`]). The
+/// archive it extracts is the one the upload installs (`archive_path`). The target's
+/// `date` stamps `deploy_info.json` (no `jq` dependency), whose other values are written
+/// as JSON strings here, so the file parses whatever a version or an operator's name
+/// holds.
 ///
 /// Nothing the config, the operator machine or the target supplied is read by the
 /// shell: each such value is one single-quoted word, and a message is printed by
@@ -963,7 +1079,7 @@ done
 /// doesn't hold the lock past the script; the script's own copy stays open while they
 /// run. Under the lock it recovers what a deploy that did not finish left in
 /// `releases/` ([`RECOVER_RELEASES`]), then checks that `current` still names the
-/// release the plan read as live ([`DeployContext::previous_version`], by the link's last
+/// release the plan read as live ([`DeployPlan::previous`], by the link's last
 /// segment with trailing slashes dropped; no link at all for none): a deploy that swapped since the plan was made stops this
 /// one (exit 1, before anything else), so the release this one rolls back to and the
 /// one its prune keeps are the ones live just before its swap.
@@ -996,15 +1112,17 @@ done
 /// follows — removing what was moved aside, writing `deploy_info.json`, the prune — is
 /// housekeeping: a failure there is a warning line, each of its error lines a warning
 /// of its own, and the script still exits 0, its last line `Deployed version <version>`.
-fn extract_swap_script(opts: &DeploySpec, ctx: &DeployContext, archive: &str) -> String {
-    let app = &opts.path;
+fn extract_swap_script(plan: &DeployPlan, swap: &ReleaseSwap) -> String {
+    let app = &swap.app;
+    let version = &plan.version;
+    let archive = archive_path(app, plan.user.as_deref().unwrap_or_default(), version);
     let releases_dir = format!("{app}/releases");
     let shared_dir = format!("{app}/shared");
     let current = format!("{app}/current");
-    let release = format!("{releases_dir}/{}", ctx.version);
+    let release = format!("{releases_dir}/{version}");
 
     let mut script = String::from("set -e\n");
-    let _ = writeln!(script, "zap_archive={}", single_quote(archive));
+    let _ = writeln!(script, "zap_archive={}", single_quote(&archive));
     // The release is built under a hidden name in `releases/` (the same filesystem, so
     // the rename into place is one `rename`), and what held its name is moved aside
     // first, under a name carrying the version so a later run can put it back. One run
@@ -1019,7 +1137,7 @@ fn extract_swap_script(opts: &DeploySpec, ctx: &DeployContext, archive: &str) ->
     let _ = writeln!(
         script,
         "zap_old={}",
-        single_quote(&format!("{releases_dir}/.zap-old-{}", ctx.version))
+        single_quote(&format!("{releases_dir}/.zap-old-{version}"))
     );
     script.push_str(concat!(
         "zap_moved=\n",
@@ -1088,7 +1206,7 @@ fn extract_swap_script(opts: &DeploySpec, ctx: &DeployContext, archive: &str) ->
     // Trailing slashes dropped, as the plan's read drops them; a plan that read no
     // live release goes on only with nothing there at all — no link, and nothing else
     // the swap's rename would fail on after the release is staged.
-    let still = ctx.previous_version.as_deref().map_or_else(
+    let still = plan.previous.as_deref().map_or_else(
         || format!("[ -z \"$zap_cur\" ] && ! [ -e {} ]", single_quote(&current)),
         |previous| {
             script.push_str(concat!(
@@ -1107,7 +1225,7 @@ fn extract_swap_script(opts: &DeploySpec, ctx: &DeployContext, archive: &str) ->
     );
 
     // Verify each declared shared file exists (apply must have provisioned them).
-    for file in &opts.shared {
+    for file in &swap.shared {
         let _ = writeln!(
             script,
             "[ -f {} ] || zap_fail {}",
@@ -1130,7 +1248,7 @@ fn extract_swap_script(opts: &DeploySpec, ctx: &DeployContext, archive: &str) ->
     // Symlink shared files into the release root. A directory the release ships at a
     // shared name fails the deploy: `ln -sfn` would put the link inside it and exit 0,
     // and the release would run on the shipped directory, not the shared file.
-    for file in &opts.shared {
+    for file in &swap.shared {
         let at = format!("\"$zap_stage\"/{}", single_quote(file));
         let _ = writeln!(
             script,
@@ -1152,9 +1270,9 @@ fn extract_swap_script(opts: &DeploySpec, ctx: &DeployContext, archive: &str) ->
     // own (`sh -e`), so an `exit` or an `exec` in one ends that command, not the script,
     // and its output goes to the script's stderr: the script's stdout carries only its
     // own lines, `SWAPPED_LINE` among them.
-    if !opts.prepare.is_empty() {
+    if !swap.prepare.is_empty() {
         script.push_str("cd -- \"$zap_stage\"\n");
-        for command in &opts.prepare {
+        for command in &swap.prepare {
             let _ = writeln!(script, "sh -ec {} 9>&- >&2", single_quote(command));
         }
     }
@@ -1194,22 +1312,21 @@ fn extract_swap_script(opts: &DeploySpec, ctx: &DeployContext, archive: &str) ->
         script,
         "zap_e=$(rm -rf -- \"$zap_old\" 2>&1) || zap_after {} \"$zap_e\"",
         single_quote(&format!(
-            "releases/.zap-old-{} was not removed; the next deploy removes it",
-            ctx.version
+            "releases/.zap-old-{version} was not removed; the next deploy removes it"
         )),
     );
 
     // Record deploy info (no `jq`: the target's `date` stamps `deployed_at`). Each value
     // arrives as a JSON string of its own, printed by `%s` as it is.
-    let previous_json = ctx
-        .previous_version
+    let previous_json = plan
+        .previous
         .as_deref()
         .map_or_else(|| "null".to_owned(), json_string);
     let _ = writeln!(
         script,
         "zap_e=$(printf '{{\"version\":%s,\"deployed_by\":%s,\"previous_version\":%s,\"deployed_at\":\"%s\"}}\\n' {} {} {} \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" 2>&1 > {}) || zap_after {} \"$zap_e\"",
-        single_quote(&json_string(&ctx.version)),
-        single_quote(&json_string(&ctx.deployed_by)),
+        single_quote(&json_string(version)),
+        single_quote(&json_string(&plan.deployed_by)),
         single_quote(&previous_json),
         single_quote(&format!("{app}/deploy_info.json")),
         single_quote("deploy_info.json was not written"),
@@ -1222,19 +1339,14 @@ fn extract_swap_script(opts: &DeploySpec, ctx: &DeployContext, archive: &str) ->
     let _ = writeln!(
         script,
         "zap_e=$({} 2>&1) || zap_after {} \"$zap_e\"",
-        prune_releases_call(
-            app,
-            opts.releases,
-            &ctx.version,
-            ctx.previous_version.as_deref()
-        ),
+        prune_releases_call(app, swap.keep, version, plan.previous.as_deref()),
         single_quote("the old releases were not pruned"),
     );
 
     let _ = write!(
         script,
         "printf 'Deployed version %s\\n' {}",
-        single_quote(&ctx.version)
+        single_quote(version)
     );
     script
 }
@@ -1242,9 +1354,10 @@ fn extract_swap_script(opts: &DeploySpec, ctx: &DeployContext, archive: &str) ->
 #[cfg(test)]
 mod tests {
     use super::{
-        ARCHIVE_CHECK, ARCHIVE_ENV, DeployAction, DeployContext, DeployStepId, DriftPreflight,
-        PRUNE_RELEASES, RollbackSwap, SCRIPT_WARNING_PREFIX, SWAPPED_LINE, deploy_lock_path,
-        deploy_references, plan_deploy, rollback_swap_command, upload_put_command,
+        ARCHIVE_CHECK, ARCHIVE_ENV, DeployAction, DeployContext, DeployPlan, DeployStepId,
+        DriftPreflight, PRUNE_RELEASES, ReleaseSwap, RollbackSwap, SCRIPT_WARNING_PREFIX,
+        SWAPPED_LINE, deploy_lock_path, deploy_references, plan_deploy, rollback_swap_command,
+        upload_put_command,
     };
     use crate::scalar::EnvVarName;
     use crate::schema::{DeployHealth, DeploySpec, ServiceManager, Target};
@@ -1282,6 +1395,7 @@ mod tests {
         DeployContext {
             references: BTreeMap::new(),
             version: "abc1234".to_owned(),
+            subject: "Ship the release".to_owned(),
             target_user: "deploy".to_owned(),
             deployed_by: "op@laptop".to_owned(),
             previous_version: Some("def5678".to_owned()),
@@ -1436,7 +1550,7 @@ mod tests {
             .steps
             .iter()
             .find_map(|s| match &s.action {
-                DeployAction::ExtractSwap { script } => Some(script.clone()),
+                DeployAction::ExtractSwap(swap) => Some(plan.swap_script(swap)),
                 _ => None,
             })
             .unwrap();
@@ -1460,8 +1574,11 @@ mod tests {
                 ..ctx()
             },
         );
+        let DeployAction::ExtractSwap(swap) = &first.steps[3].action else {
+            panic!("{first:?}");
+        };
         assert!(
-            serde_json::to_string(&first).unwrap().contains(
+            first.swap_script(swap).contains(
                 "zap_prune '/root/app/releases' '/root/app/current' 5 'abc1234' '' 2>&1)"
             )
         );
@@ -1497,7 +1614,7 @@ mod tests {
             .steps
             .iter()
             .find_map(|s| match &s.action {
-                DeployAction::ExtractSwap { script } => Some(script.clone()),
+                DeployAction::ExtractSwap(swap) => Some(plan.swap_script(swap)),
                 _ => None,
             })
             .unwrap();
@@ -1552,10 +1669,13 @@ mod tests {
                 ..ctx()
             },
         );
+        let DeployAction::ExtractSwap(swap) = &first.steps[3].action else {
+            panic!("{first:?}");
+        };
         assert!(
-            serde_json::to_string(&first)
-                .unwrap()
-                .contains(r#"'\"abc1234\"' '\"op@laptop\"' 'null' "#)
+            first
+                .swap_script(swap)
+                .contains(r#"'"abc1234"' '"op@laptop"' 'null' "#)
         );
     }
 
@@ -1621,7 +1741,7 @@ mod tests {
                 .steps
                 .iter()
                 .find_map(|s| match &s.action {
-                    DeployAction::ExtractSwap { script } => Some(script.clone()),
+                    DeployAction::ExtractSwap(swap) => Some(plan.swap_script(swap)),
                     _ => None,
                 })
                 .unwrap();
@@ -1703,7 +1823,7 @@ mod tests {
             .steps
             .iter()
             .find_map(|s| match &s.action {
-                DeployAction::ExtractSwap { script } => Some(script.clone()),
+                DeployAction::ExtractSwap(swap) => Some(plan.swap_script(swap)),
                 _ => None,
             })
             .unwrap();
@@ -1839,7 +1959,7 @@ mod tests {
             .steps
             .iter()
             .find_map(|s| match &s.action {
-                DeployAction::ExtractSwap { script } => Some(script.clone()),
+                DeployAction::ExtractSwap(swap) => Some(plan.swap_script(swap)),
                 _ => None,
             })
             .unwrap();
@@ -1926,6 +2046,154 @@ zap_e=$(printf '{"version":%s,"deployed_by":%s,"previous_version":%s,"deployed_a
 
     const GOLDEN_TAIL: &str = r#"zap_e=$(zap_prune '/root/app/releases' '/root/app/current' 5 'abc1234' 'def5678' 2>&1) || zap_after 'the old releases were not pruned' "$zap_e"
 printf 'Deployed version %s\n' 'abc1234'"#;
+
+    /// The swap's script is built from the values the plan shows beside it and from
+    /// nothing else: each value the preview lifts out of it — the operator, the
+    /// retention, each shared file, each `prepare` command, the release it requires
+    /// `current` to name — and the version, app path and connecting user, stands in the
+    /// script as one quoted word, and a change to any of them is a change to the script;
+    /// a change to anything else the plan holds is none.
+    #[test]
+    fn the_swap_script_is_built_from_the_values_the_plan_shows() {
+        use crate::shell::single_quote;
+
+        type Edit = (&'static str, fn(&mut DeployPlan, &mut ReleaseSwap));
+
+        let plan = plan_deploy(&opts(), &target(), &ctx());
+        let DeployAction::ExtractSwap(swap) = &plan.steps[3].action else {
+            panic!("{plan:?}");
+        };
+        let script = plan.swap_script(swap);
+        assert_eq!(swap.app, "/root/app");
+        assert_eq!(swap.keep, 5);
+        assert_eq!(swap.shared, [".env.production"]);
+        assert_eq!(swap.prepare, ["deno cache src/lib/server/server.ts"]);
+        assert_eq!(plan.previous.as_deref(), Some("def5678"));
+        assert_eq!(plan.deployed_by, "op@laptop");
+        assert_eq!(plan.user.as_deref(), Some("deploy"));
+        for shown in [
+            format!(
+                "{} {} {} ",
+                single_quote("\"abc1234\""),
+                single_quote("\"op@laptop\""),
+                single_quote("\"def5678\"")
+            ),
+            format!(
+                "zap_prune {} {} 5 {} {} 2>&1",
+                single_quote("/root/app/releases"),
+                single_quote("/root/app/current"),
+                single_quote("abc1234"),
+                single_quote("def5678")
+            ),
+            format!("[ \"${{zap_was##*/}}\" = {} ]", single_quote("def5678")),
+            format!(
+                "[ -f {} ]",
+                single_quote("/root/app/shared/.env.production")
+            ),
+            format!(
+                "sh -ec {} 9>&- >&2",
+                single_quote("deno cache src/lib/server/server.ts")
+            ),
+            format!(
+                "zap_archive={}",
+                single_quote("/root/app/.zap-deploy-deploy-abc1234.tar.gz")
+            ),
+        ] {
+            assert!(script.contains(&shown), "{shown}\n{script}");
+        }
+
+        let moving: [Edit; 9] = [
+            ("version", |plan, _| plan.version.push('0')),
+            ("previous", |plan, _| {
+                plan.previous = Some("0123abcd".to_owned());
+            }),
+            ("no previous", |plan, _| plan.previous = None),
+            ("deployed_by", |plan, _| plan.deployed_by.push('x')),
+            ("user", |plan, _| plan.user = None),
+            ("app", |_, swap| swap.app.push('x')),
+            ("keep", |_, swap| swap.keep += 1),
+            ("shared", |_, swap| swap.shared.push("other".to_owned())),
+            ("prepare", |_, swap| swap.prepare.clear()),
+        ];
+        let still: [Edit; 7] = [
+            ("subject", |plan, _| plan.subject.push('x')),
+            ("host", |plan, _| plan.host.push('x')),
+            ("target", |plan, _| plan.target = Target::default()),
+            ("dirty", |plan, _| plan.dirty = !plan.dirty),
+            ("preflight", |plan, _| {
+                plan.preflight = DriftPreflight::Skipped;
+            }),
+            ("warnings", |plan, _| plan.warnings.push("w".to_owned())),
+            ("other steps", |plan, _| plan.steps.truncate(4)),
+        ];
+        for (moves, edits) in [(true, &moving[..]), (false, &still[..])] {
+            for (name, edit) in edits {
+                let (mut edited, mut swap) = (plan.clone(), swap.clone());
+                edit(&mut edited, &mut swap);
+                assert_eq!(edited.swap_script(&swap) != script, moves, "{name}");
+            }
+        }
+    }
+
+    /// The archive the swap's script extracts is the one the upload step installs, for a
+    /// connecting user by value, for none, and for one the render's masking reached: the
+    /// upload holds the path it installs at and the swap the app it works in, and both
+    /// name the archive by the one rule (`archive_path`).
+    #[test]
+    fn the_swap_extracts_the_archive_the_upload_installs() {
+        use crate::shell::single_quote;
+
+        let archives = |plan: &DeployPlan| {
+            let remote = plan
+                .steps
+                .iter()
+                .find_map(|s| match &s.action {
+                    DeployAction::Upload { remote } => Some(remote.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            let DeployAction::ExtractSwap(swap) = &plan.steps[3].action else {
+                panic!("{plan:?}");
+            };
+            let script = plan.swap_script(swap);
+            let named = script
+                .lines()
+                .find_map(|line| line.strip_prefix("zap_archive="))
+                .unwrap()
+                .to_owned();
+            (single_quote(&remote), named, remote)
+        };
+        let user = plan_deploy(
+            &opts(),
+            &target(),
+            &DeployContext {
+                target_user: "opsuser".to_owned(),
+                ..ctx()
+            },
+        );
+        let none = plan_deploy(
+            &opts(),
+            &target(),
+            &DeployContext {
+                target_user: String::new(),
+                ..ctx()
+            },
+        );
+        let masked = user.map_text(|text| text.replace("opsuser", "[MASKED:ZAP_T_USER]"));
+        for (plan, archive) in [
+            (&user, "/root/app/.zap-deploy-opsuser-abc1234.tar.gz"),
+            (&none, "/root/app/.zap-deploy--abc1234.tar.gz"),
+            (
+                &masked,
+                "/root/app/.zap-deploy-[MASKED:ZAP_T_USER]-abc1234.tar.gz",
+            ),
+        ] {
+            let (uploaded, extracted, remote) = archives(plan);
+            assert_eq!(remote, archive);
+            assert_eq!(extracted, uploaded, "{archive}");
+        }
+        assert_eq!(none.user, None);
+    }
 
     /// A `current` link names its release by its last segment, trailing slashes
     /// dropped, and only when that segment is a release's name: a `.` segment, a path
@@ -2184,12 +2452,13 @@ printf 'Deployed version %s\n' 'abc1234'"#;
 
         assert_eq!(
             deploy_plan_hash(&plan_deploy(&opts(), &target(), &ctx())).unwrap(),
-            "352be17eccd071e6e76e6eb2f9ca246eecf67dd3fb634bce42d448bedd5d4231"
+            "560908e46c1161d854dbf12b3c3dbd320efefbd82bc517d956034b8d43757239"
         );
     }
 
-    /// A reviewed deploy plan binds the put its upload runs and the rollback's swap: the
-    /// plan holds the text of neither, and its address moves with each.
+    /// A reviewed deploy plan binds the put its upload runs, the script its swap runs,
+    /// and the rollback's swap: the plan holds the text of none, and its address moves
+    /// with each.
     #[test]
     fn the_deploy_plan_address_moves_with_the_scripts_it_names() {
         use crate::config_hash::{deploy_plan_hash, deploy_plan_hash_with};
@@ -2201,26 +2470,39 @@ printf 'Deployed version %s\n' 'abc1234'"#;
                 .iter()
                 .any(|step| matches!(step.action, DeployAction::Upload { .. }))
         );
-        assert!(!serde_json::to_string(&plan).unwrap().contains(FILE_PUT));
+        let held = serde_json::to_string(&plan).unwrap();
+        assert!(!held.contains(FILE_PUT));
+        assert!(!held.contains(SWAPPED_LINE), "{held}");
         let address = deploy_plan_hash(&plan).unwrap();
         let rollback = || rollback_swap_command("", "", "");
         assert_eq!(
             address,
-            deploy_plan_hash_with(&plan, upload_put_command, rollback).unwrap()
+            deploy_plan_hash_with(&plan, upload_put_command, DeployPlan::swap_script, rollback)
+                .unwrap()
         );
         assert!(upload_put_command("/x").contains(FILE_PUT));
         let moved = deploy_plan_hash_with(
             &plan,
             |remote| upload_put_command(remote).replace(FILE_PUT, "edited"),
+            DeployPlan::swap_script,
             rollback,
         )
         .unwrap();
         assert_ne!(moved, address, "the upload's put");
-        assert!(rollback().contains("flock -n 9"));
-        let moved = deploy_plan_hash_with(&plan, upload_put_command, || {
-            rollback().replace("flock -n 9", "flock -n 8")
-        })
+        let moved = deploy_plan_hash_with(
+            &plan,
+            upload_put_command,
+            |plan, swap| plan.swap_script(swap).replace("flock -n 9", "flock -n 8"),
+            rollback,
+        )
         .unwrap();
+        assert_ne!(moved, address, "the swap's script");
+        assert!(rollback().contains("flock -n 9"));
+        let moved =
+            deploy_plan_hash_with(&plan, upload_put_command, DeployPlan::swap_script, || {
+                rollback().replace("flock -n 9", "flock -n 8")
+            })
+            .unwrap();
         assert_ne!(moved, address, "the rollback's swap");
     }
 

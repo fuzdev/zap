@@ -49,7 +49,9 @@ use zap_core::lock::{
     LockStanding, NameOnlyRef, NameOnlyRefs, UnverifiableEntry, render_name_only_refs,
 };
 use zap_core::progress::{Notice, Progress, render_progress};
-use zap_types::deploy::{DeployAction, DeployPlan, DeployStep, DeployStepId, DriftPreflight};
+use zap_types::deploy::{
+    DeployAction, DeployPlan, DeployStep, DeployStepId, DriftPreflight, ReleaseSwap,
+};
 use zap_types::deploy_preview::DeployPreviewPass;
 use zap_types::detected::{
     AptRepoDrift, CurrentState, DatabaseDrift, Detection, FileDrift, FirewallDrift, PgHbaMissing,
@@ -912,8 +914,12 @@ fn deploy_plan() -> DeployPlan {
     DeployPlan {
         references: references("deploy.body.reference"),
         version: h("deploy.version"),
+        subject: h("deploy.body.subject"),
+        previous: Some(h("deploy.previous")),
         target: target(),
         host: h("deploy.host"),
+        user: Some(h("deploy.body.user")),
+        deployed_by: h("deploy.body.deployed_by"),
         dirty: true,
         preflight: DriftPreflight::Checks {
             resources: 1,
@@ -944,9 +950,12 @@ fn deploy_plan() -> DeployPlan {
             step(
                 DeployStepId::ExtractSwap,
                 "deploy.body.extract_swap.name",
-                DeployAction::ExtractSwap {
-                    script: h("deploy.body.extract_swap.script"),
-                },
+                DeployAction::ExtractSwap(ReleaseSwap {
+                    app: h("deploy.body.extract_swap.app"),
+                    keep: 5,
+                    shared: vec![h("deploy.body.extract_swap.shared")],
+                    prepare: vec![h("deploy.body.extract_swap.prepare")],
+                }),
             ),
             step(
                 DeployStepId::Restart,
@@ -963,6 +972,7 @@ fn deploy_plan() -> DeployPlan {
                     url_label: h("deploy.body.health.url_label"),
                     attempts: 3,
                     interval_ms: 100,
+                    timeout_ms: 5000,
                 },
             ),
             step(
@@ -973,6 +983,7 @@ fn deploy_plan() -> DeployPlan {
                     url_label: h("deploy.body.readiness.url_label"),
                     attempts: 3,
                     interval_ms: 100,
+                    timeout_ms: 5000,
                 },
             ),
         ],
@@ -996,7 +1007,6 @@ fn deploy_report(outcome: DeployOutcome) -> DeployReport {
         },
         outcome,
         version: h("report.version"),
-        previous_version: Some(h("report.previous_version")),
         plan: deploy_plan(),
         plan_hash: "deadbeef".to_owned(),
         step_outcomes: if stepped {
@@ -1633,7 +1643,9 @@ const HELPERS: &[&str] = &[
     "commands::plan::render_change_diff",
     "commands::status::render_run_unverifiable",
     "commands::deploy::render::render_plan_preview",
+    "commands::deploy::render::render_recap",
     "commands::deploy::render::render_action",
+    "commands::deploy::render::render_swap",
     "commands::deploy::render::render_poll",
     "commands::deploy::render::render_run",
     "commands::deploy::render::render_rows",

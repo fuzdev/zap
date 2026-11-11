@@ -233,8 +233,9 @@ reason [the config is first-party](#the-config-is-first-party).
 ### Escaped output
 
 A review is only as good as the text it reads. Everything Zap prints as text
-writes what it takes from the config, the environment, the command line,
-`zap.lock`, a file under `~/.zap`, or the target with control, bidirectional,
+writes what it takes from the config, the environment, the command line, the
+checkout (a deploy's commit subject, what `git` said), `zap.lock`, a file under
+`~/.zap`, or the target with control, bidirectional,
 and default-ignorable characters (every control character but tab, the line and
 paragraph separators, zero-width characters and the like) spelled out as
 `<U+XXXX>`, and a tab as spaces, so such text can't move the cursor, overwrite

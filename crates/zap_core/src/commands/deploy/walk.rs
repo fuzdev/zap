@@ -8,8 +8,8 @@ use std::path::Path;
 use std::time::Instant;
 
 use zap_types::deploy::{
-    ARCHIVE_ENV, DeployAction, DeployPlan, DeployStep, DeployStepId, SCRIPT_ERROR_PREFIX,
-    SCRIPT_WARNING_PREFIX, SWAPPED_LINE,
+    ARCHIVE_ENV, DeployAction, DeployPlan, DeployStep, DeployStepId, ReleaseSwap,
+    SCRIPT_ERROR_PREFIX, SCRIPT_WARNING_PREFIX, SWAPPED_LINE,
 };
 use zap_types::event::{Event, StepOutcome};
 use zap_types::shell::single_quote;
@@ -48,7 +48,7 @@ pub(super) enum Stopped {
 pub(super) async fn execute_deploy_plan(
     local: &Connection,
     target: &Connection,
-    live: AppLive<'_>,
+    app: AppWalk<'_>,
     plan: &DeployPlan,
     mut archive: ReleaseArchive,
     handler: &EventHandler,
@@ -74,12 +74,22 @@ pub(super) async fn execute_deploy_plan(
                 name: step.name.clone(),
             });
             let release = Release {
-                app: live.app,
+                app: app.app,
                 version: &plan.version,
-                previous: live.previous,
+                previous: plan.previous.as_deref(),
             };
             let started = Instant::now();
-            let ran = run_step(local, target, release, step, &mut archive, warnings).await;
+            let script = |swap: &ReleaseSwap| (app.swap_script)(plan, swap);
+            let ran = run_step(
+                local,
+                target,
+                release,
+                &script,
+                step,
+                &mut archive,
+                warnings,
+            )
+            .await;
             let mut record = StepRecord {
                 id: step.id,
                 took: started.elapsed(),
@@ -216,14 +226,15 @@ impl ReleaseArchive {
     }
 }
 
-/// The app a deploy ships to: its path on the target and the release the plan read as
-/// live there.
+/// What a walk needs beside its plan: the app path on the target, and how the script an
+/// extract-and-swap step sends there is made.
 #[derive(Clone, Copy)]
-pub(super) struct AppLive<'a> {
+pub(super) struct AppWalk<'a> {
     /// The app path (`deploy.path`).
     pub(super) app: &'a str,
-    /// The release live when the plan was made (`None` on a first deploy).
-    pub(super) previous: Option<&'a str>,
+    /// The script of an extract-and-swap step of the plan: [`DeployPlan::swap_script`],
+    /// the script the plan's hash covers. A walk test passes a stand-in.
+    pub(super) swap_script: &'a (dyn Fn(&DeployPlan, &ReleaseSwap) -> String + Sync),
 }
 
 /// The release a deploy's steps ship: the app path on the target, the version, and the
@@ -254,8 +265,9 @@ impl From<String> for StepFailure {
     }
 }
 
-/// Execute one deploy step. `Ok` carries whether it ran ([`StepRun`]); `Err`
-/// fails the step (and aborts the deploy).
+/// Execute one deploy step, an extract-and-swap step sending the script `swap_script`
+/// makes of it. `Ok` carries whether it ran ([`StepRun`]); `Err` fails the step (and
+/// aborts the deploy).
 ///
 /// `archive` carries the release from the step that creates it to the one that uploads
 /// it, and its digest from there to the script that extracts it.
@@ -263,6 +275,7 @@ async fn run_step(
     local: &Connection,
     target: &Connection,
     release: Release<'_>,
+    swap_script: &(dyn Fn(&ReleaseSwap) -> String + Sync),
     step: &DeployStep,
     archive: &mut ReleaseArchive,
     warnings: &mut Vec<String>,
@@ -301,7 +314,8 @@ async fn run_step(
                 }),
             })
         }
-        DeployAction::ExtractSwap { script } => {
+        DeployAction::ExtractSwap(swap) => {
+            let script = &swap_script(swap);
             // never ran: `current` is as it was
             let (remote, digest) = archive.uploaded.as_ref().ok_or_else(|| StepFailure {
                 error: "no release archive was uploaded to extract".to_owned(),
@@ -347,22 +361,26 @@ async fn run_step(
             url,
             attempts,
             interval_ms,
+            timeout_ms,
             ..
-        } => Ok(health::http_health_check(url, *attempts, *interval_ms)
-            .await
-            .map(|said| StepRun::Ran {
-                output: said.clone(),
-                summary: Some(StepSummary::Said(said)),
-            })?),
+        } => Ok(
+            health::http_health_check(url, *attempts, *interval_ms, *timeout_ms)
+                .await
+                .map(|said| StepRun::Ran {
+                    output: said.clone(),
+                    summary: Some(StepSummary::Said(said)),
+                })?,
+        ),
         DeployAction::Readiness {
             url,
             attempts,
             interval_ms,
+            timeout_ms,
             ..
         } => {
             // The poller resolves; these messages report the URL as declared, which is
             // what the operator wrote and what the plan renders.
-            match health::http_readiness_check(url, *attempts, *interval_ms).await {
+            match health::http_readiness_check(url, *attempts, *interval_ms, *timeout_ms).await {
                 health::ReadinessOutcome::Ready => Ok(StepRun::Ran {
                     output: format!("ready: live schema matches at {url}"),
                     summary: Some(StepSummary::Said("live schema matches".to_owned())),

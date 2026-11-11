@@ -184,17 +184,35 @@ first apply: [targets.md](./targets.md#the-bootstrap-user).
 
 ## Binding a wetrun to a reviewed plan
 
-A dry run prints the whole plan and ends with its hash:
+A dry run prints the whole plan and ends with its hash. It comes in groups a
+blank line apart: what ships where (the version and the release it replaces,
+the commit's subject, the host and the user Zap connects as, who is deploying,
+the declared target, and what the references resolve to), the two gates (the
+tree and the drift preflight), the steps, and what the run does with the plan.
+The commit's subject is its own first line, cut at 100 characters, with any
+secret's value masked; on a dirty tree it is still the commit's, and its line
+says it is the commit under the uncommitted changes. The extract-and-swap step
+lists the values its script is built from above the script: the app path, the
+release `current` must still name, each `shared` link, each `prepare` command,
+and how many releases are kept. Each poll's first line says what it does and
+how long it can take; a second gives the URL as declared when a reference in it
+resolves. Last, `in short:` restates the commit, version, host, user, tree, and
+preflight beside the hash, below however long the script is:
 
 ```
 deploy — target {env:DEPLOY_HOST} (dry-run)
   version: 3f2a9c1e7b04 (previous: 8d41e0a6c2f9)
+  commit: Add the readiness gate
   host: app.example.com
+  user: app
+  deployed by: ops@laptop
   target: {"local":false,"host":{"$env":"DEPLOY_HOST"},"user":{"$env":"DEPLOY_USER"},"home":"/home/app","package_manager":"apt","service_manager":"systemd"}
   references:
     DEPLOY_DOMAIN = app.example.com
+
   tree: clean
   preflight: no apply-managed resources declared — nothing to check
+
   - Build application (build)
       local$ gro build
   - Create tarball (tarball)
@@ -203,6 +221,11 @@ deploy — target {env:DEPLOY_HOST} (dry-run)
   - Upload tarball (upload)
       the archive → target:/home/app/app/.zap-deploy-app-3f2a9c1e7b04.tar.gz (as the connecting user, mode 600, checked against its SHA-512)
   - Extract and swap release (extract_swap)
+      app: /home/app/app
+      replaces: 8d41e0a6c2f9 — `current` must still name it
+      links: shared/.env.production
+      prepare: deno cache server.js
+      keeps: 5 releases, counting this one and 8d41e0a6c2f9
       target script (its stdin: the archive's SHA-512):
         set -e
         zap_archive='/home/app/app/.zap-deploy-app-3f2a9c1e7b04.tar.gz'
@@ -210,13 +233,22 @@ deploy — target {env:DEPLOY_HOST} (dry-run)
   - Restart app (restart)
       target$ sudo systemctl daemon-reload && sudo systemctl restart app
   - Health check (health)
-      GET https://{env:DEPLOY_DOMAIN}/health — healthy on 2xx; up to 15 attempt(s), 2000 ms apart
-      polls https://app.example.com/health
+      GET https://app.example.com/health — healthy on 2xx; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
+      declared as https://{env:DEPLOY_DOMAIN}/health
   - Readiness check (readiness)
-      GET https://{env:DEPLOY_DOMAIN}/ready — ready on 2xx, unserved on 404; up to 15 attempt(s), 2000 ms apart
-      polls https://app.example.com/ready
+      GET https://app.example.com/ready — ready on 2xx, unserved on 404; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
+      declared as https://{env:DEPLOY_DOMAIN}/ready
+
   (dry-run — re-run with --wetrun to deploy)
-plan_hash: 1f98612fcbfacb69b9d31236457d549e00714e4ad0fb0a36e225c3fe6a5f4312
+
+  in short:
+    commit: Add the readiness gate
+    version: 3f2a9c1e7b04 (previous: 8d41e0a6c2f9)
+    host: app.example.com
+    user: app
+    tree: clean
+    preflight: no apply-managed resources declared — nothing to check
+plan_hash: 2d09162e11f59e2b2409f6d89dcf0f469a877baf09d6e9f770bf5218eb6fcb95
 ```
 
 A wetrun executes only a plan you were shown. It computes its plan again, and
@@ -237,13 +269,24 @@ run rejects `--expect-plan`.
 
 On an interactive terminal (standard input and standard error both terminals),
 a wetrun with no review and no `--expect-plan` shows the plan instead, under an
-`UNREVIEWED` banner with its `plan_hash`, and ends with the question:
+`UNREVIEWED` banner, then its recap and its `plan_hash`, and ends with the
+question:
 
 ```
+  …
+
   UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
     no deploy plan has been previewed for this host.
-plan_hash: 1f98612fcbfacb69b9d31236457d549e00714e4ad0fb0a36e225c3fe6a5f4312
-Deploy this plan? Type 1f98612f, the start of its plan_hash, to confirm:
+
+  in short:
+    commit: Add the readiness gate
+    version: 3f2a9c1e7b04 (previous: 8d41e0a6c2f9)
+    host: app.example.com
+    user: app
+    tree: clean
+    preflight: no apply-managed resources declared — nothing to check
+plan_hash: 2d09162e11f59e2b2409f6d89dcf0f469a877baf09d6e9f770bf5218eb6fcb95
+Deploy this plan? Type 2d09162e, the start of its plan_hash, to confirm:
 ```
 
 Typing those eight characters back is the review: the wetrun goes on with
@@ -274,18 +317,22 @@ Everything the hash covers is printed but two of Zap's own scripts: the one the
 upload installs the archive with, and the swap the auto-rollback runs. So a plan
 reviewed under one `zap` build doesn't bind one whose scripts differ. It covers:
 
-- the version, the tree state, and the previous release on the target;
-- the declared target, the host it resolves to, and the connecting user (in the
-  uploaded archive's name);
+- the version, the subject line of its commit, the tree state, and the
+  previous release on the target;
+- the declared target, the host it resolves to, and the connecting user;
 - who is deploying (`user@host` of the operator machine, recorded in
   `deploy_info.json`);
 - the preflight's state: skipped, nothing declared, or which apply-managed
   resources it checks, as a count and a digest of their declarations and the
   current pins `zap.lock` holds for them;
 - every step: the build and tarball commands, the upload paths and the script
-  that installs the archive, the remote script with its `shared` links and
-  `prepare` commands, the restart command, the health and readiness URLs as
-  they resolve, and the swap the auto-rollback would run;
+  that installs the archive, the remote script and the values it is built from
+  (the app path, the `shared` links, the `prepare` commands, how many releases
+  are kept), the restart command, the health and readiness URLs as they resolve
+  and the budget each is polled with (the attempts, the wait between two, the
+  time each is given), and the swap the auto-rollback would run;
+- the plan's warnings, printed under it (a `deploy.service` the target's
+  service manager can't restart);
 - the value of each reference the `deploy` block uses (its health domain),
   printed in its `references:` block (a secret's value excepted: the plan
   records only that it is one).
@@ -314,9 +361,10 @@ before anything runs, and a dry run shows the plan under an `UNBINDABLE` note,
 with no `plan_hash` and no recorded preview. The ways out:
 [env.md](./env.md#masked-hosts-and-review).
 
-Text from the config, the environment, and the target is printed with control
-characters written out as `<U+XXXX>`, so a value can't hide or forge a line of
-the preview ([security.md](./security.md#escaped-output)).
+Text from the config, the environment, the checkout (the commit's subject), and
+the target is printed with control characters written out as `<U+XXXX>`, so a
+value can't hide or forge a line of the preview
+([security.md](./security.md#escaped-output)).
 
 ## Preflight
 
@@ -381,9 +429,11 @@ Zap reads the tree against a copy of the index's entries that holds no
 timestamps or flags, so every file is compared by its contents: a file the
 index marks unchanged (`assume-unchanged`, `skip-worktree`) counts like any
 other, and so does one whose timestamps the index's cache would take for
-unchanged. Each read sets `core.fsmonitor=false`, `core.untrackedCache=false`,
-`core.ignoreStat=false`, `core.fileMode=true` (a mode change counts),
-`core.autocrlf=false` (line endings are not converted), and
+unchanged. Each read compares against the objects the commit names, not ones a
+`refs/replace/` entry puts in their place (`--no-replace-objects`, as the
+subject line is read too), and sets `core.fsmonitor=false`,
+`core.untrackedCache=false`, `core.ignoreStat=false`, `core.fileMode=true` (a
+mode change counts), `core.autocrlf=false` (line endings are not converted), and
 `core.splitIndex=false`, and passes `--untracked-files=normal` and
 `--ignore-submodules=none`, so `status.showUntrackedFiles`, a submodule's
 `ignore` setting, and `diff.ignoreSubmodules` don't narrow it either. So a
@@ -501,7 +551,8 @@ build (local) → tarball → upload → extract + swap → restart → health �
    (with a `daemon-reload` first on systemd).
 6. **health**: poll `https://<domain><path>` from the operator machine (the one
    you run `zap` on) until
-   it answers 2xx, up to `attempts` times, `interval_ms` apart. Neither poll
+   it answers 2xx, up to `attempts` times, `interval_ms` apart, each attempt
+   given 5 seconds. The plan states the most a poll can take. Neither poll
    follows a redirect: a 3xx is not healthy or ready, so a release that
    redirects to a login page doesn't pass on that page's 200.
 7. **readiness**: when `health.path` isn't already `/ready`, poll `/ready` too.

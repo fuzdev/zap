@@ -60,9 +60,9 @@ use detect_pass::{
     Diffed, detect_and_diff, detect_pass, diff_unrecorded, prepare_lock, record_pass, spend_review,
 };
 use render::{
-    check_references, render_address, render_change, render_change_header, render_declared,
-    render_native_puts, render_plan_subject, render_references, render_steps, render_target,
-    render_trigger, render_unrecorded, target_location,
+    NO_USER, check_references, render_address, render_change, render_change_header,
+    render_declared, render_machine, render_native_puts, render_plan_subject, render_references,
+    render_steps, render_target, render_trigger, render_unrecorded, target_location,
 };
 use target::{
     NAMES_NO_ONE_MACHINE, PinFrom, ResolvedMachine, connecting_user, eval_target, eval_untargeted,

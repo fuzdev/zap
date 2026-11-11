@@ -73,7 +73,8 @@ pub const PLAN_HASH_VERSION: u32 = 7;
 /// changeset, for the imperative deploy plan.
 ///
 /// The text a deploy plan runs is hashed: each step's own, the command an upload runs
-/// its constant script in, and the rollback's swap.
+/// its constant script in, the extract-and-swap script built from the plan's values, and
+/// the rollback's swap.
 pub const DEPLOY_PLAN_HASH_VERSION: u32 = 10;
 
 /// Which artifact an address is for — the version axis every hash here folds in.
@@ -258,8 +259,10 @@ fn plan_hash_with(
 ///
 /// The address covers the plan and the text it names but doesn't hold: the command
 /// each [`Upload`](crate::deploy::DeployAction::Upload) step runs its constant script in
-/// ([`upload_put_command`](crate::deploy::upload_put_command)), and, for a plan that
-/// swaps a release in, the auto-rollback's compare-and-swap
+/// ([`upload_put_command`](crate::deploy::upload_put_command)), the script each
+/// [`ExtractSwap`](crate::deploy::DeployAction::ExtractSwap) step runs
+/// ([`DeployPlan::swap_script`]), and, for a plan that swaps a release in, the
+/// auto-rollback's compare-and-swap
 /// ([`rollback_swap_command`](crate::deploy::rollback_swap_command)) with its app path
 /// and versions left empty (the plan fixes those elsewhere). Every other step holds the
 /// text it runs.
@@ -267,16 +270,21 @@ fn plan_hash_with(
 /// # Errors
 /// Returns an error if the plan cannot be serialized.
 pub fn deploy_plan_hash(plan: &DeployPlan) -> Result<String, serde_json::Error> {
-    deploy_plan_hash_with(plan, crate::deploy::upload_put_command, || {
-        crate::deploy::rollback_swap_command("", "", "")
-    })
+    deploy_plan_hash_with(
+        plan,
+        crate::deploy::upload_put_command,
+        DeployPlan::swap_script,
+        || crate::deploy::rollback_swap_command("", "", ""),
+    )
 }
 
 /// [`deploy_plan_hash`] with the command an upload to a path runs given by `upload`,
-/// and the rollback's swap by `rollback`.
+/// the script an extract-and-swap step runs by `swap`, and the rollback's swap by
+/// `rollback`.
 pub(crate) fn deploy_plan_hash_with(
     plan: &DeployPlan,
     upload: impl Fn(&str) -> String,
+    swap: impl Fn(&DeployPlan, &crate::deploy::ReleaseSwap) -> String,
     rollback: impl Fn() -> String,
 ) -> Result<String, serde_json::Error> {
     /// What a deploy plan's address is computed over.
@@ -285,6 +293,8 @@ pub(crate) fn deploy_plan_hash_with(
         plan: &'a DeployPlan,
         /// The command each upload runs, in plan order.
         uploads: Vec<String>,
+        /// The script each extract-and-swap step runs, in plan order.
+        swaps: Vec<String>,
         /// The rollback's swap, when the plan swaps a release in.
         rollback: Option<String>,
     }
@@ -296,16 +306,21 @@ pub(crate) fn deploy_plan_hash_with(
             _ => None,
         })
         .collect();
-    let rollback = plan
+    let swaps: Vec<String> = plan
         .steps
         .iter()
-        .any(|step| matches!(step.action, crate::deploy::DeployAction::ExtractSwap { .. }))
-        .then(rollback);
+        .filter_map(|step| match &step.action {
+            crate::deploy::DeployAction::ExtractSwap(release) => Some(swap(plan, release)),
+            _ => None,
+        })
+        .collect();
+    let rollback = (!swaps.is_empty()).then(rollback);
     hash_canonical(
         HashDomain::Deploy,
         &Addressed {
             plan,
             uploads,
+            swaps,
             rollback,
         },
     )

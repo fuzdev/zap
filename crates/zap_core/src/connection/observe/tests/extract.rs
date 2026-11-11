@@ -1056,6 +1056,7 @@ fn deploy_script_against(
     let ctx = DeployContext {
         references: std::collections::BTreeMap::new(),
         version: version.to_owned(),
+        subject: "Ship the release".to_owned(),
         target_user: "deploy".to_owned(),
         deployed_by: DEPLOYED_BY.to_owned(),
         previous_version: previous.map(str::to_owned),
@@ -1068,9 +1069,9 @@ fn deploy_script_against(
     let plan = plan_deploy(&spec, &Target::default(), &ctx);
     let mut script = None;
     let mut remote = None;
-    for step in plan.steps {
-        match step.action {
-            DeployAction::ExtractSwap { script: text } => script = Some(text),
+    for step in &plan.steps {
+        match &step.action {
+            DeployAction::ExtractSwap(swap) => script = Some(plan.swap_script(swap)),
             DeployAction::Upload { remote: path } => remote = Some(PathBuf::from(path)),
             _ => {}
         }

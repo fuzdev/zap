@@ -48,9 +48,10 @@ A map; each module's `//!` doc and its items' rustdoc are the detail.
 - `last_run` — the last-run report's on-disk contract and `review_plan`, the
   wetrun review rule.
 - `deploy_preview` — the deploy preview's on-disk contract and its review rule.
-- `deploy` — the pure deploy plan (`plan_deploy`), the release scripts it carries, and
-  the auto-rollback's compare-and-swap (`rollback_swap_command`) under the app's deploy
-  lock (`deploy_lock_path`).
+- `deploy` — the pure deploy plan (`plan_deploy`), the release scripts it builds from
+  the values it holds (`DeployPlan::swap_script`), and the auto-rollback's
+  compare-and-swap (`rollback_swap_command`) under the app's deploy lock
+  (`deploy_lock_path`).
 - `lock` — the `zap.lock` schema (`ZapLock`, its `Toolchain` pin, `LockEntry`,
   `LOCK_VERSION`).
 - `secrecy` — the one rule for which reference is a secret (`SecretRule::classify`).

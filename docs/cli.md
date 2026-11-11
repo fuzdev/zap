@@ -291,8 +291,10 @@ upload, extract into `releases/<version>`, swap the `current` symlink, restart
 the service, poll health. Full mechanism: [deploy.md](./deploy.md).
 
 A dry run reads `zap.lock`, connects over SSH to read the live `current`
-symlink, prints the plan (the resolved host, the declared target, the tree and
-preflight state, and every step with its command, script, paths, or URL), ends
+symlink, prints the plan (the version and the release it replaces, the commit's
+subject, the resolved host and connecting user, the declared target, the tree
+and preflight state, and every step with its command, script, paths, or URL),
+closes with a recap of the commit, version, host, user, tree, and preflight, ends
 with the `plan_hash`, records the plan as this host's **deploy preview**, and
 exits 0. If the live release is already this version it reports
 `server already at this version`, prints no hash, records nothing, and exits 0,

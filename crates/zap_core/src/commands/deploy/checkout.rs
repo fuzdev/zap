@@ -1,7 +1,10 @@
 //! The operator-side reads of the checkout a deploy ships: whether the working tree is
-//! dirty, the release version (the short commit hash, `-dirty-<id>` under `--force`),
-//! and the id of an uncommitted tree. Each is read through `git` with the checkout
-//! settings that would narrow what it compares forced off.
+//! dirty, the release version (the short commit hash, `-dirty-<id>` under `--force`) and
+//! the subject line of that commit, and the id of an uncommitted tree. Each read of the
+//! tree is made through `git` with the checkout settings that would narrow what it
+//! compares forced off.
+
+use zap_types::shell::single_quote;
 
 use crate::connection::{CommandOutput, Connection, RunOptions};
 use crate::error::{Error, Result};
@@ -47,28 +50,85 @@ fn git_error(what: &str, command: &str, out: &CommandOutput, masker: &SecretMask
     ))
 }
 
-/// The short git commit hash, with `-dirty-` and the tree's [`dirty_id`] when `dirty`
-/// is set.
-pub(super) async fn git_version(
+/// The release a checkout ships: its version and what its commit says of itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Shipped {
+    /// The short git commit hash, with `-dirty-` and the tree's [`dirty_id`] for a
+    /// dirty tree shipped under `--force`.
+    pub(super) version: String,
+    /// The commit's subject line ([`git_subject`]).
+    pub(super) subject: String,
+}
+
+/// The release the checkout's `HEAD` ships ([`Shipped`]): its short hash, with `-dirty-`
+/// and the tree's [`dirty_id`] when `dirty` is set, and the subject line of that commit.
+///
+/// # Errors
+/// [`Error::Git`] when a read fails: a version or a subject is never a default for one.
+pub(super) async fn git_shipped(
     local: &Connection,
     dirty: bool,
     masker: &SecretMasker,
-) -> Result<String> {
+) -> Result<Shipped> {
     const COMMAND: &str = "git rev-parse --short=12 HEAD";
     let out = local.run(COMMAND, &RunOptions::default()).await?;
     if !out.success {
         return Err(git_error("the commit hash", COMMAND, &out, masker));
     }
     let hash = out.stdout.trim();
-    Ok(if dirty {
+    let subject = git_subject(local, hash, masker).await?;
+    let version = if dirty {
         format!("{hash}-dirty-{}", dirty_id(local, masker).await?)
     } else {
         hash.to_owned()
+    };
+    Ok(Shipped { version, subject })
+}
+
+/// The most of a commit's subject line a plan holds, in characters.
+///
+/// The subject is the repository's text, shown on one line of the preview; past this
+/// bound it is cut and ends in `…`, and the plan holds what is shown.
+pub(super) const SUBJECT_CHARS: usize = 100;
+
+/// The command [`git_subject`] reads the subject line of `commit` with: that one commit,
+/// by the hash the version was read as, so the subject is the version's whatever moves
+/// `HEAD` in between; the commit's own object, not one `refs/replace/` puts in its place
+/// (`--no-replace-objects`), since the hash names the original; and no signature check
+/// printed into it (`log.showSignature`).
+pub(super) fn subject_command(commit: &str) -> String {
+    format!(
+        "git --no-replace-objects log -1 --no-show-signature --format=%s {} --",
+        single_quote(commit)
+    )
+}
+
+/// The subject line of `commit` ([`subject_command`]): git's `%s`, the first paragraph
+/// of its message on one line, with a registered secret masked out of it and then cut
+/// at [`SUBJECT_CHARS`] — so what the plan holds, and its hash covers, is what a preview
+/// shows, and no secret's value reaches either. Empty for a commit with no message.
+///
+/// # Errors
+/// [`Error::Git`] when the read fails.
+async fn git_subject(local: &Connection, commit: &str, masker: &SecretMasker) -> Result<String> {
+    let command = subject_command(commit);
+    let out = local.run(&command, &RunOptions::default()).await?;
+    if !out.success {
+        return Err(git_error("the commit's subject", &command, &out, masker));
+    }
+    let subject = masker.mask(out.stdout.strip_suffix('\n').unwrap_or(&out.stdout));
+    Ok(if subject.chars().count() > SUBJECT_CHARS {
+        let cut: String = subject.chars().take(SUBJECT_CHARS).collect();
+        format!("{cut}…")
+    } else {
+        subject
     })
 }
 
-/// The `git` every read of the working tree runs, with the checkout settings that would
-/// narrow what it compares forced: `core.fsmonitor=false`, `core.untrackedCache=false`,
+/// The `git` every read of the working tree runs: against the objects the commits name,
+/// not ones `refs/replace/` puts in their place (`--no-replace-objects`), so the tree is
+/// compared with the commit the version names; and with the checkout settings that
+/// would narrow what it compares forced: `core.fsmonitor=false`, `core.untrackedCache=false`,
 /// `core.ignoreStat=false`, `core.fileMode=true` (a mode change counts),
 /// `core.autocrlf=false` (no line-ending conversion), and `core.splitIndex=false` (the
 /// copy of the index writes no shared index into the checkout's `.git`). A checkout on
@@ -76,7 +136,8 @@ pub(super) async fn git_version(
 /// therefore reads dirty.
 macro_rules! dirty_git {
     () => {
-        "git -c core.fsmonitor=false -c core.untrackedCache=false -c core.ignoreStat=false \
+        "git --no-replace-objects -c core.fsmonitor=false -c core.untrackedCache=false \
+         -c core.ignoreStat=false \
          -c core.fileMode=true -c core.autocrlf=false -c core.splitIndex=false"
     };
 }

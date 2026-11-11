@@ -38,26 +38,27 @@ fn plan_restart_command(plan: &DeployPlan) -> Option<&str> {
 
 /// The health-check parameters from the plan's `health` step, if any — reused to
 /// confirm the rolled-back release is actually serving.
-fn plan_health(plan: &DeployPlan) -> Option<(&str, u32, u64)> {
+fn plan_health(plan: &DeployPlan) -> Option<(&str, u32, u64, u64)> {
     plan.steps.iter().find_map(|step| match &step.action {
         DeployAction::Health {
             url,
             attempts,
             interval_ms,
+            timeout_ms,
             ..
-        } => Some((url.as_str(), *attempts, *interval_ms)),
+        } => Some((url.as_str(), *attempts, *interval_ms, *timeout_ms)),
         _ => None,
     })
 }
 
-/// Recover from a post-swap deploy failure by re-pointing `current` at the previous
-/// release and restarting, then re-checking health. Emits `rollback` step events and
+/// Recover from a post-swap deploy failure of `plan` by re-pointing `current` at the
+/// release it replaced ([`DeployPlan::previous`]) and restarting, then re-checking health. Emits `rollback` step events and
 /// returns how it left the target, or `None` when it never started (nothing to return
 /// to); a rollback that went wrong or was skipped also says
 /// why in `warnings`, telling the operator what needs a hand. Best-effort: a failed
 /// rollback is a warning, never an error.
 ///
-/// Only a `current` that still names `version`, the release this deploy swapped in, is
+/// Only a `current` that still names the plan's version, the release this deploy swapped in, is
 /// re-pointed (`zap_types::deploy::rollback_swap_command`), and only at a previous
 /// release still on the host: when another deploy holds the app's lock or has replaced
 /// the release since, when `current` names nothing, or when the previous release is
@@ -67,11 +68,10 @@ pub(super) async fn attempt_rollback(
     target: &Connection,
     app_path: &str,
     plan: &DeployPlan,
-    previous: Option<&str>,
-    version: &str,
     handler: &EventHandler,
     warnings: &mut Vec<String>,
 ) -> Option<RollbackOutcome> {
+    let (previous, version) = (plan.previous.as_deref(), plan.version.as_str());
     // With nothing to swap back to, the rollback is skipped, and says so on the event
     // stream as well as in the warnings: a `--json` run prints no warning, and its
     // consumer must still learn that a broken release was left live.
@@ -171,8 +171,8 @@ pub(super) async fn attempt_rollback(
     }
 
     let health_checked = plan_health(plan).is_some();
-    let summary = if let Some((url, attempts, interval_ms)) = plan_health(plan) {
-        match http_health_check(url, attempts, interval_ms).await {
+    let summary = if let Some((url, attempts, interval_ms, timeout_ms)) = plan_health(plan) {
+        match http_health_check(url, attempts, interval_ms, timeout_ms).await {
             Ok(_) => {
                 format!("deploy failed — rolled back to {previous} and restarted (health OK)")
             }
@@ -231,6 +231,7 @@ mod tests {
         DeployContext {
             references: std::collections::BTreeMap::new(),
             version: "abc1234".to_owned(),
+            subject: "Ship the release".to_owned(),
             target_user: "deploy".to_owned(),
             deployed_by: "op@box".to_owned(),
             previous_version: Some("def5678".to_owned()),
@@ -308,7 +309,12 @@ mod tests {
         };
         assert_eq!(
             plan_health(&with_health),
-            Some(("https://example.com/health", 9, 1500))
+            Some((
+                "https://example.com/health",
+                9,
+                1500,
+                zap_types::deploy::PROBE_TIMEOUT_MS
+            ))
         );
     }
 
@@ -373,8 +379,6 @@ mod tests {
                 &Connection::Mock(mock),
                 "/root/app",
                 &plan,
-                Some("def5678"),
-                "abc1234",
                 &EventHandler::Null,
                 &mut warnings,
             )
@@ -404,9 +408,10 @@ mod tests {
             let outcome = attempt_rollback(
                 &Connection::Mock(MockConnection::new("host")),
                 "/root/app",
-                &plan(),
-                previous,
-                "abc1234",
+                &DeployPlan {
+                    previous: previous.map(str::to_owned),
+                    ..plan()
+                },
                 &EventHandler::Capture(std::sync::Arc::clone(&events)),
                 &mut warnings,
             )
@@ -470,8 +475,6 @@ mod tests {
             &Connection::Mock(mock),
             "/root/app",
             &plan,
-            Some("def5678"),
-            "abc1234",
             &EventHandler::Capture(std::sync::Arc::clone(&events)),
             &mut warnings,
         )
@@ -571,8 +574,6 @@ mod tests {
             &Connection::Mock(mock.clone()),
             "/root/app",
             &plan,
-            Some("def5678"),
-            "abc1234",
             &EventHandler::Capture(std::sync::Arc::clone(&events)),
             &mut warnings,
         )
