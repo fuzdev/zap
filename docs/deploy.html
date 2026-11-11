@@ -28,7 +28,7 @@
 		<link href="/_app/immutable/chunks/CkSeWg2M.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Cyt8LZpN.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/nqpJJcfP.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.DBBUTYbQ.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.DaSMZjRK.js" rel="modulepreload">
 		<link href="/_app/immutable/nodes/0.CBD02HwM.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/EpM2J4Cd.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Drx_RGrR.js" rel="modulepreload">
@@ -36,7 +36,7 @@
 		<link href="/_app/immutable/chunks/yWx_1vUe.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMVmPj5_.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJ6hHGax.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/2.CjS8qjKf.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/2.CTeavGnV.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CHEAhmp6.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BbCw5KVU.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BPVwp-J3.js" rel="modulepreload">
@@ -48,29 +48,29 @@
 		<link href="/_app/immutable/chunks/tQA3rDst.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/k6TRNp0w.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DH_LefOd.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CiI0WzPA.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DBPsyPf2.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CtsBFaJL.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/D1RK0gmx.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/C_fCHugf.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/opzu_emj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/GoVQbpeX.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/d9FfLdfy.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CABULNtq.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BY8Njl_U.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/F58SSrOj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/B34bN6Wl.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D2QvIx7t.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CH4seIGa.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CjACcmfS.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DHlLBREC.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CwC1awOQ.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/B60F4JOd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/df6WGb4l.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJMm7Txn.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BXoHXHa0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DKqhmjm7.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMnsbEWi.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Brh7-bty.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/9ZLJ-H4D.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/DRFOPxDd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/sNOw6LX0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Ch_dVXHx.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/o9OBPhqj.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CTnnGNGJ.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/13.B0vuEzui.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/13.LGv89mGf.js" rel="modulepreload">
 		<!--12qhfyh--><!----><!--4fa0a9--><!--[-1--><!--]--><!----><!--1d1gc0k--><!----><title>Deploy — zap</title>
 		<link href="/_app/immutable/assets/0.C0PIgcC8.css" rel="stylesheet">
 		<link href="/_app/immutable/assets/Svg.DfrCKcO9.css" rel="stylesheet">
@@ -121,7 +121,45 @@ operator env first, as for every command. Flags, exit codes, and what a dry run
 reads: <a href="/docs/cli#zap-deploy">cli.md</a>.</p><p><strong>What it needs.</strong> On your machine: <code>git</code>, <code>tar</code> with <code>gzip</code>, and <code>ssh</code>, with <code>zap</code> run from
 inside the application's git checkout. On the target: what a file write needs
 (<a href="/docs/targets#what-the-target-needs">targets.md</a>), plus <code>tar</code>, <code>id</code>, and
-<code>flock</code>.</p><h2 id="first-deploy">First deploy</h2><p>A first deploy onto a fresh host is a chicken-and-egg: the binary lands via
+<code>flock</code>.</p><h3 id="what-a-wetrun-prints">What a wetrun prints</h3><p>While a wetrun runs, each phase prints one line to standard error as it starts:
+the drift preflight, each step, and a rollback if one starts. Nothing about how
+a phase ended prints there. When the run ends, the report goes to standard
+output: a table with a row for the preflight, each step, and a rollback when
+one ran, each with its status, how long it took, and what it says (the
+upload's size, what the health and readiness checks found, a failed step's
+error, a skipped one's reason; a command's own output, such as the build log,
+is left out), then the warnings and a closing line that says what is live
+where.</p><code class="svelte-jqsy8a"><!--[0-->→ preflight: checking 1 apply-managed resource for drift
+→ build: Build application
+→ tarball: Create tarball
+→ upload: Upload tarball
+→ extract_swap: Extract and swap release
+→ restart: Restart app
+→ health: Health check
+deploy — target host.example (wetrun)
+  version: abc1234 (previous: def5678)
+  ok    preflight     4.1s  1 apply-managed resource, no drift
+  ok    build         1.1s
+  ok    tarball       2.2s
+  ok    upload        3.3s  4.2 MB sent
+  ok    extract_swap  4.4s
+  ok    restart       5.5s
+  ok    health        6.6s  healthy after 2 attempts
+deployed abc1234 to host.example (previous: def5678) in 1m 23s
+plan_hash: deadbeef<!--]--></code><!----><p>The <code>→</code> lines are standard error and the rest standard output, so standard
+output redirected to a file holds the whole report and no progress line. Under
+<code>--json</code> neither prints: the events stream instead
+(<a href="/docs/cli#json-events">cli.md</a>). A preflight that checked nothing is a <code>skip</code>
+row that says why (<code>--skip-preflight</code>, or no apply-managed resources declared).</p><p>A failed run's closing line names the step that failed and the state the
+target is in. A failure before the swap released nothing:</p><code class="svelte-jqsy8a"><!--[0-->deploy FAILED at upload on host.example after 1m 23s — nothing was released, and `current` was not moved<!--]--></code><!----><p>A failure of the extract-and-swap step itself is read back from <code>current</code>, and
+nothing is rolled back. When <code>current</code> names another release, or none on a
+first release, this one is not live:</p><code class="svelte-jqsy8a"><!--[0-->deploy FAILED at extract_swap on host.example after 1m 23s — `current` does not name this release, so nothing was released<!--]--></code><!----><p>When it names this version (the swap can have happened before the step failed,
+or another deploy of the same version swapped), or can't be read, the line
+claims neither way and points at the step's error. So does a <code>current</code> that
+reads as missing where a release was live before the run: Zap never removes
+<code>current</code>, so that read is one it can't believe (an app path the connecting
+user can no longer search reads that way):</p><code class="svelte-jqsy8a"><!--[0-->deploy FAILED at extract_swap on host.example after 1m 23s — the swap is not known to have completed, and nothing was rolled back (see the step's error above)<!--]--></code><!----><p>A failure after the swap is followed by a rollback
+(<a href="#auto-rollback">Auto-rollback</a>).</p><h2 id="first-deploy">First deploy</h2><p>A first deploy onto a fresh host is a chicken-and-egg: the binary lands via
 <code>deploy</code>, but <code>deploy</code>'s preflight requires a converged <code>apply</code>, and a <code>service</code>
 declared <code>running: true</code> can't be running before there is anything to run.
 Resolve it in the config: declare the service <code>enabled</code> and leave <code>running</code>
@@ -143,14 +181,32 @@ stayed down reports converged. Declaring <code>running: true</code> buys that as
 back at the cost of one <code>deploy --wetrun --skip-preflight</code> on the very first
 release (previewed with <code>deploy --skip-preflight</code>, since the flag is part of
 the plan), and <code>--skip-preflight</code> disables the whole drift gate for that run.</p><p>When SSH hardening changes the user Zap connects as, add <code>--bootstrap</code> to the
-first apply: <a href="/docs/targets#the-bootstrap-user">targets.md</a>.</p><h2 id="binding-a-wetrun-to-a-reviewed-plan">Binding a wetrun to a reviewed plan</h2><p>A dry run prints the whole plan and ends with its hash:</p><code class="svelte-jqsy8a"><!--[0-->deploy — target {env:DEPLOY_HOST} (dry-run)
+first apply: <a href="/docs/targets#the-bootstrap-user">targets.md</a>.</p><h2 id="binding-a-wetrun-to-a-reviewed-plan">Binding a wetrun to a reviewed plan</h2><p>A dry run prints the whole plan and ends with its hash. It comes in groups a
+blank line apart: what ships where (the version and the release it replaces,
+the commit's subject, the host and the user Zap connects as, who is deploying,
+the declared target, and what the references resolve to), the two gates (the
+tree and the drift preflight), the steps, and what the run does with the plan.
+The commit's subject is its own first line, cut at 100 characters, with any
+secret's value masked; on a dirty tree it is still the commit's, and its line
+says it is the commit under the uncommitted changes. The extract-and-swap step
+lists the values its script is built from above the script: the app path, the
+release <code>current</code> must still name, each <code>shared</code> link, each <code>prepare</code> command,
+and how many releases are kept. Each poll's first line says what it does and
+how long it can take; a second gives the URL as declared when a reference in it
+resolves. Last, <code>in short:</code> restates the commit, version, host, user, tree, and
+preflight beside the hash, below however long the script is:</p><code class="svelte-jqsy8a"><!--[0-->deploy — target {env:DEPLOY_HOST} (dry-run)
   version: 3f2a9c1e7b04 (previous: 8d41e0a6c2f9)
+  commit: Add the readiness gate
   host: app.example.com
+  user: app
+  deployed by: ops@laptop
   target: {"local":false,"host":{"$env":"DEPLOY_HOST"},"user":{"$env":"DEPLOY_USER"},"home":"/home/app","package_manager":"apt","service_manager":"systemd"}
   references:
     DEPLOY_DOMAIN = app.example.com
+
   tree: clean
   preflight: no apply-managed resources declared — nothing to check
+
   - Build application (build)
       local$ gro build
   - Create tarball (tarball)
@@ -159,6 +215,11 @@ first apply: <a href="/docs/targets#the-bootstrap-user">targets.md</a>.</p><h2 i
   - Upload tarball (upload)
       the archive → target:/home/app/app/.zap-deploy-app-3f2a9c1e7b04.tar.gz (as the connecting user, mode 600, checked against its SHA-512)
   - Extract and swap release (extract_swap)
+      app: /home/app/app
+      replaces: 8d41e0a6c2f9 — `current` must still name it
+      links: shared/.env.production
+      prepare: deno cache server.js
+      keeps: 5 releases, counting this one and 8d41e0a6c2f9
       target script (its stdin: the archive's SHA-512):
         set -e
         zap_archive='/home/app/app/.zap-deploy-app-3f2a9c1e7b04.tar.gz'
@@ -166,14 +227,24 @@ first apply: <a href="/docs/targets#the-bootstrap-user">targets.md</a>.</p><h2 i
   - Restart app (restart)
       target$ sudo systemctl daemon-reload &amp;&amp; sudo systemctl restart app
   - Health check (health)
-      GET https://{env:DEPLOY_DOMAIN}/health — healthy on 2xx; up to 15 attempt(s), 2000 ms apart
-      polls https://app.example.com/health
+      GET https://app.example.com/health — healthy on 2xx; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
+      declared as https://{env:DEPLOY_DOMAIN}/health
   - Readiness check (readiness)
-      GET https://{env:DEPLOY_DOMAIN}/ready — ready on 2xx, unserved on 404; up to 15 attempt(s), 2000 ms apart
-      polls https://app.example.com/ready
+      GET https://app.example.com/ready — ready on 2xx, unserved on 404; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
+      declared as https://{env:DEPLOY_DOMAIN}/ready
+
   (dry-run — re-run with --wetrun to deploy)
-plan_hash: 1f98612fcbfacb69b9d31236457d549e00714e4ad0fb0a36e225c3fe6a5f4312<!--]--></code><!----><p>A wetrun executes only a plan you were shown. It computes its plan again, and
-that plan's hash must equal the reviewed one:</p><ul><li><code>--expect-plan &lt;hash></code> names the reviewed plan explicitly, and binds alone;</li><li>with no flag, the reviewed plan is the <strong>deploy preview</strong> recorded for this
+
+  in short:
+    commit: Add the readiness gate
+    version: 3f2a9c1e7b04 (previous: 8d41e0a6c2f9)
+    host: app.example.com
+    user: app
+    tree: clean
+    preflight: no apply-managed resources declared — nothing to check
+plan_hash: 2d09162e11f59e2b2409f6d89dcf0f469a877baf09d6e9f770bf5218eb6fcb95<!--]--></code><!----><p>A wetrun executes only a reviewed plan: one whose hash you named, or one Zap
+printed as a preview. It computes its plan again, and that plan's hash must
+equal the reviewed one:</p><ul><li><code>--expect-plan &lt;hash></code> names the reviewed plan explicitly, and binds alone;</li><li>with no flag, the reviewed plan is the <strong>deploy preview</strong> recorded for this
 config and host: the last <code>zap deploy</code> dry run, or a wetrun that refused.</li></ul><p>Otherwise the wetrun <strong>refuses</strong> before the drift preflight and any step,
 prints the plan it would have run under a <code>REFUSED</code> banner that says why (no
 preview yet, the plan changed since the preview, or the hash doesn't match),
@@ -181,12 +252,29 @@ records that render as the new preview, and exits 2. Nothing is built or
 uploaded. The everyday flow is <code>zap deploy</code>, read it, <code>zap deploy --wetrun</code>
 with the same flags. A wetrun fired cold becomes the preview, and the next one
 executes if nothing moved. There is no flag that skips the review, and a dry
-run rejects <code>--expect-plan</code>.</p><p>On an interactive terminal (standard input and standard error both terminals),
+run rejects <code>--expect-plan</code>.</p><p>The preview is recorded when Zap prints it, not when anyone reads it. A dry run
+whose output couldn't be written is withdrawn, so the next wetrun run without
+<code>--expect-plan</code> refuses; one sent to <code>/dev/null</code>, or cut short by <code>head</code> after
+the pipe took it whole, still binds it. When the output may be truncated, or
+the one who reads the preview isn't the one who deploys, pass <code>--expect-plan</code>
+with the hash on the preview's last line
+(<a href="/docs/concepts#a-wetrun-executes-only-the-plan-you-reviewed">concepts.md</a>).</p><p>On an interactive terminal (standard input and standard error both terminals),
 a wetrun with no review and no <code>--expect-plan</code> shows the plan instead, under an
-<code>UNREVIEWED</code> banner with its <code>plan_hash</code>, and ends with the question:</p><code class="svelte-jqsy8a"><!--[0-->  UNREVIEWED — this plan is not the one that was reviewed.
+<code>UNREVIEWED</code> banner, then its recap and its <code>plan_hash</code>, and ends with the
+question:</p><code class="svelte-jqsy8a"><!--[0-->  …
+
+  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
     no deploy plan has been previewed for this host.
-plan_hash: 1f98612fcbfacb69b9d31236457d549e00714e4ad0fb0a36e225c3fe6a5f4312
-Deploy this plan? Type 1f98612f, the start of its plan_hash, to confirm:<!--]--></code><!----><p>Typing those eight characters back is the review: the wetrun goes on with
+
+  in short:
+    commit: Add the readiness gate
+    version: 3f2a9c1e7b04 (previous: 8d41e0a6c2f9)
+    host: app.example.com
+    user: app
+    tree: clean
+    preflight: no apply-managed resources declared — nothing to check
+plan_hash: 2d09162e11f59e2b2409f6d89dcf0f469a877baf09d6e9f770bf5218eb6fcb95
+Deploy this plan? Type 2d09162e, the start of its plan_hash, to confirm:<!--]--></code><!----><p>Typing those eight characters back is the review: the wetrun goes on with
 exactly the plan shown, to the drift preflight, the withdrawal of any recorded
 preview, and the steps, as a bound wetrun does. Any other answer is the refusal
 above, under a <code>DECLINED</code> banner. The prompt follows <code>zap apply</code>'s rules: no
@@ -206,14 +294,17 @@ records its pass as the last-run report, which is no preview, so a <code>zap app
 previewed before it needs a new preview before its wetrun. With no state
 directory nothing is recorded, the run says so, and only <code>--expect-plan</code> binds.</p><p>Everything the hash covers is printed but two of Zap's own scripts: the one the
 upload installs the archive with, and the swap the auto-rollback runs. So a plan
-reviewed under one <code>zap</code> build doesn't bind one whose scripts differ. It covers:</p><ul><li>the version, the tree state, and the previous release on the target;</li><li>the declared target, the host it resolves to, and the connecting user (in the
-uploaded archive's name);</li><li>who is deploying (<code>user@host</code> of the operator machine, recorded in
+reviewed under one <code>zap</code> build doesn't bind one whose scripts differ. It covers:</p><ul><li>the version, the subject line of its commit, the tree state, and the
+previous release on the target;</li><li>the declared target, the host it resolves to, and the connecting user;</li><li>who is deploying (<code>user@host</code> of the operator machine, recorded in
 <code>deploy_info.json</code>);</li><li>the preflight's state: skipped, nothing declared, or which apply-managed
 resources it checks, as a count and a digest of their declarations and the
 current pins <code>zap.lock</code> holds for them;</li><li>every step: the build and tarball commands, the upload paths and the script
-that installs the archive, the remote script with its <code>shared</code> links and
-<code>prepare</code> commands, the restart command, the health and readiness URLs as
-they resolve, and the swap the auto-rollback would run;</li><li>the value of each reference the <code>deploy</code> block uses (its health domain),
+that installs the archive, the remote script and the values it is built from
+(the app path, the <code>shared</code> links, the <code>prepare</code> commands, how many releases
+are kept), the restart command, the health and readiness URLs as they resolve
+and the budget each is polled with (the attempts, the wait between two, the
+time each is given), and the swap the auto-rollback would run;</li><li>the plan's warnings, printed under it (a <code>deploy.service</code> the target's
+service manager can't restart);</li><li>the value of each reference the <code>deploy</code> block uses (its health domain),
 printed in its <code>references:</code> block (a secret's value excepted: the plan
 records only that it is one).</li></ul><p>So a plan reviewed for one host, tree, flag set, or operator does not bind a
 wetrun for another: a new commit, a deploy or rollback by someone else in
@@ -230,9 +321,10 @@ the health domain. The same holds for the bytes of a local <code>source</code> f
 review can bind such a plan: a wetrun is an error that names the reference
 before anything runs, and a dry run shows the plan under an <code>UNBINDABLE</code> note,
 with no <code>plan_hash</code> and no recorded preview. The ways out:
-<a href="/docs/env#masked-hosts-and-review">env.md</a>.</p><p>Text from the config, the environment, and the target is printed with control
-characters written out as <code>&lt;U+XXXX></code>, so a value can't hide or forge a line of
-the preview (<a href="/docs/security#escaped-output">security.md</a>).</p><h2 id="preflight">Preflight</h2><p>Before deploy touches the network, the machine-free gates run (secrets,
+<a href="/docs/env#masked-hosts-and-review">env.md</a>.</p><p>Text from the config, the environment, the checkout (the commit's subject), and
+the target is printed with control characters written out as <code>&lt;U+XXXX></code>, so a
+value can't hide or forge a line of the preview
+(<a href="/docs/security#escaped-output">security.md</a>).</p><h2 id="preflight">Preflight</h2><p>Before deploy touches the network, the machine-free gates run (secrets,
 structure, and, for a deploy config, a present <code>health.domain</code>), and a wetrun
 rejects any unset reference and a host, connecting user, or health domain behind
 a masked reference. <code>zap.lock</code> is read here too, when the drift preflight will
@@ -268,9 +360,11 @@ dirty tree on one commit is a release of its own:</p><table><thead><tr><th>In th
 timestamps or flags, so every file is compared by its contents: a file the
 index marks unchanged (<code>assume-unchanged</code>, <code>skip-worktree</code>) counts like any
 other, and so does one whose timestamps the index's cache would take for
-unchanged. Each read sets <code>core.fsmonitor=false</code>, <code>core.untrackedCache=false</code>,
-<code>core.ignoreStat=false</code>, <code>core.fileMode=true</code> (a mode change counts),
-<code>core.autocrlf=false</code> (line endings are not converted), and
+unchanged. Each read compares against the objects the commit names, not ones a
+<code>refs/replace/</code> entry puts in their place (<code>--no-replace-objects</code>, as the
+subject line is read too), and sets <code>core.fsmonitor=false</code>,
+<code>core.untrackedCache=false</code>, <code>core.ignoreStat=false</code>, <code>core.fileMode=true</code> (a
+mode change counts), <code>core.autocrlf=false</code> (line endings are not converted), and
 <code>core.splitIndex=false</code>, and passes <code>--untracked-files=normal</code> and
 <code>--ignore-submodules=none</code>, so <code>status.showUntrackedFiles</code>, a submodule's
 <code>ignore</code> setting, and <code>diff.ignoreSubmodules</code> don't narrow it either. So a
@@ -357,7 +451,8 @@ guard, the prune removes nothing unless <code>current</code> names a release, an
 on a target with no <code>sort</code> it removes nothing and warns.</li></ul></li><li><strong>restart</strong>: restart <code>deploy.service</code> through the target's service manager
 (with a <code>daemon-reload</code> first on systemd).</li><li><strong>health</strong>: poll <code>https://&lt;domain>&lt;path></code> from the operator machine (the one
 you run <code>zap</code> on) until
-it answers 2xx, up to <code>attempts</code> times, <code>interval_ms</code> apart. Neither poll
+it answers 2xx, up to <code>attempts</code> times, <code>interval_ms</code> apart, each attempt
+given 5 seconds. The plan states the most a poll can take. Neither poll
 follows a redirect: a 3xx is not healthy or ready, so a release that
 redirects to a login page doesn't pass on that page's 200.</li><li><strong>readiness</strong>: when <code>health.path</code> isn't already <code>/ready</code>, poll <code>/ready</code> too.
 2xx proceeds. When the attempts run out, the last HTTP status decides; a connection failure
@@ -370,8 +465,36 @@ status, or no answer at all. Point <code>health.path</code> at <code>/ready</cod
 check the gate; then any non-2xx, 404 included, rolls back.</li></ol><h2 id="auto-rollback">Auto-rollback</h2><p>If a step after the swap fails (the restart errors, health never goes green,
 <code>/ready</code> answers 503), Zap re-points <code>current</code> at the previous release,
 restarts, and re-checks health (the health URL, not <code>/ready</code>), recording the
-rollback as warnings and step events. The deploy still exits 1: rollback
-restores service, it doesn't paper over the failure.</p><p>The re-point is a compare-and-swap under the app's deploy lock, taken without
+rollback as a row of the report and as step events. The deploy still exits 1:
+rollback restores service, it doesn't paper over the failure.</p><p>The rollback has its own row in the report, after the failed step, and the
+closing line says where it left the target:</p><code class="svelte-jqsy8a"><!--[0-->→ preflight: checking 1 apply-managed resource for drift
+→ build: Build application
+→ tarball: Create tarball
+→ upload: Upload tarball
+→ extract_swap: Extract and swap release
+→ restart: Restart app
+→ health: Health check
+→ rollback: Roll back to def5678
+deploy — target host.example (wetrun)
+  version: abc1234 (previous: def5678)
+  ok    preflight     4.1s  1 apply-managed resource, no drift
+  ok    build         1.1s
+  ok    tarball       2.2s
+  ok    upload        3.3s  4.2 MB sent
+  ok    extract_swap  4.4s
+  ok    restart       5.5s
+  FAIL  health        6.6s  service did not become healthy at https://app.example.com/health within 15 attempts (last: HTTP 502)
+  ok    rollback      8.0s  def5678 restored and restarted, health OK
+  this deploy spent its review: before re-running, preview again with `zap deploy` (or pass --expect-plan with the hash that preview prints)
+deploy FAILED at health on host.example after 1m 23s — rolled back: def5678 is live again
+plan_hash: deadbeef<!--]--></code><!----><p>Without a health check in the plan, the line says the previous release was
+restored and restarted, not that it is live. A rollback that didn't go as
+planned says so on its row and in the closing line, and a warning below the
+table says why: no release was known to return to, so the failed release is live
+(the row has no time: it never started); the previous release was restored,
+but its restart or its health check failed, so it is not confirmed serving; the
+rollback was skipped, so <code>current</code> is as the warnings say; or the re-point
+itself failed, so the host may be serving the failed release.</p><p>The re-point is a compare-and-swap under the app's deploy lock, taken without
 waiting. It moves <code>current</code> back only while <code>current</code> still names this deploy's
 release and the previous release is still on the host. Otherwise (another
 deploy holds the lock or has replaced the release, someone re-pointed <code>current</code>
@@ -385,7 +508,12 @@ not from a recorded file, so a manual rollback done by hand is seen correctly
 on the next deploy. A <code>current</code> whose last segment, trailing slashes dropped,
 is no release's name names no previous release, so the deploy refuses before
 it builds anything: point <code>current</code> at the live release by hand, or remove it
-to deploy as onto a fresh host.</p><h3 id="concurrent-deploys">Concurrent deploys</h3><p>A deploy planned before another deploy's swap stops at its check (step 4), so a
+to deploy as onto a fresh host.</p><p>A <code>current</code> that can't be read (the read fails, or the app path is there but
+the connecting user can't enter it) leaves the deploy with no previous release:
+the preview warns, with the reason, that there is nothing to roll back to. An
+app path below a directory the connecting user can't search reads as missing,
+so the preview says <code>(first release)</code> with no warning; its wetrun then fails at
+the upload, before anything is released.</p><h3 id="concurrent-deploys">Concurrent deploys</h3><p>A deploy planned before another deploy's swap stops at its check (step 4), so a
 rollback never undoes a newer deploy, with one exception: a <code>--force</code> redeploy
 of the same version, planned after a deploy's swap while that deploy is in its
 health check, writes the same <code>current</code>, which the first deploy's rollback
@@ -400,16 +528,16 @@ archive (exit 1) rather than ship bytes it didn't build.</p><!----><!----></div>
 			
 			<script>
 				{
-					__sveltekit_j41qhg = {
+					__sveltekit_h0s9s2 = {
 						base: "",
-						version: "7f2b1564d4335285d2562cc4ed2e47b383a12f1e"
+						version: "fa7283a6b9e6447582f73bdd3668dc027e726ae2"
 					};
 
 					const element = document.currentScript.parentElement;
 
 					import("/_app/immutable/entry/start.DMWmOBF_.js").then(async (kit) => {
-						kit.init(__sveltekit_j41qhg);
-						const app = await import("/_app/immutable/entry/app.DBBUTYbQ.js");
+						kit.init(__sveltekit_h0s9s2);
+						const app = await import("/_app/immutable/entry/app.DaSMZjRK.js");
 						kit.start(app, element, {
 							node_ids: [0, 2, 13],
 							data: [null,null,null],

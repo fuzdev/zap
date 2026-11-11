@@ -28,7 +28,7 @@
 		<link href="/_app/immutable/chunks/CkSeWg2M.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Cyt8LZpN.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/nqpJJcfP.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.DBBUTYbQ.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.DaSMZjRK.js" rel="modulepreload">
 		<link href="/_app/immutable/nodes/0.CBD02HwM.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/EpM2J4Cd.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Drx_RGrR.js" rel="modulepreload">
@@ -36,7 +36,7 @@
 		<link href="/_app/immutable/chunks/yWx_1vUe.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMVmPj5_.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJ6hHGax.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/2.CjS8qjKf.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/2.CTeavGnV.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CHEAhmp6.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BbCw5KVU.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BPVwp-J3.js" rel="modulepreload">
@@ -48,29 +48,29 @@
 		<link href="/_app/immutable/chunks/tQA3rDst.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/k6TRNp0w.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DH_LefOd.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CiI0WzPA.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DBPsyPf2.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CtsBFaJL.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/D1RK0gmx.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/C_fCHugf.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/opzu_emj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/GoVQbpeX.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/d9FfLdfy.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CABULNtq.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BY8Njl_U.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/F58SSrOj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/B34bN6Wl.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D2QvIx7t.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CH4seIGa.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CjACcmfS.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DHlLBREC.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CwC1awOQ.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/B60F4JOd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/df6WGb4l.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJMm7Txn.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BXoHXHa0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DKqhmjm7.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMnsbEWi.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Brh7-bty.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/9ZLJ-H4D.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/DRFOPxDd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/sNOw6LX0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Ch_dVXHx.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/o9OBPhqj.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CTnnGNGJ.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/18.BgLQwxcT.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/18.wLGuX0m_.js" rel="modulepreload">
 		<!--12qhfyh--><!----><!--4fa0a9--><!--[-1--><!--]--><!----><!--di86c5--><!----><title>Getting started — zap</title>
 		<link href="/_app/immutable/assets/0.C0PIgcC8.css" rel="stylesheet">
 		<link href="/_app/immutable/assets/Svg.DfrCKcO9.css" rel="stylesheet">
@@ -119,6 +119,9 @@ $ echo $?   # $status in fish
 declares: a file's content shows as its length and the start of its SHA-512,
 never the bytes. The <code>plan_hash</code> names this exact plan. <code>zap plan</code> prints the
 same plan with a change count and exits 0: it reports, where <code>apply</code> judges.</p><p><strong>Apply.</strong> Now act:</p><code class="svelte-jqsy8a"><!--[0-->$ zap apply --wetrun
+→ notes: create directory
+→ hello: create file
+→ re-detect: reading 2 declared resources back to confirm what the changes left
 apply — target local (wetrun)
   user: ops
   home: /home/ops
@@ -126,20 +129,25 @@ apply — target local (wetrun)
   ok    notes
   ok    hello
 applied: 2 ok, 0 failed, 0 skipped (of 2)
-plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61<!--]--></code><!----><p>After the changes ran, Zap read both resources again and found them converged,
+plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61<!--]--></code><!----><p>The <code>→</code> lines are progress, printed to standard error as each change and the
+re-detection start; the report under them is standard output. After the changes
+ran, Zap read both resources again and found them converged,
 which is why the exit was 0. Had anything still read wrong, the report would
 say <code>RESIDUAL</code> and exit 1.</p><p>The wetrun went through because your preview a moment ago bound it: a wetrun
 executes only the plan you reviewed.</p><p>Had you run <code>zap apply --wetrun</code> first, with no preview behind it, it would
 have shown the plan and asked:</p><code class="svelte-jqsy8a"><!--[0-->$ zap apply --wetrun
 apply — target local (wetrun, awaiting confirmation)
   …
-  UNREVIEWED — this plan is not the one that was reviewed.
+
+  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
     no plan has been previewed on this host.
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 Apply this plan? Type 5bb79cc9, the start of its plan_hash, to confirm: n
 apply — target local (wetrun, declined)
   …
-  DECLINED — nothing ran: this plan was not confirmed, and is not the one that was reviewed.
+
+  DECLINED — nothing ran: this plan was not confirmed.
+    no plan has been previewed on this host.
   …<!--]--></code><!----><p>Typing <code>5bb79cc9</code> would have run exactly that plan: the answer is the start of a hash
 you can only know by looking at the plan. Declined, it changed nothing, exited 2,
 and became the preview: running it again executes if nothing moved. Without a
@@ -228,16 +236,16 @@ connects as, declare both users and run the first apply with <code>--bootstrap</
 			
 			<script>
 				{
-					__sveltekit_j41qhg = {
+					__sveltekit_h0s9s2 = {
 						base: "",
-						version: "7f2b1564d4335285d2562cc4ed2e47b383a12f1e"
+						version: "fa7283a6b9e6447582f73bdd3668dc027e726ae2"
 					};
 
 					const element = document.currentScript.parentElement;
 
 					import("/_app/immutable/entry/start.DMWmOBF_.js").then(async (kit) => {
-						kit.init(__sveltekit_j41qhg);
-						const app = await import("/_app/immutable/entry/app.DBBUTYbQ.js");
+						kit.init(__sveltekit_h0s9s2);
+						const app = await import("/_app/immutable/entry/app.DaSMZjRK.js");
 						kit.start(app, element, {
 							node_ids: [0, 2, 18],
 							data: [null,null,null],

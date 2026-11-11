@@ -43,10 +43,13 @@ host is unsupported: <code>fgro</code>'s sandbox needs Linux, so your side does 
 without compatibility layers. <a>stability.md</a> names the surfaces
 whose breaks a release calls out. Read <a>security.md</a> before
 pointing Zap at a machine you care about.</p><h2>Agents and alternatives</h2><p><strong>Can an AI agent run Zap?</strong> Yes, and it is designed for that: the default
-command is read-only, the plan is a hash-named fact the agent can show you, the
-wetrun executes only that plan, and <code>--json</code> streams typed events. Give the
-agent <code>zap plan</code> and <code>zap apply</code> freely and keep <code>--wetrun</code> for the human, or
-let it wetrun with <code>--expect-plan</code> set to the hash you approved.</p><p><strong>How is this different from a shell script with <code>if</code> guards?</strong> That script is
+command is read-only, the plan is a hash-named fact the agent can show you, a
+wetrun given that hash executes only that plan, and <code>--json</code> streams typed
+events. Give the agent <code>zap plan</code> and <code>zap apply</code> freely and keep <code>--wetrun</code> for
+the human, or let it wetrun with <code>--expect-plan</code> set to the hash you approved.
+Without the flag, a wetrun binds to the last preview Zap printed on that host,
+whether or not anyone read it: a preview an agent cut short with <code>head</code> still
+binds once the pipe took it whole, and the hash is its last line.</p><p><strong>How is this different from a shell script with <code>if</code> guards?</strong> That script is
 reaching toward what Zap declares: detection (skip what's done), idempotent
 re-runs, a preview before acting, and a report after. Zap adds the parts a
 script never grows: a refusal to guess when a read fails, a re-read after acting,

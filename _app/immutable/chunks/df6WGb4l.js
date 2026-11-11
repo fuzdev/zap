@@ -44,10 +44,13 @@ wetruns started on one preview, the one that claims it first goes on and the
 other stops with nothing changed (exit 2);</li><li>re-checks that every reference the plan recorded still resolves to the
 recorded value, refusing (exit 2) if one moved while the run was in progress;</li><li>writes <code>zap.lock</code> when the config has tracked pins;</li><li>executes the changes in dependency order, stopping at the first failure,
 writing a pending-trigger marker on the target before the first source of a
-triggered service and clearing it after the service's change;</li><li> <code>RESIDUAL</code>.</li></ol><h3>Binding to the review</h3><p>A wetrun executes only the plan you reviewed: the plan it computes must equal,
+triggered service and clearing it after the service's change;</li><li> <code>RESIDUAL</code>.</li></ol><p>While steps 8 and 9 run, each change and the re-detection print one line to
+standard error as they start (<code>→ notes: create directory</code>); the report, on
+standard output when the run ends, holds every outcome. <code>--json</code> prints no such
+line.</p><h3>Binding to the review</h3><p>A wetrun executes only the plan you reviewed: the plan it computes must equal,
 hash for hash, the one named by <code>--expect-plan &lt;hash></code> or the one in the most
-recent preview on this host. Otherwise it <strong>refuses</strong> <a>concepts.md</a>.</p><p>On an interactive terminal, a wetrun whose plan has no review (no preview, or a
-preview of a different plan) and no <code>--expect-plan</code> shows the plan and asks instead:</p><!><p> <code>plan_hash</code>, in either case. Input typed before the question appears is
+recent preview on this host. Otherwise it <strong>refuses</strong> <code>/dev/null</code>, or cut short by <code>head</code> <a>concepts.md</a>.</p><p>On an interactive terminal, a wetrun whose plan has no review (no preview, or a
+preview of a different plan) and no <code>--expect-plan</code> shows the plan and asks instead:</p><!><p>The plan and the question go to standard error, as do the <code>→</code> <code>plan_hash</code>, in either case. Input typed before the question appears is
 discarded, so neither a <code>y</code> nor an earlier run's answer typed ahead while Zap
 reads the machine runs anything. Those
 characters execute the plan shown and nothing else; any other answer (a <code>y</code>,
@@ -62,7 +65,9 @@ a plan with no review. A script stays non-interactive by previewing first (a dry
 then the wetrun), by passing <code>--expect-plan &lt;hash></code>, or by running with
 standard input that isn't a terminal (<code>&lt; /dev/null</code>). A non-interactive wetrun
 with no review of its plan refuses, and <code>--json</code> never asks.</p><p><code>--expect-plan</code> makes the binding explicit: the hash from the plan you reviewed,
-perhaps in a pull request or an agent's transcript. The match is exact. A dry run
+perhaps in a pull request or an agent's transcript. It is the binding to use
+when the preview's output may be truncated, or when the one who reads it isn't
+the one who runs the wetrun. The match is exact. A dry run
 rejects the flag. <code>zap deploy</code> follows the same rule against its own preview
 (<a>below</a>).</p><p>Exit codes:</p><table><thead><tr><th>Code</th><th>Dry run</th><th>Wetrun</th></tr></thead><tbody><tr><td>0</td><td>no changes pending</td><td>every change completed, and the re-detection read everything converged</td></tr><tr><td>2</td><td>changes pending; <code>--expect-plan</code> without <code>--wetrun</code></td><td>refused: the plan was not the reviewed one (or was declined at the prompt), its preview was claimed by another wetrun first, or a command can't take a resolved value; or an error before anything runs: the host or connecting user is behind a masked reference</td></tr><tr><td>1</td><td>a held resource or an unresolved reference</td><td>a failed change, a residual resource, a failed re-detection, a held resource, or a preview that couldn't be withdrawn</td></tr></tbody></table><h2><code>zap deploy</code></h2><!><p>Ships a release to a remote target: build locally, tarball the artifacts,
 upload, extract into <code>releases/&lt;version></code>, swap the <code>current</code> symlink, restart
@@ -72,7 +77,7 @@ reference;</li><li>the checkout has uncommitted changes or untracked files and n
 deploy preview: its plan's hash must equal <code>--expect-plan</code> or the recorded
 preview's, or it refuses before the preflight and any step, becomes the new
 preview, and exits 2 (on an interactive terminal with no <code>--expect-plan</code> it asks
-for the start of the <code>plan_hash</code> <code>zap status</code> <a>deploy.md</a>.</p><p>Flags:</p><table><thead><tr><th>Flag</th><th>Meaning</th></tr></thead><tbody><tr><td><code>--expect-plan &lt;hash></code></td><td>bind to this hash instead of the recorded preview: execute only if the plan has exactly it. Wetrun only, and not single-use.</td></tr><tr><td><code>--force</code></td><td>deploy an unchanged version, and version a dirty tree <code>&lt;hash>-dirty-&lt;id></code>, named by its changes. Without it a wetrun of a dirty tree is refused.</td></tr><tr><td><code>--skip-build</code></td><td>leave <code>deploy.build</code> out of the plan; ship the artifacts as they are</td></tr><tr><td><code>--skip-preflight</code></td><td>skip the drift preflight. The machine-free gates and the env check still run.</td></tr></tbody></table><p><code>--skip-build</code>, <code>--skip-preflight</code>, <code>--force</code> on a dirty tree, and <code>--bootstrap</code> </p><p>Exit codes:</p><table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody><tr><td>0</td><td>dry run rendered, release deployed, or already deployed</td></tr><tr><td>2</td><td>refused: the plan was not the reviewed one, was declined at the prompt, or its preview was spent by another run first</td></tr><tr><td>2</td><td>the preflight found drift, or couldn't read every resource</td></tr><tr><td>2</td><td>a wetrun whose host, connecting user, or health domain resolves through a masked reference, or from a dirty checkout without <code>--force</code></td></tr><tr><td>2</td><td><code>--expect-plan</code> on a dry run; a <code>zap.lock</code> that doesn't parse</td></tr><tr><td>1</td><td>a step failed, including the release script finding another deploy of the app holding its deploy lock or having swapped since this plan was made (rollback may have restored the previous release; the exit stays 1); the recorded preview couldn't be withdrawn; <code>zap.lock</code> couldn't be opened</td></tr></tbody></table><h2><code>zap detect</code></h2><!><p>The detection half of <code>plan</code>, rendered raw: one line per resource with its
+for the start of the <code>plan_hash</code> <code>zap status</code> <a>deploy.md</a>.</p><p> <a>deploy.md</a>.</p><p>Flags:</p><table><thead><tr><th>Flag</th><th>Meaning</th></tr></thead><tbody><tr><td><code>--expect-plan &lt;hash></code></td><td>bind to this hash instead of the recorded preview: execute only if the plan has exactly it. Wetrun only, and not single-use.</td></tr><tr><td><code>--force</code></td><td>deploy an unchanged version, and version a dirty tree <code>&lt;hash>-dirty-&lt;id></code>, named by its changes. Without it a wetrun of a dirty tree is refused.</td></tr><tr><td><code>--skip-build</code></td><td>leave <code>deploy.build</code> out of the plan; ship the artifacts as they are</td></tr><tr><td><code>--skip-preflight</code></td><td>skip the drift preflight. The machine-free gates and the env check still run.</td></tr></tbody></table><p><code>--skip-build</code>, <code>--skip-preflight</code>, <code>--force</code> on a dirty tree, and <code>--bootstrap</code> </p><p>Exit codes:</p><table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody><tr><td>0</td><td>dry run rendered, release deployed, or already deployed</td></tr><tr><td>2</td><td>refused: the plan was not the reviewed one, was declined at the prompt, or its preview was spent by another run first</td></tr><tr><td>2</td><td>the preflight found drift, or couldn't read every resource</td></tr><tr><td>2</td><td>a wetrun whose host, connecting user, or health domain resolves through a masked reference, or from a dirty checkout without <code>--force</code></td></tr><tr><td>2</td><td><code>--expect-plan</code> on a dry run; a <code>zap.lock</code> that doesn't parse</td></tr><tr><td>1</td><td>a step failed, including the release script finding another deploy of the app holding its deploy lock or having swapped since this plan was made (rollback may have restored the previous release; the exit stays 1); the recorded preview couldn't be withdrawn; <code>zap.lock</code> couldn't be opened</td></tr></tbody></table><h2><code>zap detect</code></h2><!><p>The detection half of <code>plan</code>, rendered raw: one line per resource with its
 mark (<code>ok</code>, <code>drift</code>, <code>absent</code>, or <code>?</code> for undetermined), its id and kind, and,
 for drift, what was observed. For validating that a probe reads a real target
 correctly. Over a host that resolves through a masked
@@ -106,9 +111,24 @@ fails. The config is <code>--config &lt;path></code> here, since the positional 
 ids. A failed entry keeps the code its error has everywhere else: exit 1 if any
 failure is operational (a fetch, a write), else 2 if any entry failed on an
 input to fix (an unset reference in its URL or credential, a signature that
-doesn't verify). It prints the same <code>note:</code> lines as <code>zap lock</code>.</p><h2><code>zap version</code></h2><p>Prints <code>zap &lt;version></code>.</p><h2>Banners</h2><p>What a pass couldn't establish, or why it didn't act, leads its report:</p><table><thead><tr><th>Banner</th><th>Means</th><th>Exit</th></tr></thead><tbody><tr><td><code>UNDETERMINED</code></td><td>resources detection couldn't read, each with why, then the changes held behind them, each with what it waits on or would trigger; all held out of the plan</td><td>1; 2 in a deploy's preflight</td></tr><tr><td><code>UNVERIFIABLE</code></td><td>referenced variables that were unset or empty</td><td>1; a wetrun refuses with 2</td></tr><tr><td><code>LOCK</code></td><td>a tracked pin that is missing, stale, or unverifiable</td><td>1; <code>apply</code> and a deploy wetrun refuse with 2</td></tr><tr><td><code>UNREVIEWED</code></td><td>a wetrun's plan isn't the reviewed one; on a terminal, Zap asks</td><td></td></tr><tr><td><code>REFUSED</code></td><td>a wetrun that didn't execute; its plan becomes the preview</td><td>2 (1 when a resource is held)</td></tr><tr><td><code>DECLINED</code></td><td>the confirmation wasn't the plan's hash prefix</td><td>2</td></tr><tr><td><code>RESIDUAL</code></td><td>resources that still don't read converged after a wetrun</td><td>1</td></tr><tr><td><code>UNBINDABLE</code></td><td>the host, connecting user, or (deploy) health domain is behind a masked reference: no <code>plan_hash</code>, not a preview</td><td></td></tr><tr><td><code>UNRECORDED</code></td><td>the host is behind a masked reference: no last-run report kept</td><td></td></tr></tbody></table><h2>Exit codes, all commands</h2><p>The pattern across commands. The tables list 2 before 1 because 2 is still an
+doesn't verify). It prints the same <code>note:</code> lines as <code>zap lock</code>.</p><h2><code>zap version</code></h2><p>Prints <code>zap &lt;version></code>.</p><h2>Banners</h2><p>What a pass couldn't establish, or why it didn't act, leads its report:</p><table><thead><tr><th>Banner</th><th>Means</th><th>Exit</th></tr></thead><tbody><tr><td><code>UNDETERMINED</code></td><td>resources detection couldn't read, each with why, then the changes held behind them, each with what it waits on or would trigger; all held out of the plan</td><td>1; 2 in a deploy's preflight</td></tr><tr><td><code>UNVERIFIABLE</code></td><td>referenced variables that were unset or empty</td><td>1; a wetrun refuses with 2</td></tr><tr><td><code>LOCK</code></td><td>a tracked pin that is missing, stale, or unverifiable</td><td>1; <code>apply</code> and a deploy wetrun refuse with 2</td></tr><tr><td><code>UNREVIEWED</code></td><td>a wetrun's plan has no review; on a terminal, Zap asks</td><td></td></tr><tr><td><code>REFUSED</code></td><td>a wetrun that didn't execute; its plan becomes the preview</td><td>2 (1 when a resource is held)</td></tr><tr><td><code>DECLINED</code></td><td>the confirmation wasn't the plan's hash prefix</td><td>2</td></tr><tr><td><code>RESIDUAL</code></td><td>resources that still don't read converged after a wetrun</td><td>1</td></tr><tr><td><code>UNBINDABLE</code></td><td>the host, connecting user, or (deploy) health domain is behind a masked reference: no <code>plan_hash</code>, not a preview</td><td></td></tr><tr><td><code>UNRECORDED</code></td><td>the host is behind a masked reference: no last-run report kept</td><td></td></tr></tbody></table><h2>Exit codes, all commands</h2><p>The pattern across commands. The tables list 2 before 1 because 2 is still an
 established answer and 1 is not:</p><table><thead><tr><th>Code</th><th>Family</th></tr></thead><tbody><tr><td>0</td><td>established and fine: converged, deployed, nothing to do</td></tr><tr><td>2</td><td>established and needs a decision: changes pending (for the commands that judge them: <code>apply</code>, <code>status</code>), a refused or declined wetrun, preflight drift, a config error</td></tr><tr><td>1</td><td>unestablished or failed: a held or unverifiable resource, a failed change, a failed step, an operational error</td></tr></tbody></table><p><code>plan</code>, <code>detect</code>, and a deploy dry run report rather than judge: pending changes
-exit 0 there.</p><p>An error prints as <code>error:</code> and its message; a message of several lines is
+exit 0 there.</p><p>A report that can't be written (standard output a pipe whose reader has gone,
+or a full device) prints <code>error: the report could not be written:</code> and the
+reason on standard error.
+A run whose report is its answer (<code>plan</code>, <code>detect</code>, <code>status</code>, <code>lock --check</code> <code>config validate</code>, <code>version</code>, the help, a dry run, a refused wetrun) then exits
+1 where it would have exited 0. A preview whose report couldn't be written is
+withdrawn, and <code>its preview was withdrawn</code> follows on standard error: the next
+wetrun run without <code>--expect-plan</code> refuses. The preview of a <code>plan</code> <code>apply</code> is the host's last-run report, so <code>zap status</code> then has no last run for
+that host until the next pass. A record another run has written at its name
+since is left alone, and a run stopped while it writes (a signal) withdraws
+nothing. A run
+that changed something keeps its own code, which describes the machine or the
+lock: an <code>apply</code> <code>deploy</code> wetrun that reached its steps, <code>lock</code>, and an <code>update</code> that advanced or
+refreshed an entry. An <code>apply</code> wetrun with nothing to do, or an <code>update</code> that
+moved no entry, only answered. A non-zero code is kept either way. An error or a
+usage error that standard error can't take is lost, and exits with its own code
+all the same.</p><p>An error prints as <code>error:</code> and its message; a message of several lines is
 indented under it, and any advice Zap adds follows at the left margin.</p><p>Errors raised before a report exists follow the same split.</p><p>Exit 2, a problem in your inputs:</p><ul><li><code>fgro</code>: none named; a path that isn't absolute; one that is missing, a link, a
 script or set-ID file, or doesn't hash to the toolchain pin; one that answers in
 an eval protocol or graph version this <code>zap</code> doesn't read; no toolchain pin; an <code>fgro</code> pin
@@ -140,26 +160,28 @@ starting.</p><p><code>code</code> on a failure is a triage category: <code>trans
 by the error the system returned (a symbolic link or anything else in the way,
 or a full disk, is <code>conflict</code>; a timeout is <code>transient</code>); a command, or <code>ssh</code>,
 by its exit code and what it printed. Every value is masked: a resolved secret
-never appears in an event.</p><p> <code>warning:</code> lines go with it: the stream carries a warning only where an event
+never appears in an event.</p><p>Events carry no duration: a consumer reading the stream live can time it by
+when each line arrives. The <code>→</code> progress lines a text-mode wetrun prints to
+standard error are not events and are not in the stream.</p><p> <code>warning:</code> lines go with it: the stream carries a warning only where an event
 holds it. A deploy's rollback is always one: rolled back, failed, or skipped,
 with nothing to return to (a broken release left live) among the skips. The
 others, such as a deploy's repairs of an unfinished one or a failed prune,
 aren't in the stream.</p><h2>Environment variables Zap reads</h2><table><thead><tr><th>Variable</th><th>Meaning</th></tr></thead><tbody><tr><td><code>ZAP_HOME</code></td><td>where Zap keeps operator-side state (default <code>~/.zap</code>): the eval cache, the <code>fgro</code> pin cache, the content cache, last-run reports, deploy previews, SSH multiplexing sockets. An absolute path; empty counts as unset. See <a>lock.md</a>.</td></tr><tr><td><code>ZAP_FGRO</code></td><td>the <code>fgro</code> binary that evaluates configs, by absolute path (an empty one is an error, not unset); never looked up on <code>PATH</code>. <code>--fgro</code> overrides it, and is the one that survives <code>sudo</code>. Name a copy you update deliberately, not Gro's build output (<a>install.md</a>).</td></tr><tr><td><code>ZAP_MINISIGN</code></td><td>the <code>minisign</code> binary a <code>build</code> source's <code>verify</code> runs, by absolute path (an empty or relative one fails the verification, saying so); unset, the first <code>minisign</code> in an absolute directory on <code>PATH</code>. Either is refused when it, or a directory on the way to it, is writable by a group or others or owned by anyone but root and you, or it sits in <code>node_modules</code> (<a>resources.md</a>)</td></tr><tr><td><code>ZAP_EVAL_CACHE</code></td><td><code>shadow</code> (default: eval fresh, compare against the cache, report a mismatch) or <code>skip</code> (serve a cache hit whose files are unchanged without running <code>fgro</code>; a change the evaluation's record doesn't name isn't seen: a symbolic link, in <code>node_modules</code> or the project, pointed at other files, or a directory turned world-writable)</td></tr><tr><td><code>ZAP_EVAL_CACHE_LOG</code></td><td>set to print eval-cache hit/miss observations</td></tr></tbody></table><p> <code>--env-file</code>.</p>`,1);function m(a,m){l(m,!0);let h=ie(`cli`);s(`y492lb`,e=>{t(()=>{ee.title=`CLI reference — zap`})}),d(a,{get tome(){return h},children:(t,ee)=>{p(t,{children:(t,ee)=>{var a=ae(),s=ne(a),c=e(n(s)),l=e(c);l.nodeValue=`; for a first run, see
 `;var ie=e(l);r(),i(s);var d=e(s);f(d,{lang:null,content:`zap <command> [flags] [config]`});var p=e(d),m=e(n(p),6);m.nodeValue=` prints the command list, and
 `,r(2),i(p);var h=e(p);o(h,`id`,`commands-at-a-glance`);var g=e(h,2),_=e(n(g),4);_.nodeValue=` build
-`;var oe=e(_,6);oe.nodeValue=`, a cycle, service intent on a target with no
-`;var se=e(oe,2);se.nodeValue=`, …) fails every command with the same message. See
-`;var ce=e(se);r(),i(g);var le=e(g);o(le,`id`,`shared-flags`);var v=e(le),ue=e(n(v)),y=n(ue),de=e(n(y),2),fe=e(n(de),7);r(),i(de),i(y);var b=e(y),pe=e(n(b),2),me=e(n(pe),3);r(),i(pe),i(b);var he=e(b,2),ge=e(n(he),2),_e=e(n(ge),5);r(),i(ge),i(he),r(2),i(ue),i(v);var ve=e(v);o(ve,`id`,`zap-plan`);var ye=e(ve);f(ye,{lang:null,content:`zap plan [--diff] [--no-cache] [--bootstrap] [--fgro <p>] [--env-file <p>] [config]`});var x=e(ye),be=e(n(x),2);be.nodeValue=`
-(create) or `;var xe=e(be,2);xe.nodeValue=` (update) line per resource, its steps under it, and the
-`;var Se=e(xe,6);Se.nodeValue=`
+`;var v=e(_,6);v.nodeValue=`, a cycle, service intent on a target with no
+`;var oe=e(v,2);oe.nodeValue=`, …) fails every command with the same message. See
+`;var se=e(oe);r(),i(g);var ce=e(g);o(ce,`id`,`shared-flags`);var y=e(ce),le=e(n(y)),b=n(le),ue=e(n(b),2),de=e(n(ue),7);r(),i(ue),i(b);var x=e(b),fe=e(n(x),2),pe=e(n(fe),3);r(),i(fe),i(x);var me=e(x,2),he=e(n(me),2),ge=e(n(he),5);r(),i(he),i(me),r(2),i(le),i(y);var _e=e(y);o(_e,`id`,`zap-plan`);var ve=e(_e);f(ve,{lang:null,content:`zap plan [--diff] [--no-cache] [--bootstrap] [--fgro <p>] [--env-file <p>] [config]`});var S=e(ve),ye=e(n(S),2);ye.nodeValue=`
+(create) or `;var be=e(ye,2);be.nodeValue=` (update) line per resource, its steps under it, and the
+`;var xe=e(be,6);xe.nodeValue=`
 attribute lines above a drifted resource's steps; every change still shows its
-steps, so the view prints everything the `,r(4),i(x);var S=e(x),Ce=e(n(S),4);Ce.nodeValue=`
-runs as root and refuses a review made without it.`,i(S);var C=e(S),we=e(n(C)),Te=e(n(we),4),Ee=e(n(Te),2),De=e(n(Ee));De.textContent=`{"local":true}`;var Oe=e(De,2);Oe.textContent=`{"$env":"NAME"}`,r(),i(Ee),i(Te),r(),i(we),i(C);var w=e(C),ke=e(n(w),22);ke.nodeValue=`
-its bytes must have, a swap's `;var Ae=e(ke,4);Ae.nodeValue=` and its
-`;var je=e(Ae,8);je.nodeValue=` and their
-`;var Me=e(je,4);Me.nodeValue=`
-(`;var Ne=e(Me);r(),i(w);var T=e(w),Pe=e(n(T),8);Pe.nodeValue=` is a command Zap runs as written.
-`,r(6),i(T);var Fe=e(T);f(Fe,{lang:null,content:`  [+] deploy  (user)
+steps, so the view prints everything the `,r(4),i(S);var C=e(S),Se=e(n(C),4);Se.nodeValue=`
+runs as root and refuses a review made without it.`,i(C);var w=e(C),Ce=e(n(w)),we=e(n(Ce),4),Te=e(n(we),2),Ee=e(n(Te));Ee.textContent=`{"local":true}`;var De=e(Ee,2);De.textContent=`{"$env":"NAME"}`,r(),i(Te),i(we),r(),i(Ce),i(w);var T=e(w),Oe=e(n(T),22);Oe.nodeValue=`
+its bytes must have, a swap's `;var ke=e(Oe,4);ke.nodeValue=` and its
+`;var Ae=e(ke,8);Ae.nodeValue=` and their
+`;var je=e(Ae,4);je.nodeValue=`
+(`;var Me=e(je);r(),i(T);var E=e(T),Ne=e(n(E),8);Ne.nodeValue=` is a command Zap runs as written.
+`,r(6),i(E);var Pe=e(E);f(Pe,{lang:null,content:`  [+] deploy  (user)
       > id -u -- 'deploy' >/dev/null 2>&1 || sudo useradd -m -d '/home/deploy' -s '/bin/bash' -- 'deploy'
       > sudo chown -h -- 'deploy:' '/home/deploy'
       > sudo usermod -s '/bin/bash' -- 'deploy'
@@ -176,23 +198,26 @@ its bytes must have, a swap's `;var Ae=e(ke,4);Ae.nodeValue=` and its
       = put /etc/apt/sources.list.d/pgdg.list  (mode 644, as root)
           from: the line below, as the target's shell reads it inside double quotes after reading /etc/os-release: a variable in it expands and a $(…) in it runs, at every plan too
           line: deb [signed-by=/usr/share/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main
-      > sudo apt-get update`});var E=e(Fe),D=n(E),Ie=e(n(D),2),Le=e(Ie,5);Le.nodeValue=`
+      > sudo apt-get update`});var D=e(Pe),O=n(D),Fe=e(n(O),2),Ie=e(Fe,5);Ie.nodeValue=`
 line saying where it comes from and what skips the put. Text the config
-supplies for it prints under `,r(8),i(D);var O=e(D,3),Re=e(n(O));Re.nodeValue=`
-comes first in a `;var ze=e(Re,3);r(),i(O);var Be=e(O),Ve=e(n(Be),3);Ve.nodeValue=`, as the
-`;var He=e(Ve,6);He.nodeValue=`
-lists an `,r(2),i(Be),i(E);var k=e(E),Ue=e(n(k),6);Ue.nodeValue=`:
-`,r(2),i(k);var A=e(k),We=n(A);We.nodeValue=`A pass that can't establish a verdict says so before the plan, under an
-`;var Ge=e(We,7);o(Ge,`href`,`#banners`),r(),i(A);var j=e(A,3),Ke=e(n(j),3);r(7),i(j);var qe=e(j);o(qe,`id`,`zap-apply`);var Je=e(qe);f(Je,{lang:null,content:`zap apply [--wetrun] [--expect-plan <hash>] [--json] [--no-lock]
-          [--no-cache] [--bootstrap] [--fgro <p>] [--env-file <p>] [config]`});var M=e(Je),Ye=e(n(M),6);Ye.nodeValue=` would do,
+supplies for it prints under `,r(8),i(O);var k=e(O,3),Le=e(n(k));Le.nodeValue=`
+comes first in a `;var Re=e(Le,3);r(),i(k);var ze=e(k),Be=e(n(ze),3);Be.nodeValue=`, as the
+`;var Ve=e(Be,6);Ve.nodeValue=`
+lists an `,r(2),i(ze),i(D);var A=e(D),He=e(n(A),6);He.nodeValue=`:
+`,r(2),i(A);var j=e(A),Ue=n(j);Ue.nodeValue=`A pass that can't establish a verdict says so before the plan, under an
+`;var We=e(Ue,7);o(We,`href`,`#banners`),r(),i(j);var M=e(j,3),Ge=e(n(M),3);r(7),i(M);var Ke=e(M);o(Ke,`id`,`zap-apply`);var qe=e(Ke);f(qe,{lang:null,content:`zap apply [--wetrun] [--expect-plan <hash>] [--json] [--no-lock]
+          [--no-cache] [--bootstrap] [--fgro <p>] [--env-file <p>] [config]`});var N=e(qe),Je=e(n(N),6);Je.nodeValue=` would do,
 and exit codes that judge the result (below). It also resolves any missing
 tracked pin over the network and reports it as
-`,r(2),i(M);var N=e(M,3),P=e(n(N),3),Xe=n(P);Xe.nodeValue=`refuses if any planned command can't take a value its reference resolves to
+`,r(2),i(N);var P=e(N,3),F=e(n(P),3),Ye=n(F);Ye.nodeValue=`refuses if any planned command can't take a value its reference resolves to
 (a single quote in a command, for one), naming the resource and the variable;
-`,r(2),i(P);var Ze=e(P,5),Qe=n(Ze);Qe.nodeValue=`re-detects every resource and reports any that still isn't converged as
-`,r(2),i(Ze),i(N);var $e=e(N);o($e,`id`,`binding-to-the-review`);var F=e($e),et=e(n(F),4);et.nodeValue=`, changes nothing, and
-exits 2. The rules are in
-`;var tt=e(et);r(),i(F);var nt=e(F,2);f(nt,{lang:null,content:`$ zap apply --wetrun
+`,r(2),i(F);var Xe=e(F,5),Ze=n(Xe);Ze.nodeValue=`re-detects every resource and reports any that still isn't converged as
+`,r(2),i(Xe),i(P);var Qe=e(P,2);o(Qe,`id`,`binding-to-the-review`);var I=e(Qe),$e=e(n(I),4);$e.nodeValue=`, changes nothing, and
+exits 2. A preview binds once Zap has written it, read or not: one sent to
+`;var et=e($e,4);et.nodeValue=` after the pipe took it whole, binds the
+same. One whose output couldn't be written is withdrawn, and binds nothing. The
+rules are in
+`;var tt=e(et);r(),i(I);var nt=e(I,2);f(nt,{lang:null,content:`$ zap apply --wetrun
 apply — target local (wetrun, awaiting confirmation)
   user: ops
   home: /home/ops
@@ -203,10 +228,14 @@ apply — target local (wetrun, awaiting confirmation)
   [+] hello  (file)
       path: ~/notes/hello.txt
       content: inline (15 bytes, sha512 0c7463f032f1dc98…)
-  UNREVIEWED — this plan is not the one that was reviewed.
+
+  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
     no plan has been previewed on this host.
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 Apply this plan? Type 5bb79cc9, the start of its plan_hash, to confirm: 5bb79cc9
+→ notes: create directory
+→ hello: create file
+→ re-detect: reading 2 declared resources back to confirm what the changes left
 apply — target local (wetrun, confirmed)
   user: ops
   home: /home/ops
@@ -214,33 +243,44 @@ apply — target local (wetrun, confirmed)
   ok    notes
   ok    hello
 applied: 2 ok, 0 failed, 0 skipped (of 2)
-plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61`});var I=e(nt),rt=n(I);rt.nodeValue=`The plan and the question go to standard error; the report goes where it
+plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61`});var L=e(nt),rt=e(n(L),2);rt.nodeValue=` lines a wetrun
+prints as each change and the re-detection starts; the report goes where it
 always does. The answer is the first eight characters of the plan's
-`,r(12),i(I);var L=e(I,2),it=e(n(L),4);o(it,`href`,`#zap-deploy`),r(),i(L);var at=e(L,3);o(at,`id`,`zap-deploy`);var ot=e(at);f(ot,{lang:null,content:`zap deploy [--wetrun] [--expect-plan <hash>] [--force] [--skip-build]
+`,r(12),i(L);var it=e(L,2),at=e(n(it),4);o(at,`href`,`#zap-deploy`),r(),i(it);var ot=e(it,3);o(ot,`id`,`zap-deploy`);var st=e(ot);f(st,{lang:null,content:`zap deploy [--wetrun] [--expect-plan <hash>] [--force] [--skip-build]
            [--skip-preflight] [--json] [--no-cache] [--bootstrap]
-           [--fgro <p>] [--env-file <p>] [config]`});var R=e(ot),st=e(n(R),5);r(),i(R);var z=e(R),ct=e(n(z),4);ct.nodeValue=`
-symlink, prints the plan (the resolved host, the declared target, the tree and
-preflight state, and every step with its command, script, paths, or URL), ends
-with the `;var lt=e(ct,4);lt.nodeValue=`, and
+           [--fgro <p>] [--env-file <p>] [config]`});var R=e(st),ct=e(n(R),5);r(),i(R);var z=e(R),lt=e(n(z),4);lt.nodeValue=`
+symlink, prints the plan (the version and the release it replaces, the commit's
+subject, the resolved host and connecting user, the declared target, the tree
+and preflight state, and every step with its command, script, paths, or URL),
+closes with a recap of the commit, version, host, user, tree, and preflight, ends
+with the `;var ut=e(lt,4);ut.nodeValue=`, and
 exits 0. If the live release is already this version it reports
-`,r(4),i(z);var B=e(z,2),ut=e(n(B)),dt=e(n(ut),2);dt.nodeValue=`
+`,r(4),i(z);var B=e(z,2),dt=e(n(B)),ft=e(n(dt),2);ft.nodeValue=`
 (never reported as already at this version, since the tree isn't what the
-live release holds).`,i(ut),i(B);var V=e(B,2),ft=e(n(V),8);ft.nodeValue=` instead). A wetrun that passes withdraws the
+live release holds).`,i(dt),i(B);var V=e(B,2),pt=e(n(V),8);pt.nodeValue=` instead). A wetrun that passes withdraws the
 preview before its first step, so one recorded preview covers one execution.
-`;var pt=e(ft,2);pt.nodeValue=` doesn't show the deploy preview. The rules are in
-`;var mt=e(pt);r(),i(V);var H=e(V,3),ht=e(n(H),7);ht.nodeValue=`
+`;var mt=e(pt,2);mt.nodeValue=` doesn't show the deploy preview. The rules are in
+`;var ht=e(mt);r(),i(V);var H=e(V),gt=n(H);gt.nodeValue=`A wetrun prints one line to standard error as each phase starts (the drift
+preflight, each step, a rollback), and its report to standard output when it
+ends: a table of the preflight, each step, and any rollback, each with its
+status and how long it took, then a closing line naming the version live on the
+host, or, after a failure, the step that failed and the state the target is in. Samples:
+`;var _t=e(gt);r(),i(H);var U=e(H,3),vt=e(n(U),7);vt.nodeValue=`
 each change the plan, and so its hash: a wetrun binds to a preview made with
-the same flags.`,i(H);var gt=e(H,3);o(gt,`id`,`zap-detect`);var _t=e(gt);f(_t,{lang:null,content:`zap detect [--no-cache] [--bootstrap] [--fgro <p>] [--env-file <p>] [config]`});var vt=e(_t,3);o(vt,`id`,`zap-status`);var yt=e(vt);f(yt,{lang:null,content:`zap status [--fgro <p>] [--env-file <p>] [config]`});var U=e(yt),bt=e(n(U)),xt=e(bt);xt.nodeValue=`) and the on-disk
-`,r(6),i(U);var St=e(U);f(St,{lang:null,content:`$ zap status
+the same flags.`,i(U);var yt=e(U,3);o(yt,`id`,`zap-detect`);var bt=e(yt);f(bt,{lang:null,content:`zap detect [--no-cache] [--bootstrap] [--fgro <p>] [--env-file <p>] [config]`});var xt=e(bt,3);o(xt,`id`,`zap-status`);var St=e(xt);f(St,{lang:null,content:`zap status [--fgro <p>] [--env-file <p>] [config]`});var W=e(St),Ct=e(n(W)),wt=e(Ct);wt.nodeValue=`) and the on-disk
+`,r(6),i(W);var Tt=e(W);f(Tt,{lang:null,content:`$ zap status
 target local (pkg: none, service: none)
 last run on local: zap apply --wetrun, after its changes ran, at 2026-10-11T21:09:26Z — offline; \`zap plan\` reads the target live
   a 0 exit means every declared resource read converged in the last run and its config is unchanged since — not that the target still is
   converged    notes  directory
-  converged    hello  file`});var Ct=e(St,5);o(Ct,`id`,`zap-config-validate`);var wt=e(Ct);f(wt,{lang:null,content:`zap config validate [--fgro <p>] [--env-file <p>] [config]`});var W=e(wt),Tt=n(W);Tt.nodeValue=`Evaluates the config and runs the two gates, nothing else. Prints
-`;var Et=e(Tt,5);r(),i(W);var Dt=e(W);o(Dt,`id`,`zap-lock`);var Ot=e(Dt);f(Ot,{lang:null,content:`zap lock [--check] [--fgro <p>] [--env-file <p>] [config]`});var G=e(Ot),kt=e(n(G),2);kt.nodeValue=`, the ledger for the toolchain pin and the tracked
-`;var At=e(kt,5);r(),i(G);var K=e(G),jt=e(n(K),4);r(),i(K);var q=e(K,2),Mt=e(n(q)),Nt=e(n(Mt),2),Pt=e(n(Nt)),Ft=e(n(Pt),2);o(Ft,`href`,`#exit-codes-all-commands`),r(),i(Pt),i(Nt),i(Mt),i(q);var J=e(q),It=e(n(J),3);r(),i(J);var Lt=e(J);o(Lt,`id`,`zap-update`);var Rt=e(Lt);f(Rt,{lang:null,content:`zap update [--config <p>] [--fgro <p>] [--env-file <p>] [ids…]`});var zt=e(Rt,2);o(zt,`id`,`zap-version`);var Bt=e(zt,2);o(Bt,`id`,`banners`);var Vt=e(Bt,3);o(Vt,`id`,`exit-codes-all-commands`);var Ht=e(Vt,9);o(Ht,`id`,`json-events`);var Y=e(Ht,4),Ut=e(n(Y),5);Ut.nodeValue=`,
-`;var Wt=e(Ut,10);Wt.nodeValue=`
-includes `,r(8),i(Y);var X=e(Y),Gt=n(X);Gt.nodeValue=`A run that streamed events doesn't print its text report, and the report's
-`,r(2),i(X);var Kt=e(X);o(Kt,`id`,`environment-variables-zap-reads`);var Z=e(Kt),qt=e(n(Z)),Q=n(qt),Jt=e(n(Q)),Yt=e(n(Jt),5);r(),i(Jt),i(Q);var $=e(Q),Xt=e(n($)),Zt=e(n(Xt),9);r(),i(Xt),i($);var Qt=e($),$t=e(n(Qt)),en=e(n($t),13);r(),i($t),i(Qt),r(2),i(qt),i(Z);var tn=e(Z),nn=n(tn);nn.nodeValue=`Nothing that shapes a plan comes from Zap's own environment. Values a config
+  converged    hello  file`});var Et=e(Tt,5);o(Et,`id`,`zap-config-validate`);var Dt=e(Et);f(Dt,{lang:null,content:`zap config validate [--fgro <p>] [--env-file <p>] [config]`});var G=e(Dt),Ot=n(G);Ot.nodeValue=`Evaluates the config and runs the two gates, nothing else. Prints
+`;var kt=e(Ot,5);r(),i(G);var At=e(G);o(At,`id`,`zap-lock`);var jt=e(At);f(jt,{lang:null,content:`zap lock [--check] [--fgro <p>] [--env-file <p>] [config]`});var K=e(jt),Mt=e(n(K),2);Mt.nodeValue=`, the ledger for the toolchain pin and the tracked
+`;var Nt=e(Mt,5);r(),i(K);var q=e(K),Pt=e(n(q),4);r(),i(q);var J=e(q,2),Ft=e(n(J)),It=e(n(Ft),2),Lt=e(n(It)),Rt=e(n(Lt),2);o(Rt,`href`,`#exit-codes-all-commands`),r(),i(Lt),i(It),i(Ft),i(J);var Y=e(J),zt=e(n(Y),3);r(),i(Y);var Bt=e(Y);o(Bt,`id`,`zap-update`);var Vt=e(Bt);f(Vt,{lang:null,content:`zap update [--config <p>] [--fgro <p>] [--env-file <p>] [ids…]`});var Ht=e(Vt,2);o(Ht,`id`,`zap-version`);var Ut=e(Ht,2);o(Ut,`id`,`banners`);var Wt=e(Ut,3);o(Wt,`id`,`exit-codes-all-commands`);var X=e(Wt,4),Gt=e(n(X),10);Gt.nodeValue=`,
+`;var Kt=e(Gt,10);Kt.nodeValue=` or an
+`;var qt=e(Kt,6);qt.nodeValue=` wetrun that ran changes or pinned what the lock lacked, a
+`,r(10),i(X);var Jt=e(X,6);o(Jt,`id`,`json-events`);var Z=e(Jt,4),Yt=e(n(Z),5);Yt.nodeValue=`,
+`;var Xt=e(Yt,10);Xt.nodeValue=`
+includes `,r(8),i(Z);var Q=e(Z,2),Zt=n(Q);Zt.nodeValue=`A run that streamed events doesn't print its text report, and the report's
+`,r(2),i(Q);var Qt=e(Q);o(Qt,`id`,`environment-variables-zap-reads`);var $=e(Qt),$t=e(n($)),en=n($t),tn=e(n(en)),nn=e(n(tn),5);r(),i(tn),i(en);var rn=e(en),an=e(n(rn)),on=e(n(an),9);r(),i(an),i(rn);var sn=e(rn),cn=e(n(sn)),ln=e(n(cn),13);r(),i(cn),i(sn),r(2),i($t),i($);var un=e($),dn=n(un);dn.nodeValue=`Nothing that shapes a plan comes from Zap's own environment. Values a config
 needs come from references resolved from the operator environment or
-`,r(2),i(tn),te((e,t,ee,te,n,ne,r,i,a,re,s,l,u,d,f,p,ae,m,h,g,_)=>{o(c,`href`,e),o(ie,`href`,t),o(ce,`href`,ee),o(fe,`href`,te),o(me,`href`,n),o(_e,`href`,ne),o(Ne,`href`,r),o(Ie,`href`,i),o(ze,`href`,a),o(Ke,`href`,re),o(tt,`href`,s),o(st,`href`,l),o(mt,`href`,u),o(bt,`href`,d),o(Et,`href`,f),o(At,`href`,p),o(jt,`href`,ae),o(It,`href`,m),o(Yt,`href`,h),o(Zt,`href`,g),o(en,`href`,_)},[()=>u(`docs/concepts`),()=>u(`docs/getting-started`),()=>u(`docs/configs#what-the-gates-reject`),()=>u(`docs/install#getting-fgro`),()=>u(`docs/env#the-env-file`),()=>u(`docs/targets#the-bootstrap-user`),()=>u(`docs/security#escaped-output`),()=>u(`docs/security#writes-on-the-host`),()=>u(`docs/resources#swap`),()=>u(`docs/concepts#a-wetrun-executes-only-the-plan-you-reviewed`),()=>u(`docs/concepts#a-wetrun-executes-only-the-plan-you-reviewed`),()=>u(`docs/deploy`),()=>u(`docs/deploy#binding-a-wetrun-to-a-reviewed-plan`),()=>u(`docs/detection#the-last-run-report`),()=>u(`docs/lock#the-toolchain-pin`),()=>u(`docs/lock`),()=>u(`docs/lock#the-toolchain-pin`),()=>u(`docs/lock`),()=>u(`docs/lock#on-disk-state`),()=>u(`docs/install#getting-fgro`),()=>u(`docs/resources#verification`)]),re(t,a)},$$slots:{default:!0}})},$$slots:{default:!0}}),c()}export{m as t};
+`,r(2),i(un),te((e,t,ee,te,n,ne,r,i,a,re,s,l,u,d,f,p,ae,m,h,g,_,v)=>{o(c,`href`,e),o(ie,`href`,t),o(se,`href`,ee),o(de,`href`,te),o(pe,`href`,n),o(ge,`href`,ne),o(Me,`href`,r),o(Fe,`href`,i),o(Re,`href`,a),o(Ge,`href`,re),o(tt,`href`,s),o(ct,`href`,l),o(ht,`href`,u),o(_t,`href`,d),o(Ct,`href`,f),o(kt,`href`,p),o(Nt,`href`,ae),o(Pt,`href`,m),o(zt,`href`,h),o(nn,`href`,g),o(on,`href`,_),o(ln,`href`,v)},[()=>u(`docs/concepts`),()=>u(`docs/getting-started`),()=>u(`docs/configs#what-the-gates-reject`),()=>u(`docs/install#getting-fgro`),()=>u(`docs/env#the-env-file`),()=>u(`docs/targets#the-bootstrap-user`),()=>u(`docs/security#escaped-output`),()=>u(`docs/security#writes-on-the-host`),()=>u(`docs/resources#swap`),()=>u(`docs/concepts#a-wetrun-executes-only-the-plan-you-reviewed`),()=>u(`docs/concepts#a-wetrun-executes-only-the-plan-you-reviewed`),()=>u(`docs/deploy`),()=>u(`docs/deploy#binding-a-wetrun-to-a-reviewed-plan`),()=>u(`docs/deploy#what-a-wetrun-prints`),()=>u(`docs/detection#the-last-run-report`),()=>u(`docs/lock#the-toolchain-pin`),()=>u(`docs/lock`),()=>u(`docs/lock#the-toolchain-pin`),()=>u(`docs/lock`),()=>u(`docs/lock#on-disk-state`),()=>u(`docs/install#getting-fgro`),()=>u(`docs/resources#verification`)]),re(t,a)},$$slots:{default:!0}})},$$slots:{default:!0}}),c()}export{m as t};

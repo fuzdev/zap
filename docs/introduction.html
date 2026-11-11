@@ -28,7 +28,7 @@
 		<link href="/_app/immutable/chunks/CkSeWg2M.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Cyt8LZpN.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/nqpJJcfP.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.DBBUTYbQ.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.DaSMZjRK.js" rel="modulepreload">
 		<link href="/_app/immutable/nodes/0.CBD02HwM.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/EpM2J4Cd.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Drx_RGrR.js" rel="modulepreload">
@@ -36,7 +36,7 @@
 		<link href="/_app/immutable/chunks/yWx_1vUe.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMVmPj5_.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJ6hHGax.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/2.CjS8qjKf.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/2.CTeavGnV.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CHEAhmp6.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BbCw5KVU.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BPVwp-J3.js" rel="modulepreload">
@@ -48,29 +48,29 @@
 		<link href="/_app/immutable/chunks/tQA3rDst.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/k6TRNp0w.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DH_LefOd.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CiI0WzPA.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DBPsyPf2.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CtsBFaJL.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/D1RK0gmx.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/C_fCHugf.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/opzu_emj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/GoVQbpeX.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/d9FfLdfy.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CABULNtq.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BY8Njl_U.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/F58SSrOj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/B34bN6Wl.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D2QvIx7t.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CH4seIGa.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CjACcmfS.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DHlLBREC.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CwC1awOQ.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/B60F4JOd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/df6WGb4l.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJMm7Txn.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BXoHXHa0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DKqhmjm7.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMnsbEWi.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Brh7-bty.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/9ZLJ-H4D.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/DRFOPxDd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/sNOw6LX0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Ch_dVXHx.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/o9OBPhqj.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CTnnGNGJ.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/21.DE07d3A1.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/21.GFepSC7K.js" rel="modulepreload">
 		<!--12qhfyh--><!----><!--4fa0a9--><!--[-1--><!--]--><!----><!--1tljqsr--><!----><title>Introduction — zap</title>
 		<link href="/_app/immutable/assets/0.C0PIgcC8.css" rel="stylesheet">
 		<link href="/_app/immutable/assets/Svg.DfrCKcO9.css" rel="stylesheet">
@@ -130,6 +130,10 @@ apply — target local (dry-run)
 plan_hash: d317a15e82f2f1117f0d9fa1fdafc079b70f9e3ac5e3103c4b3333f1b6afeab0
 
 $ zap apply --wetrun
+→ cache-update-apt: create script
+→ gitconfig: create file
+→ ripgrep: create package
+→ re-detect: reading 2 declared resources back to confirm what the changes left
 apply — target local (wetrun)
   user: ada
   home: /home/ada
@@ -144,7 +148,8 @@ printed, and only then acted. Had the machine changed in between, it would have
 shown the new plan and refused it, or, on a terminal, asked before running it.</p><p>Point the target at a host instead and the same config converges a server over
 SSH. <a href="/docs/getting-started">Getting started</a> walks through both.</p><h2 id="what-zap-does-differently">What Zap does differently</h2><ol><li><strong>A wetrun executes only the plan you reviewed.</strong> Dry run is the default,
 with no flag to auto-approve. <code>--wetrun</code> re-plans against the live machine,
-then refuses unless the plan matches the one you saw, by hash; on a
+then refuses unless the plan matches, by hash, the one you name or the last
+preview Zap printed; on a
 terminal, when the plan isn't the reviewed one, it shows you the plan and asks first.</li><li><strong>Unknown means hold, not guess.</strong> A resource Zap can't read is left out of
 the plan and reported as undetermined, with exit 1. It never reads as
 "converged" because a probe failed. (A few kinds whose create step is
@@ -175,16 +180,16 @@ come up first.</p><h2 id="where-next">Where next</h2><ul><li><a href="/docs/inst
 			
 			<script>
 				{
-					__sveltekit_j41qhg = {
+					__sveltekit_h0s9s2 = {
 						base: "",
-						version: "7f2b1564d4335285d2562cc4ed2e47b383a12f1e"
+						version: "fa7283a6b9e6447582f73bdd3668dc027e726ae2"
 					};
 
 					const element = document.currentScript.parentElement;
 
 					import("/_app/immutable/entry/start.DMWmOBF_.js").then(async (kit) => {
-						kit.init(__sveltekit_j41qhg);
-						const app = await import("/_app/immutable/entry/app.DBBUTYbQ.js");
+						kit.init(__sveltekit_h0s9s2);
+						const app = await import("/_app/immutable/entry/app.DaSMZjRK.js");
 						kit.start(app, element, {
 							node_ids: [0, 2, 21],
 							data: [null,null,null],

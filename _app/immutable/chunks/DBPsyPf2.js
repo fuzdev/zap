@@ -21,7 +21,8 @@ printed, and only then acted. Had the machine changed in between, it would have
 shown the new plan and refused it, or, on a terminal, asked before running it.</p><p>Point the target at a host instead and the same config converges a server over
 SSH. <a>Getting started</a> walks through both.</p><h2>What Zap does differently</h2><ol><li><strong>A wetrun executes only the plan you reviewed.</strong> Dry run is the default,
 with no flag to auto-approve. <code>--wetrun</code> re-plans against the live machine,
-then refuses unless the plan matches the one you saw, by hash; on a
+then refuses unless the plan matches, by hash, the one you name or the last
+preview Zap printed; on a
 terminal, when the plan isn't the reviewed one, it shows you the plan and asks first.</li><li><strong>Unknown means hold, not guess.</strong> A resource Zap can't read is left out of
 the plan and reported as undetermined, with exit 1. It never reads as
 "converged" because a probe failed. (A few kinds whose create step is
@@ -78,6 +79,10 @@ apply — target local (dry-run)
 plan_hash: d317a15e82f2f1117f0d9fa1fdafc079b70f9e3ac5e3103c4b3333f1b6afeab0
 
 $ zap apply --wetrun
+→ cache-update-apt: create script
+→ gitconfig: create file
+→ ripgrep: create package
+→ re-detect: reading 2 declared resources back to confirm what the changes left
 apply — target local (wetrun)
   user: ada
   home: /home/ada

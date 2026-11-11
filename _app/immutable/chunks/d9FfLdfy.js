@@ -1,4 +1,4 @@
-import{$ as e,G as t,J as n,K as ee,X as r,Z as te,dt as i,ft as a,j as o,k as ne,l as s,m as c,ot as l,st as u}from"./CkSeWg2M.js";import{t as d}from"./Cyt8LZpN.js";import{n as f}from"./BbCw5KVU.js";import"./BPVwp-J3.js";import{t as p}from"./k6TRNp0w.js";import{t as re}from"./DH_LefOd.js";import{t as m}from"./CtsBFaJL.js";var ie=o(`<p>The ideas behind every zap command. Read this once; the other docs assume it.</p><h2>The loop</h2><!><p>You <strong>describe</strong> a machine in <code>zap.ts</code>: these packages, this file with this
+import{$ as e,G as t,J as ee,K as n,X as r,Z as i,dt as a,ft as o,j as s,k as c,l,m as u,ot as d,st as f}from"./CkSeWg2M.js";import{t as p}from"./Cyt8LZpN.js";import{n as m}from"./BbCw5KVU.js";import"./BPVwp-J3.js";import{t as h}from"./k6TRNp0w.js";import{t as g}from"./DH_LefOd.js";import{t as _}from"./CtsBFaJL.js";var te=s(`<p>The ideas behind every zap command. Read this once; the other docs assume it.</p><h2>The loop</h2><!><p>You <strong>describe</strong> a machine in <code>zap.ts</code>: these packages, this file with this
 content, this user with these keys, this service running. Zap <strong>detects</strong> what
 the machine looks like now, <strong>plans</strong> the difference, <strong>applies</strong> only that
 difference when you say so, and <strong>observes</strong> the result by reading the machine
@@ -46,7 +46,11 @@ its reference (<code></code>), and the plan records beside it what each referenc
 its changes use resolves to, printed in a <code>references:</code> block under the target:
 the value of a plain one, and for a <a>secret</a> only that it is
 one. So <code>plan_hash</code> <code>APP_DIR</code> is another plan. A secret reference's value is never in the plan or its hash,
-so rotating one changes neither.</p><h3>A wetrun executes only the plan you reviewed</h3><p> <code>plan_hash</code> against the plan you reviewed:</p><ul><li><code>--expect-plan &lt;hash></code> names the reviewed plan explicitly, and the wetrun
+so rotating one changes neither.</p><h3>A wetrun executes only the plan you reviewed</h3><p>A wetrun doesn't take a saved plan as input; it detects and plans again, because
+the machine may have moved. What it guarantees instead is that the plan it
+executes is a reviewed one: a plan whose hash you named, or one Zap printed as a
+preview. Before it changes anything, it compares its fresh <code>plan_hash</code> against
+the reviewed plan:</p><ul><li><code>--expect-plan &lt;hash></code> names the reviewed plan explicitly, and the wetrun
 executes only if the fresh plan has exactly that hash;</li><li> <a>last-run report</a> <strong>preview</strong>: <code>zap plan</code>, a dry <code>zap apply</code>, or a wetrun that refused. Its
 recorded <code>plan_hash</code> must equal the fresh one.</li></ul><p>Otherwise the wetrun <strong>refuses</strong>. It changes nothing, renders the plan it would
 have run under a <code>REFUSED</code> banner that says why (no preview yet, the last run
@@ -58,7 +62,15 @@ whether its changes succeed or fail, spends it, and of two started on one
 preview only one goes on. An agent given <code>--expect-plan</code> with the hash it
 showed you can execute only that plan: the same changes, on the same machine,
 as the same user, with the same values for every reference that isn't a secret.
-An empty plan needs no review.</p><p>On an interactive terminal, a wetrun whose plan has no review asks for the
+An empty plan needs no review.</p><p>A preview is recorded when Zap prints it, not when anyone reads it: Zap knows
+what it wrote, not what reached a reader. When the write itself fails (a full
+device, a pipe whose reader has gone), Zap withdraws the preview it recorded
+and says so, and the next wetrun run without <code>--expect-plan</code> refuses. A preview
+that was written but not read still binds that wetrun: one sent to <code>/dev/null</code>,
+or cut short by <code>head</code> after the pipe took it whole. When the output may be
+truncated, or the one who reads the preview isn't the one who runs the wetrun,
+bind with <code>--expect-plan</code>: its hash is the preview's last line, the first one a
+cut-short preview loses.</p><p>On an interactive terminal, a wetrun whose plan has no review asks for the
 first eight characters of its <code>plan_hash</code> instead of refusing
 (<a>cli.md</a>).</p><p>A plan can only be reviewed if it names its machine. A plan whose host or
 connecting user resolves through a reference Zap masks has no <code>plan_hash</code> <code>zap plan</code> and a dry <code>zap apply</code> show it under an <code>UNBINDABLE</code> <code>zap apply --wetrun</code> is an error before anything runs, even when nothing would
@@ -103,21 +115,21 @@ remote host as <code>releases/&lt;version></code> plus a <code>current</code> sy
 service, polls health, and rolls back if the health gate fails. Before shipping,
 its preflight runs the convergence pass and refuses to ship onto a host that has
 drifted from its config. The same tool that built the machine ships the app.
-See <a>deploy.md</a>.</p>`,1);function h(o,h){u(h,!0);let g=f(`concepts`);c(`mhazmq`,e=>{t(()=>{n.title=`Concepts — zap`})}),p(o,{get tome(){return g},children:(t,n)=>{m(t,{children:(t,n)=>{var o=ie(),c=e(te(o));s(c,`id`,`the-loop`);var l=e(c);re(l,{lang:null,content:`describe → detect → plan → apply → observe`});var u=e(l,3);s(u,`id`,`convergence`);var f=e(u,4),p=e(r(f),4);p.nodeValue=` runs every time, as does
-`,i(2),a(f);var m=e(f,2),h=r(m);h.nodeValue=`What Zap doesn't do: it never removes something you stop declaring. Delete a
-`;var g=e(h,4);g.nodeValue=`
+See <a>deploy.md</a>.</p>`,1);function v(s,v){f(v,!0);let y=m(`concepts`);u(`mhazmq`,e=>{t(()=>{ee.title=`Concepts — zap`})}),h(s,{get tome(){return y},children:(t,ee)=>{_(t,{children:(t,ee)=>{var s=te(),u=e(i(s));l(u,`id`,`the-loop`);var d=e(u);g(d,{lang:null,content:`describe → detect → plan → apply → observe`});var f=e(d,3);l(f,`id`,`convergence`);var m=e(f,4),h=e(r(m),4);h.nodeValue=` runs every time, as does
+`,a(2),o(m);var _=e(m,2),v=r(_);v.nodeValue=`What Zap doesn't do: it never removes something you stop declaring. Delete a
+`;var y=e(v,4);y.nodeValue=`
 lists such resources as orphaned, as a warning. To remove something, declare
-the removal (a `,i(4),a(m);var _=e(m);s(_,`id`,`detection`);var v=e(_,4),ae=e(r(v));a(v);var y=e(v),oe=e(r(y),4);oe.nodeValue=` fails before the same run installs ufw). Which kinds, and how
-`;var b=e(oe,2);b.nodeValue=` splits the two cases:
-`;var se=e(b);i(),a(y);var x=e(y),S=e(r(x),3);S.nodeValue=` is checked for existence (or, when its name pins a version, that
+the removal (a `,a(4),o(_);var b=e(_);l(b,`id`,`detection`);var x=e(b,4),ne=e(r(x));o(x);var S=e(x),C=e(r(S),4);C.nodeValue=` fails before the same run installs ufw). Which kinds, and how
+`;var re=e(C,2);re.nodeValue=` splits the two cases:
+`;var ie=e(re);a(),o(S);var w=e(S),ae=e(r(w),3);ae.nodeValue=` is checked for existence (or, when its name pins a version, that
 version), because installing it again does nothing. If re-running has side effects, detection goes deeper: a
-`;var ce=e(S,10);ce.nodeValue=`
-command is the whole idempotency contract.`,a(x);var C=e(x),le=e(r(C));le.nodeValue=` Zap keeps no detection cache. A stored
+`;var oe=e(ae,10);oe.nodeValue=`
+command is the whole idempotency contract.`,o(w);var T=e(w),se=e(r(T));se.nodeValue=` Zap keeps no detection cache. A stored
 answer is only sound when nothing else could have changed the machine, and Zap
 never assumes it is the only writer. The security controls make the point:
-`,i(6),a(C);var w=e(C);s(w,`id`,`dry-run-and-wetrun`);var T=e(w,2);s(T,`id`,`the-plan`);var E=e(T),ue=e(r(E),2);ue.nodeValue=` or
-`,i(8),a(E);var D=e(E),de=e(r(D),5),fe=e(de);fe.nodeValue=`). The
-`,i(2),a(D);var pe=e(D,2);re(pe,{lang:null,content:`$ zap plan
+`,a(6),o(T);var E=e(T);l(E,`id`,`dry-run-and-wetrun`);var D=e(E,2);l(D,`id`,`the-plan`);var O=e(D),ce=e(r(O),2);ce.nodeValue=` or
+`,a(8),o(O);var k=e(O),A=e(r(k),5),le=e(A);le.nodeValue=`). The
+`,a(2),o(k);var j=e(k,2);g(j,{lang:null,content:`$ zap plan
 plan — target local (2 change(s): +2 ~0)
   user: ops
   home: /home/ops
@@ -128,30 +140,27 @@ plan — target local (2 change(s): +2 ~0)
   [+] hello  (file)
       path: ~/notes/hello.txt
       content: inline (15 bytes, sha512 0c7463f032f1dc98…)
-plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61`});var O=e(pe),me=e(r(O),2);me.nodeValue=` line, and the host in a
-`;var he=e(me,4);he.nodeValue=`. A local plan's hash covers the user Zap runs as and its
-`,i(6),a(O);var k=e(O),A=e(r(k));A.textContent=`{env:NAME}`;var j=e(A,4),ge=e(j,3);ge.nodeValue=` covers those values: the same config under another value of
-`,i(2),a(k);var M=e(k);s(M,`id`,`a-wetrun-executes-only-the-plan-you-reviewed`);var N=e(M),_e=r(N);_e.nodeValue=`A wetrun doesn't take a saved plan as input; it detects and plans again, because
-the machine may have moved. What it guarantees instead is that the plan it
-executes is the plan you saw. Before it changes anything, it compares its fresh
-`,i(2),a(N);var P=e(N),F=e(r(P)),I=r(F);I.nodeValue=`with no flag, the reviewed plan is the one in this host's
-`;var L=e(I);s(L,`href`,`#the-last-run-report`);var ve=e(L);ve.nodeValue=`, when the pass that wrote it was a
-`,i(8),a(F),a(P);var R=e(P,2),ye=e(r(R),3);i(),a(R);var z=e(R),B=e(r(z),2);B.nodeValue=`:
-`;var V=e(B,6);V.nodeValue=` note, and
-`;var be=e(V,3);i(),a(z);var H=e(z),xe=e(r(H),2);i(),a(H);var U=e(H);s(U,`id`,`apply-asserts-convergence`);var W=e(U),G=r(W);G.nodeValue=`A wetrun doesn't stop at command success. After the changes run, it reads every
+plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61`});var M=e(j),N=e(r(M),2);N.nodeValue=` line, and the host in a
+`;var ue=e(N,4);ue.nodeValue=`. A local plan's hash covers the user Zap runs as and its
+`,a(6),o(M);var P=e(M),F=e(r(P));F.textContent=`{env:NAME}`;var I=e(F,4),de=e(I,3);de.nodeValue=` covers those values: the same config under another value of
+`,a(2),o(P);var L=e(P);l(L,`id`,`a-wetrun-executes-only-the-plan-you-reviewed`);var R=e(L,2),z=e(r(R)),B=r(z);B.nodeValue=`with no flag, the reviewed plan is the one in this host's
+`;var V=e(B);l(V,`href`,`#the-last-run-report`);var fe=e(V);fe.nodeValue=`, when the pass that wrote it was a
+`,a(8),o(z),o(R);var H=e(R,3),pe=e(r(H),3);a(),o(H);var U=e(H),me=e(r(U),2);me.nodeValue=`:
+`;var W=e(me,6);W.nodeValue=` note, and
+`;var he=e(W,3);a(),o(U);var G=e(U),ge=e(r(G),2);a(),o(G);var K=e(G);l(K,`id`,`apply-asserts-convergence`);var q=e(K),_e=r(q);_e.nodeValue=`A wetrun doesn't stop at command success. After the changes run, it reads every
 resource again. Any resource that still doesn't read converged is reported as
-`;var K=e(G,6);K.nodeValue=` still fails after its
-`;var Se=e(K,6);Se.nodeValue=`
+`;var ve=e(_e,6);ve.nodeValue=` still fails after its
+`;var ye=e(ve,6);ye.nodeValue=`
 never reads converged (it always runs), so none of them is residual.
 "Applied: N ok" alone would be a claim about commands; the re-detection makes it
 a claim about the machine. If the re-detection itself fails, the run says so and
-exits 1 too, because "converged" was not established.`,a(W);var q=e(W);s(q,`id`,`the-last-run-report`);var J=e(q),Ce=e(r(J),7);i(),a(J);var Y=e(J),we=e(r(Y),2);we.nodeValue=` renders it offline, marking each resource
+exits 1 too, because "converged" was not established.`,o(q);var be=e(q);l(be,`id`,`the-last-run-report`);var J=e(be),xe=e(r(J),7);a(),o(J);var Y=e(J),Se=e(r(Y),2);Se.nodeValue=` renders it offline, marking each resource
 whose config changed since the run, and it holds the preview a wetrun binds to. Exit
 codes are about the last run, not the live machine; the live answer is always
-`,i(2),a(Y);var Te=e(Y);s(Te,`id`,`triggers`);var X=e(Te,2),Ee=r(X);Ee.nodeValue=`A trigger fires only on a change in the current plan, so a failed reload would
+`,a(2),o(Y);var Ce=e(Y);l(Ce,`id`,`triggers`);var X=e(Ce,2),we=r(X);we.nodeValue=`A trigger fires only on a change in the current plan, so a failed reload would
 be lost: next run the file is converged and the service is running, on the old
 config. Zap keeps one marker per owed service on the target under
-`,i(2),a(X);var De=e(X,2);s(De,`id`,`the-lock-file`);var Z=e(De),Oe=e(r(Z),12);Oe.nodeValue=`
+`,a(2),o(X);var Te=e(X,2);l(Te,`id`,`the-lock-file`);var Z=e(Te),Ee=e(r(Z),12);Ee.nodeValue=`
 (rebuild), or a wetrun recording a pin that was missing. A pin that isn't current is withheld from the read-only commands, so
 the resource holds rather than being compared against stale bytes. Full detail:
-`;var ke=e(Oe);i(),a(Z);var Ae=e(Z);s(Ae,`id`,`targets-and-privilege`);var Q=e(Ae),je=e(r(Q),17);i(),a(Q);var Me=e(Q);s(Me,`id`,`secrets-and-references`);var $=e(Me),Ne=e(r($));i(),a($);var Pe=e($);s(Pe,`id`,`deploy`);var Fe=e(Pe),Ie=e(r(Fe),6);i(),a(Fe),ee((e,t,n,ee,r,te,i,a,o,ne,c,l)=>{s(ae,`href`,e),s(se,`href`,t),s(de,`href`,n),s(j,`href`,ee),s(ye,`href`,r),s(be,`href`,te),s(xe,`href`,i),s(Ce,`href`,a),s(ke,`href`,o),s(je,`href`,ne),s(Ne,`href`,c),s(Ie,`href`,l)},[()=>d(`docs/detection#a-hold-spreads-to-what-cant-run-without-it`),()=>d(`docs/detection#kinds-that-read-a-failed-probe-as-absent`),()=>d(`docs/configs#the-sandbox`),()=>d(`docs/env#secrets`),()=>d(`docs/cli#binding-to-the-review`),()=>d(`docs/env#masked-hosts-and-review`),()=>d(`docs/deploy#binding-a-wetrun-to-a-reviewed-plan`),()=>d(`docs/env#secrets`),()=>d(`docs/lock`),()=>d(`docs/targets`),()=>d(`docs/env`),()=>d(`docs/deploy`)]),ne(t,o)},$$slots:{default:!0}})},$$slots:{default:!0}}),l()}export{h as t};
+`;var De=e(Ee);a(),o(Z);var Oe=e(Z);l(Oe,`id`,`targets-and-privilege`);var Q=e(Oe),ke=e(r(Q),17);a(),o(Q);var Ae=e(Q);l(Ae,`id`,`secrets-and-references`);var $=e(Ae),je=e(r($));a(),o($);var Me=e($);l(Me,`id`,`deploy`);var Ne=e(Me),Pe=e(r(Ne),6);a(),o(Ne),n((e,t,ee,n,r,i,a,o,s,c,u,d)=>{l(ne,`href`,e),l(ie,`href`,t),l(A,`href`,ee),l(I,`href`,n),l(pe,`href`,r),l(he,`href`,i),l(ge,`href`,a),l(xe,`href`,o),l(De,`href`,s),l(ke,`href`,c),l(je,`href`,u),l(Pe,`href`,d)},[()=>p(`docs/detection#a-hold-spreads-to-what-cant-run-without-it`),()=>p(`docs/detection#kinds-that-read-a-failed-probe-as-absent`),()=>p(`docs/configs#the-sandbox`),()=>p(`docs/env#secrets`),()=>p(`docs/cli#binding-to-the-review`),()=>p(`docs/env#masked-hosts-and-review`),()=>p(`docs/deploy#binding-a-wetrun-to-a-reviewed-plan`),()=>p(`docs/env#secrets`),()=>p(`docs/lock`),()=>p(`docs/targets`),()=>p(`docs/env`),()=>p(`docs/deploy`)]),c(t,s)},$$slots:{default:!0}})},$$slots:{default:!0}}),d()}export{v as t};

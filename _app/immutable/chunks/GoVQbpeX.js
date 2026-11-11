@@ -8,7 +8,9 @@ config in <code>zap.lock</code>; every other command that reads the config refus
 would change. It changes nothing, and exits 2 to say changes are pending:</p><!><p><code>[+]</code> is a create, <code>[~]</code> an update, and the lines under each say what the change
 declares: a file's content shows as its length and the start of its SHA-512,
 never the bytes. The <code>plan_hash</code> names this exact plan. <code>zap plan</code> prints the
-same plan with a change count and exits 0: it reports, where <code>apply</code> judges.</p><p><strong>Apply.</strong> Now act:</p><!><p>After the changes ran, Zap read both resources again and found them converged,
+same plan with a change count and exits 0: it reports, where <code>apply</code> judges.</p><p><strong>Apply.</strong> Now act:</p><!><p>The <code>→</code> lines are progress, printed to standard error as each change and the
+re-detection start; the report under them is standard output. After the changes
+ran, Zap read both resources again and found them converged,
 which is why the exit was 0. Had anything still read wrong, the report would
 say <code>RESIDUAL</code> and exit 1.</p><p>The wetrun went through because your preview a moment ago bound it: a wetrun
 executes only the plan you reviewed.</p><p>Had you run <code>zap apply --wetrun</code> first, with no preview behind it, it would
@@ -67,6 +69,9 @@ apply — target local (dry-run)
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 $ echo $?   # $status in fish
 2`});var b=e(y,3);_(b,{lang:null,content:`$ zap apply --wetrun
+→ notes: create directory
+→ hello: create file
+→ re-detect: reading 2 declared resources back to confirm what the changes left
 apply — target local (wetrun)
   user: ops
   home: /home/ops
@@ -77,13 +82,16 @@ applied: 2 ok, 0 failed, 0 skipped (of 2)
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61`});var x=e(b,4);_(x,{lang:null,content:`$ zap apply --wetrun
 apply — target local (wetrun, awaiting confirmation)
   …
-  UNREVIEWED — this plan is not the one that was reviewed.
+
+  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
     no plan has been previewed on this host.
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 Apply this plan? Type 5bb79cc9, the start of its plan_hash, to confirm: n
 apply — target local (wetrun, declined)
   …
-  DECLINED — nothing ran: this plan was not confirmed, and is not the one that was reviewed.
+
+  DECLINED — nothing ran: this plan was not confirmed.
+    no plan has been previewed on this host.
   …`});var S=e(x),C=e(i(S),6);C.nodeValue=` banner and stops the same way.
 `;var w=e(C,3),te=e(w);te.nodeValue=`
 has the rules.`,s(S);var T=e(S,2);_(T,{lang:null,content:`$ zap status

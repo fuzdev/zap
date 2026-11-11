@@ -88,7 +88,10 @@ before any side effect; on an interactive terminal it asks you to type the start
 of the hash instead, a question nothing typed earlier can answer. The rule, and
 what <code>plan_hash</code> binds (the host, the connecting user, a local <code>HOME</code> <a>concepts.md</a> <code>zap deploy</code> binds its own plan the same way
 (<a>deploy.md</a> <code>--expect-plan</code> with the hash you approved, or a pipeline given the hash approved
-in a pull request, can execute only that plan. A plan whose host, connecting
+in a pull request, can execute only that plan. Without <code>--expect-plan</code>, the
+reviewed plan is the host's last recorded preview, which Zap records when it
+prints it, not when anyone reads it, and withdraws when its output couldn't be
+written. A plan whose host, connecting
 user, or deploy health domain resolves through a masked reference gets no hash,
 and its wetrun is an error (<a>env.md</a>).</p><p>The host a hash binds is the name the config resolves it to, not where <code>ssh</code> <code>ssh</code> config whose <code>HostName</code>, <code>User</code>, or <code>Port</code> for it
 changes between the review and the wetrun sends the reviewed plan to the machine
@@ -108,7 +111,9 @@ apt <code>source</code> <code>HOME</code> an <code>--env-file</code> doesn't set
 that reads the machine (<code>plan</code>, <code>detect</code>, <code>apply</code> dry or wet, the deploy
 preflight): a <code>script</code>'s <code>check</code>, a <code>verify</code>'s <code>command</code> assertions, a package's <code>check</code> <code>source</code> line, which the target's shell expands
 to compare with the list, so a <code>$(…)</code> in it runs at <code>zap plan</code>. This is one
-reason <a>the config is first-party</a>.</p><h3>Escaped output</h3><p> <code>zap.lock</code>, a file under <code>~/.zap</code> <code>&lt;U+XXXX></code>, and a tab as spaces, so such text can't move the cursor, overwrite
+reason <a>the config is first-party</a>.</p><h3>Escaped output</h3><p>A review is only as good as the text it reads. Everything Zap prints as text
+writes what it takes from the config, the environment, the command line, the
+checkout (a deploy's commit subject, what <code>git</code> said), <code>zap.lock</code> <code>~/.zap</code> <code>&lt;U+XXXX></code>, and a tab as spaces, so such text can't move the cursor, overwrite
 output, reorder what is shown, or sit in a line unseen. Text that is a block (a
 command, a script, what a failed command printed) keeps its lines, each
 indented under its first. The <code>--json</code> event stream writes the same characters
@@ -332,15 +337,14 @@ write `,r(2),i(E);var Fe=e(E);o(Fe,`id`,`a-wetrun-executes-only-the-plan-you-rev
 plain reference's value), is in
 `;var Le=e(Ie),Re=e(Le);Re.nodeValue=`;
 `;var ze=e(Re,3),Be=e(ze);Be.nodeValue=`). So an agent given
-`;var Ve=e(Be,3);r(),i(D);var O=e(D),He=e(n(O),2);He.nodeValue=`
+`;var Ve=e(Be,5);r(),i(D);var O=e(D),He=e(n(O),2);He.nodeValue=`
 takes that name: an `,r(10),i(O);var Ue=e(O);o(Ue,`id`,`what-the-hash-covers-that-a-preview-doesnt-print`);var k=e(Ue,3),We=n(k);We.nodeValue=`The hash is not a fingerprint of the zap binary: what it does natively on a
 local target, and the few commands it composes directly around a path (the
 `,r(2),i(k);var Ge=e(k);o(Ge,`id`,`what-an-approved-hash-doesnt-fix`);var A=e(Ge,2),j=e(n(A),2),Ke=e(n(j),4);Ke.nodeValue=` line), which on a local target is Zap's own environment, whose
 `,r(4),i(j);var qe=e(j,4),Je=e(n(qe),2);Je.nodeValue=` and
 `,r(2),i(qe),i(A);var M=e(A),Ye=e(n(M),16);Ye.nodeValue=`
-when it is a command, and an apt `;var Xe=e(Ye,7);o(Xe,`href`,`#the-config-is-first-party`),r(),i(M);var Ze=e(M);o(Ze,`id`,`escaped-output`);var Qe=e(Ze),$e=n(Qe);$e.nodeValue=`A review is only as good as the text it reads. Everything Zap prints as text
-writes what it takes from the config, the environment, the command line,
-`;var et=e($e,4);et.nodeValue=`, or the target with control, bidirectional,
+when it is a command, and an apt `;var Xe=e(Ye,7);o(Xe,`href`,`#the-config-is-first-party`),r(),i(M);var Ze=e(M);o(Ze,`id`,`escaped-output`);var Qe=e(Ze),$e=e(n(Qe),4);$e.nodeValue=`, a file under
+`;var et=e($e,2);et.nodeValue=`, or the target with control, bidirectional,
 and default-ignorable characters (every control character but tab, the line and
 paragraph separators, zero-width characters and the like) spelled out as
 `;var tt=e(et,9);tt.textContent=`{env:NAME}`,r(),i(Qe);var nt=e(Qe);o(nt,`id`,`secrets`);var N=e(nt),P=e(n(N)),rt=n(P);rt.nodeValue=`Which references are secrets, and the forms masking looks for:

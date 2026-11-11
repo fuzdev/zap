@@ -1,4 +1,4 @@
-import{$ as e,G as t,J as ee,K as n,X as r,Z as te,dt as i,ft as a,j as o,k as ne,l as s,m as c,ot as re,st as l}from"./CkSeWg2M.js";import{t as u}from"./Cyt8LZpN.js";import{n as d}from"./BbCw5KVU.js";import"./BPVwp-J3.js";import{t as f}from"./k6TRNp0w.js";import{t as p}from"./DH_LefOd.js";import{t as m}from"./CtsBFaJL.js";var ie=o(`<p><code>zap deploy</code> ships a versioned release of your application to a remote host over
+import{$ as e,G as t,J as n,K as ee,X as r,Z as te,dt as i,ft as a,j as o,k as ne,l as s,m as c,ot as re,st as l}from"./CkSeWg2M.js";import{t as u}from"./Cyt8LZpN.js";import{n as d}from"./BbCw5KVU.js";import"./BPVwp-J3.js";import{t as f}from"./k6TRNp0w.js";import{t as p}from"./DH_LefOd.js";import{t as m}from"./CtsBFaJL.js";var ie=o(`<p><code>zap deploy</code> ships a versioned release of your application to a remote host over
 SSH and swaps it in atomically, with a health gate and automatic rollback. The
 host is one your config already converges with <code>zap apply</code>: the same tool that
 built the machine ships the app, and the deploy refuses to ship onto a host that
@@ -11,7 +11,23 @@ declared one.</p><h2>Commands</h2><!><p>A wetrun binds to a preview made with th
 operator env first, as for every command. Flags, exit codes, and what a dry run
 reads: <a>cli.md</a>.</p><p><strong>What it needs.</strong> On your machine: <code>git</code>, <code>tar</code> with <code>gzip</code>, and <code>ssh</code>, with <code>zap</code> run from
 inside the application's git checkout. On the target: what a file write needs
-(<a>targets.md</a>), plus <code>tar</code>, <code>id</code> <code>flock</code>.</p><h2>First deploy</h2><p> <code>deploy</code>, but <code>deploy</code>'s preflight requires a converged <code>apply</code>, and a <code>service</code> <code>running: true</code> can't be running before there is anything to run.
+(<a>targets.md</a>), plus <code>tar</code>, <code>id</code> <code>flock</code>.</p><h3>What a wetrun prints</h3><p>While a wetrun runs, each phase prints one line to standard error as it starts:
+the drift preflight, each step, and a rollback if one starts. Nothing about how
+a phase ended prints there. When the run ends, the report goes to standard
+output: a table with a row for the preflight, each step, and a rollback when
+one ran, each with its status, how long it took, and what it says (the
+upload's size, what the health and readiness checks found, a failed step's
+error, a skipped one's reason; a command's own output, such as the build log,
+is left out), then the warnings and a closing line that says what is live
+where.</p><!><p>The <code>→</code> <code>--json</code> neither prints: the events stream instead
+(<a>cli.md</a>). A preflight that checked nothing is a <code>skip</code> <code>--skip-preflight</code>, or no apply-managed resources declared).</p><p>A failed run's closing line names the step that failed and the state the
+target is in. A failure before the swap released nothing:</p><!><p>A failure of the extract-and-swap step itself is read back from <code>current</code>, and
+nothing is rolled back. When <code>current</code> names another release, or none on a
+first release, this one is not live:</p><!><p>When it names this version (the swap can have happened before the step failed,
+or another deploy of the same version swapped), or can't be read, the line
+claims neither way and points at the step's error. So does a <code>current</code> <code>current</code>, so that read is one it can't believe (an app path the connecting
+user can no longer search reads that way):</p><!><p>A failure after the swap is followed by a rollback
+(<a>Auto-rollback</a>).</p><h2>First deploy</h2><p> <code>deploy</code>, but <code>deploy</code>'s preflight requires a converged <code>apply</code>, and a <code>service</code> <code>running: true</code> can't be running before there is anything to run.
 Resolve it in the config: declare the service <code>enabled</code> and leave <code>running</code> </p><!><p>Then the bring-up is two reviewed runs: <code>zap apply</code>, then <code>zap apply --wetrun</code> <code>zap deploy</code>, then <code>zap deploy --wetrun</code>, ships the first release, whose
 restart step starts the service. Preview the deploy after the apply has run:
 the dry run connects as the user the apply sets up, and a pin the apply writes
@@ -21,14 +37,31 @@ stayed down reports converged. Declaring <code>running: true</code> buys that as
 back at the cost of one <code>deploy --wetrun --skip-preflight</code> on the very first
 release (previewed with <code>deploy --skip-preflight</code>, since the flag is part of
 the plan), and <code>--skip-preflight</code> disables the whole drift gate for that run.</p><p>When SSH hardening changes the user Zap connects as, add <code>--bootstrap</code> to the
-first apply: <a>targets.md</a>.</p><h2>Binding a wetrun to a reviewed plan</h2><p>A dry run prints the whole plan and ends with its hash:</p><!><p>A wetrun executes only a plan you were shown. It computes its plan again, and
-that plan's hash must equal the reviewed one:</p><ul><li><code>--expect-plan &lt;hash></code> names the reviewed plan explicitly, and binds alone;</li><li>with no flag, the reviewed plan is the <strong>deploy preview</strong> recorded for this
+first apply: <a>targets.md</a>.</p><h2>Binding a wetrun to a reviewed plan</h2><p>A dry run prints the whole plan and ends with its hash. It comes in groups a
+blank line apart: what ships where (the version and the release it replaces,
+the commit's subject, the host and the user Zap connects as, who is deploying,
+the declared target, and what the references resolve to), the two gates (the
+tree and the drift preflight), the steps, and what the run does with the plan.
+The commit's subject is its own first line, cut at 100 characters, with any
+secret's value masked; on a dirty tree it is still the commit's, and its line
+says it is the commit under the uncommitted changes. The extract-and-swap step
+lists the values its script is built from above the script: the app path, the
+release <code>current</code> must still name, each <code>shared</code> link, each <code>prepare</code> command,
+and how many releases are kept. Each poll's first line says what it does and
+how long it can take; a second gives the URL as declared when a reference in it
+resolves. Last, <code>in short:</code> restates the commit, version, host, user, tree, and
+preflight beside the hash, below however long the script is:</p><!><p>A wetrun executes only a reviewed plan: one whose hash you named, or one Zap
+printed as a preview. It computes its plan again, and that plan's hash must
+equal the reviewed one:</p><ul><li><code>--expect-plan &lt;hash></code> names the reviewed plan explicitly, and binds alone;</li><li>with no flag, the reviewed plan is the <strong>deploy preview</strong> recorded for this
 config and host: the last <code>zap deploy</code> dry run, or a wetrun that refused.</li></ul><p>Otherwise the wetrun <strong>refuses</strong> before the drift preflight and any step,
 prints the plan it would have run under a <code>REFUSED</code> banner that says why (no
 preview yet, the plan changed since the preview, or the hash doesn't match),
 records that render as the new preview, and exits 2. Nothing is built or
-uploaded. The everyday flow is <code>zap deploy</code>, read it, <code>zap deploy --wetrun</code> <code>--expect-plan</code>.</p><p>On an interactive terminal (standard input and standard error both terminals),
-a wetrun with no review and no <code>--expect-plan</code> <code>UNREVIEWED</code> banner with its <code>plan_hash</code>, and ends with the question:</p><!><p>Typing those eight characters back is the review: the wetrun goes on with
+uploaded. The everyday flow is <code>zap deploy</code>, read it, <code>zap deploy --wetrun</code> <code>--expect-plan</code>.</p><p> <code>--expect-plan</code> refuses; one sent to <code>/dev/null</code>, or cut short by <code>head</code> after
+the pipe took it whole, still binds it. When the output may be truncated, or
+the one who reads the preview isn't the one who deploys, pass <code>--expect-plan</code> <a>concepts.md</a>).</p><p>On an interactive terminal (standard input and standard error both terminals),
+a wetrun with no review and no <code>--expect-plan</code> <code>UNREVIEWED</code> banner, then its recap and its <code>plan_hash</code>, and ends with the
+question:</p><!><p>Typing those eight characters back is the review: the wetrun goes on with
 exactly the plan shown, to the drift preflight, the withdrawal of any recorded
 preview, and the steps, as a bound wetrun does. Any other answer is the refusal
 above, under a <code>DECLINED</code> banner. The prompt follows <code>zap apply</code>'s rules: no
@@ -44,12 +77,16 @@ deploy dry run doesn't disturb a convergence one. It holds the hash, not the
 plan. A deploy wetrun's drift preflight does replace the convergence record: it
 records its pass as the last-run report, which is no preview, so a <code>zap apply</code> <code>--expect-plan</code> binds.</p><p>Everything the hash covers is printed but two of Zap's own scripts: the one the
 upload installs the archive with, and the swap the auto-rollback runs. So a plan
-reviewed under one <code>zap</code> build doesn't bind one whose scripts differ. It covers:</p><ul><li>the version, the tree state, and the previous release on the target;</li><li>the declared target, the host it resolves to, and the connecting user (in the
-uploaded archive's name);</li><li>who is deploying (<code>user@host</code> <code>deploy_info.json</code>);</li><li>the preflight's state: skipped, nothing declared, or which apply-managed
+reviewed under one <code>zap</code> build doesn't bind one whose scripts differ. It covers:</p><ul><li>the version, the subject line of its commit, the tree state, and the
+previous release on the target;</li><li>the declared target, the host it resolves to, and the connecting user;</li><li>who is deploying (<code>user@host</code> <code>deploy_info.json</code>);</li><li>the preflight's state: skipped, nothing declared, or which apply-managed
 resources it checks, as a count and a digest of their declarations and the
 current pins <code>zap.lock</code> holds for them;</li><li>every step: the build and tarball commands, the upload paths and the script
-that installs the archive, the remote script with its <code>shared</code> <code>prepare</code> commands, the restart command, the health and readiness URLs as
-they resolve, and the swap the auto-rollback would run;</li><li>the value of each reference the <code>deploy</code> block uses (its health domain),
+that installs the archive, the remote script and the values it is built from
+(the app path, the <code>shared</code> links, the <code>prepare</code> commands, how many releases
+are kept), the restart command, the health and readiness URLs as they resolve
+and the budget each is polled with (the attempts, the wait between two, the
+time each is given), and the swap the auto-rollback would run;</li><li>the plan's warnings, printed under it (a <code>deploy.service</code> the target's
+service manager can't restart);</li><li>the value of each reference the <code>deploy</code> block uses (its health domain),
 printed in its <code>references:</code> block (a secret's value excepted: the plan
 records only that it is one).</li></ul><p>So a plan reviewed for one host, tree, flag set, or operator does not bind a
 wetrun for another: a new commit, a deploy or rollback by someone else in
@@ -61,9 +98,10 @@ environment reaches the hash only through the host, the connecting user, and
 the health domain. The same holds for the bytes of a local <code>source</code> file.</li></ul><p><strong>A masked host, connecting user, or health domain can't be deployed to.</strong> No
 review can bind such a plan: a wetrun is an error that names the reference
 before anything runs, and a dry run shows the plan under an <code>UNBINDABLE</code> note,
-with no <code>plan_hash</code> <a>env.md</a>.</p><p>Text from the config, the environment, and the target is printed with control
-characters written out as <code>&lt;U+XXXX></code>, so a value can't hide or forge a line of
-the preview (<a>security.md</a>).</p><h2>Preflight</h2><p>Before deploy touches the network, the machine-free gates run (secrets,
+with no <code>plan_hash</code> <a>env.md</a>.</p><p>Text from the config, the environment, the checkout (the commit's subject), and
+the target is printed with control characters written out as <code>&lt;U+XXXX></code>, so a
+value can't hide or forge a line of the preview
+(<a>security.md</a>).</p><h2>Preflight</h2><p>Before deploy touches the network, the machine-free gates run (secrets,
 structure, and, for a deploy config, a present <code>health.domain</code>), and a wetrun
 rejects any unset reference and a host, connecting user, or health domain behind
 a masked reference. <code>zap.lock</code> is read here too, when the drift preflight will
@@ -87,9 +125,9 @@ and says the wetrun is refused, even when the commit is the live release.</p><p>
 the same tree gets the same id (a dry run and its wetrun agree) and a second
 dirty tree on one commit is a release of its own:</p><table><thead><tr><th>In the tree</th><th>Counts by</th></tr></thead><tbody><tr><td>tracked and staged changes</td><td><code>git diff HEAD --binary</code></td></tr><tr><td>an untracked file git doesn't ignore</td><td>its name and contents</td></tr><tr><td>an untracked symlink</td><td>the path it points to, as git records one, whether that is a file, a directory, or nothing</td></tr><tr><td>an untracked nested repository</td><td>its name alone</td></tr><tr><td>a submodule</td><td>its commit and whether its own index shows changes, not what they are</td></tr><tr><td>a sparse checkout</td><td>the files outside its cone, as deletions: the tree reads dirty</td></tr></tbody></table><p>Zap reads the tree against a copy of the index's entries that holds no
 timestamps or flags, so every file is compared by its contents: a file the
-index marks unchanged (<code>assume-unchanged</code>, <code>skip-worktree</code>) counts like any
-other, and so does one whose timestamps the index's cache would take for
-unchanged. Each read sets <code>core.fsmonitor=false</code>, <code>core.untrackedCache=false</code> <code>core.ignoreStat=false</code>, <code>core.fileMode=true</code> <code>core.autocrlf=false</code> <code>core.splitIndex=false</code>, and passes <code>--untracked-files=normal</code> <code>--ignore-submodules=none</code>, so <code>status.showUntrackedFiles</code> <code>ignore</code> setting, and <code>diff.ignoreSubmodules</code> <code>core.autocrlf=true</code>, reads dirty, and deploys only under <code>--force</code>.</p><p>Two things still decide what counts as a change. The checkout's attributes
+index marks unchanged (<code>assume-unchanged</code>, <code>skip-worktree</code> <code>refs/replace/</code> entry puts in their place (<code>--no-replace-objects</code>, as the
+subject line is read too), and sets <code>core.fsmonitor=false</code> <code>core.untrackedCache=false</code>, <code>core.ignoreStat=false</code>, <code>core.fileMode=true</code> (a
+mode change counts), <code>core.autocrlf=false</code> <code>core.splitIndex=false</code>, and passes <code>--untracked-files=normal</code> <code>--ignore-submodules=none</code>, so <code>status.showUntrackedFiles</code> <code>ignore</code> setting, and <code>diff.ignoreSubmodules</code> <code>core.autocrlf=true</code>, reads dirty, and deploys only under <code>--force</code>.</p><p>Two things still decide what counts as a change. The checkout's attributes
 (<code>.gitattributes</code>, <code>.git/info/attributes</code>) are applied: a clean filter, LFS
 among them, or an <code>eol</code> or <code>text</code> attribute can make a file that differs from
 the commit compare equal to it, and no flag turns them off. A submodule's own
@@ -153,7 +191,8 @@ guard, the prune removes nothing unless <code>current</code> names a release, an
 on a target with no <code>sort</code> it removes nothing and warns.</li></ul></li><li><strong>restart</strong>: restart <code>deploy.service</code> through the target's service manager
 (with a <code>daemon-reload</code> first on systemd).</li><li><strong>health</strong>: poll <code>https://&lt;domain>&lt;path></code> from the operator machine (the one
 you run <code>zap</code> on) until
-it answers 2xx, up to <code>attempts</code> times, <code>interval_ms</code> apart. Neither poll
+it answers 2xx, up to <code>attempts</code> times, <code>interval_ms</code> apart, each attempt
+given 5 seconds. The plan states the most a poll can take. Neither poll
 follows a redirect: a 3xx is not healthy or ready, so a release that
 redirects to a login page doesn't pass on that page's 200.</li><li><strong>readiness</strong>: when <code>health.path</code> isn't already <code>/ready</code>, poll <code>/ready</code> too.
 2xx proceeds. When the attempts run out, the last HTTP status decides; a connection failure
@@ -164,8 +203,16 @@ that doesn't match the running code, or an unreachable database), any other
 status, or no answer at all. Point <code>health.path</code> at <code>/ready</code> to make that one
 check the gate; then any non-2xx, 404 included, rolls back.</li></ol><h2>Auto-rollback</h2><p> <code>/ready</code> answers 503), Zap re-points <code>current</code> at the previous release,
 restarts, and re-checks health (the health URL, not <code>/ready</code>), recording the
-rollback as warnings and step events. The deploy still exits 1: rollback
-restores service, it doesn't paper over the failure.</p><p>The re-point is a compare-and-swap under the app's deploy lock, taken without
+rollback as a row of the report and as step events. The deploy still exits 1:
+rollback restores service, it doesn't paper over the failure.</p><p>The rollback has its own row in the report, after the failed step, and the
+closing line says where it left the target:</p><!><p>Without a health check in the plan, the line says the previous release was
+restored and restarted, not that it is live. A rollback that didn't go as
+planned says so on its row and in the closing line, and a warning below the
+table says why: no release was known to return to, so the failed release is live
+(the row has no time: it never started); the previous release was restored,
+but its restart or its health check failed, so it is not confirmed serving; the
+rollback was skipped, so <code>current</code> is as the warnings say; or the re-point
+itself failed, so the host may be serving the failed release.</p><p>The re-point is a compare-and-swap under the app's deploy lock, taken without
 waiting. It moves <code>current</code> back only while <code>current</code> still names this deploy's
 release and the previous release is still on the host. Otherwise (another
 deploy holds the lock or has replaced the release, someone re-pointed <code>current</code> <code>current</code> names nothing, or the previous release is gone) the rollback
@@ -178,7 +225,12 @@ not from a recorded file, so a manual rollback done by hand is seen correctly
 on the next deploy. A <code>current</code> whose last segment, trailing slashes dropped,
 is no release's name names no previous release, so the deploy refuses before
 it builds anything: point <code>current</code> at the live release by hand, or remove it
-to deploy as onto a fresh host.</p><h3>Concurrent deploys</h3><p>A deploy planned before another deploy's swap stops at its check (step 4), so a
+to deploy as onto a fresh host.</p><p>A <code>current</code> that can't be read (the read fails, or the app path is there but
+the connecting user can't enter it) leaves the deploy with no previous release:
+the preview warns, with the reason, that there is nothing to roll back to. An
+app path below a directory the connecting user can't search reads as missing,
+so the preview says <code>(first release)</code> with no warning; its wetrun then fails at
+the upload, before anything is released.</p><h3>Concurrent deploys</h3><p>A deploy planned before another deploy's swap stops at its check (step 4), so a
 rollback never undoes a newer deploy, with one exception: a <code>--force</code> redeploy
 of the same version, planned after a deploy's swap while that deploy is in its
 health check, writes the same <code>current</code>, which the first deploy's rollback
@@ -189,7 +241,7 @@ checks run after the script releases it, so a deploy can report on a host that
 another deploy has since moved on. Two simultaneous deploys of one version by
 one connecting user upload to the same name, so either can replace or remove
 the other's archive; the other then stops at its digest check or finds no
-archive (exit 1) rather than ship bytes it didn't build.</p>`,1);function h(o,h){l(h,!0);let g=d(`deploy`);c(`1d1gc0k`,e=>{t(()=>{ee.title=`Deploy — zap`})}),f(o,{get tome(){return g},children:(t,ee)=>{m(t,{children:(t,ee)=>{var o=ie(),c=e(te(o)),re=e(r(c));s(re,`href`,`#binding-a-wetrun-to-a-reviewed-plan`),i(),a(c);var l=e(c);s(l,`id`,`configuration`);var d=e(l);p(d,{lang:`ts`,dangerous_raw_html:`<span class="token_special_keyword">export</span> <span class="token_special_keyword">default</span> <span class="token_punctuation">(</span>zap<span class="token_punctuation">)</span> <span class="token_operator">=></span> <span class="token_punctuation">{</span>
+archive (exit 1) rather than ship bytes it didn't build.</p>`,1);function h(o,h){l(h,!0);let g=d(`deploy`);c(`1d1gc0k`,e=>{t(()=>{n.title=`Deploy — zap`})}),f(o,{get tome(){return g},children:(t,n)=>{m(t,{children:(t,n)=>{var o=ie(),c=e(te(o)),re=e(r(c));s(re,`href`,`#binding-a-wetrun-to-a-reviewed-plan`),i(),a(c);var l=e(c);s(l,`id`,`configuration`);var d=e(l);p(d,{lang:`ts`,dangerous_raw_html:`<span class="token_special_keyword">export</span> <span class="token_special_keyword">default</span> <span class="token_punctuation">(</span>zap<span class="token_punctuation">)</span> <span class="token_operator">=></span> <span class="token_punctuation">{</span>
 	zap<span class="token_punctuation">.</span><span class="token_function">target</span><span class="token_punctuation">({</span>
 		host<span class="token_operator">:</span> zap<span class="token_punctuation">.</span><span class="token_function">env</span><span class="token_punctuation">(</span><span class="token_string">'DEPLOY_HOST'</span><span class="token_punctuation">),</span>
 		user<span class="token_operator">:</span> zap<span class="token_punctuation">.</span><span class="token_function">env</span><span class="token_punctuation">(</span><span class="token_string">'DEPLOY_USER'</span><span class="token_punctuation">),</span>
@@ -215,26 +267,53 @@ zap deploy --wetrun --skip-build       <span class="token_comment"># no build st
 zap deploy --wetrun --skip-preflight   <span class="token_comment"># ship without the drift preflight</span>
 zap deploy --wetrun --force            <span class="token_comment"># ship an unchanged version, or a dirty tree</span>
 zap deploy --wetrun --json             <span class="token_comment"># stream step events as JSON lines</span>`});var g=e(h),ae=e(r(g));s(ae,`href`,`#binding-a-wetrun-to-a-reviewed-plan`);var oe=e(ae,4);i(),a(g);var _=e(g),se=e(r(_),12),ce=e(se,5);ce.nodeValue=`, and
-`,i(2),a(_);var v=e(_);s(v,`id`,`first-deploy`);var y=e(v),b=r(y);b.nodeValue=`A first deploy onto a fresh host is a chicken-and-egg: the binary lands via
-`;var x=e(b,8);x.nodeValue=`
-declared `;var le=e(x,6);le.nodeValue=`
-unset.`,a(y);var ue=e(y);p(ue,{lang:`ts`,dangerous_raw_html:`zap<span class="token_punctuation">.</span><span class="token_function">service</span><span class="token_punctuation">({</span>
+`,i(2),a(_);var le=e(_);s(le,`id`,`what-a-wetrun-prints`);var ue=e(le,2);p(ue,{lang:null,content:`→ preflight: checking 1 apply-managed resource for drift
+→ build: Build application
+→ tarball: Create tarball
+→ upload: Upload tarball
+→ extract_swap: Extract and swap release
+→ restart: Restart app
+→ health: Health check
+deploy — target host.example (wetrun)
+  version: abc1234 (previous: def5678)
+  ok    preflight     4.1s  1 apply-managed resource, no drift
+  ok    build         1.1s
+  ok    tarball       2.2s
+  ok    upload        3.3s  4.2 MB sent
+  ok    extract_swap  4.4s
+  ok    restart       5.5s
+  ok    health        6.6s  healthy after 2 attempts
+deployed abc1234 to host.example (previous: def5678) in 1m 23s
+plan_hash: deadbeef`});var v=e(ue),de=e(r(v),2);de.nodeValue=` lines are standard error and the rest standard output, so standard
+output redirected to a file holds the whole report and no progress line. Under
+`;var fe=e(de,3),pe=e(fe,3);pe.nodeValue=`
+row that says why (`,i(2),a(v);var me=e(v,2);p(me,{lang:null,content:"deploy FAILED at upload on host.example after 1m 23s — nothing was released, and `current` was not moved"});var he=e(me,2);p(he,{lang:null,content:"deploy FAILED at extract_swap on host.example after 1m 23s — `current` does not name this release, so nothing was released"});var y=e(he),ge=e(r(y),2);ge.nodeValue=` that
+reads as missing where a release was live before the run: Zap never removes
+`,i(2),a(y);var _e=e(y);p(_e,{lang:null,content:`deploy FAILED at extract_swap on host.example after 1m 23s — the swap is not known to have completed, and nothing was rolled back (see the step's error above)`});var b=e(_e),ve=e(r(b));s(ve,`href`,`#auto-rollback`),i(),a(b);var ye=e(b);s(ye,`id`,`first-deploy`);var x=e(ye),be=r(x);be.nodeValue=`A first deploy onto a fresh host is a chicken-and-egg: the binary lands via
+`;var xe=e(be,8);xe.nodeValue=`
+declared `;var Se=e(xe,6);Se.nodeValue=`
+unset.`,a(x);var Ce=e(x);p(Ce,{lang:`ts`,dangerous_raw_html:`zap<span class="token_punctuation">.</span><span class="token_function">service</span><span class="token_punctuation">({</span>
 	id<span class="token_operator">:</span> <span class="token_string">'app-service'</span><span class="token_punctuation">,</span>
 	service<span class="token_operator">:</span> <span class="token_string">'app'</span><span class="token_punctuation">,</span>
 	enabled<span class="token_operator">:</span> <span class="token_boolean">true</span><span class="token_punctuation">,</span>
 	<span class="token_comment">// no \`running\`: zap manages enablement, not runtime state, so the service</span>
 	<span class="token_comment">// doesn't drift before a binary exists; the deploy's restart starts it</span>
 	restart_on<span class="token_operator">:</span> <span class="token_punctuation">[</span><span class="token_string">'app-unit'</span><span class="token_punctuation">],</span>
-<span class="token_punctuation">});</span>`});var S=e(ue),de=e(r(S),4);de.nodeValue=`,
+<span class="token_punctuation">});</span>`});var S=e(Ce),we=e(r(S),4);we.nodeValue=`,
 provisions the host (firewall included, so deploying first would bail), and
-`,i(6),a(S);var C=e(S,2),fe=e(r(C),3);i(),a(C);var pe=e(C);s(pe,`id`,`binding-a-wetrun-to-a-reviewed-plan`);var me=e(pe,2);p(me,{lang:null,content:`deploy — target {env:DEPLOY_HOST} (dry-run)
+`,i(6),a(S);var C=e(S,2),Te=e(r(C),3);i(),a(C);var w=e(C);s(w,`id`,`binding-a-wetrun-to-a-reviewed-plan`);var T=e(w,2);p(T,{lang:null,content:`deploy — target {env:DEPLOY_HOST} (dry-run)
   version: 3f2a9c1e7b04 (previous: 8d41e0a6c2f9)
+  commit: Add the readiness gate
   host: app.example.com
+  user: app
+  deployed by: ops@laptop
   target: {"local":false,"host":{"$env":"DEPLOY_HOST"},"user":{"$env":"DEPLOY_USER"},"home":"/home/app","package_manager":"apt","service_manager":"systemd"}
   references:
     DEPLOY_DOMAIN = app.example.com
+
   tree: clean
   preflight: no apply-managed resources declared — nothing to check
+
   - Build application (build)
       local$ gro build
   - Create tarball (tarball)
@@ -243,6 +322,11 @@ provisions the host (firewall included, so deploying first would bail), and
   - Upload tarball (upload)
       the archive → target:/home/app/app/.zap-deploy-app-3f2a9c1e7b04.tar.gz (as the connecting user, mode 600, checked against its SHA-512)
   - Extract and swap release (extract_swap)
+      app: /home/app/app
+      replaces: 8d41e0a6c2f9 — \`current\` must still name it
+      links: shared/.env.production
+      prepare: deno cache server.js
+      keeps: 5 releases, counting this one and 8d41e0a6c2f9
       target script (its stdin: the archive's SHA-512):
         set -e
         zap_archive='/home/app/app/.zap-deploy-app-3f2a9c1e7b04.tar.gz'
@@ -250,66 +334,110 @@ provisions the host (firewall included, so deploying first would bail), and
   - Restart app (restart)
       target$ sudo systemctl daemon-reload && sudo systemctl restart app
   - Health check (health)
-      GET https://{env:DEPLOY_DOMAIN}/health — healthy on 2xx; up to 15 attempt(s), 2000 ms apart
-      polls https://app.example.com/health
+      GET https://app.example.com/health — healthy on 2xx; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
+      declared as https://{env:DEPLOY_DOMAIN}/health
   - Readiness check (readiness)
-      GET https://{env:DEPLOY_DOMAIN}/ready — ready on 2xx, unserved on 404; up to 15 attempt(s), 2000 ms apart
-      polls https://app.example.com/ready
+      GET https://app.example.com/ready — ready on 2xx, unserved on 404; up to 15 attempts, 2s apart, 5s each (1m 43s at most)
+      declared as https://{env:DEPLOY_DOMAIN}/ready
+
   (dry-run — re-run with --wetrun to deploy)
-plan_hash: 1f98612fcbfacb69b9d31236457d549e00714e4ad0fb0a36e225c3fe6a5f4312`});var w=e(me,3),he=e(r(w),8);he.nodeValue=`
+
+  in short:
+    commit: Add the readiness gate
+    version: 3f2a9c1e7b04 (previous: 8d41e0a6c2f9)
+    host: app.example.com
+    user: app
+    tree: clean
+    preflight: no apply-managed resources declared — nothing to check
+plan_hash: 2d09162e11f59e2b2409f6d89dcf0f469a877baf09d6e9f770bf5218eb6fcb95`});var E=e(T,3),Ee=e(r(E),8);Ee.nodeValue=`
 with the same flags. A wetrun fired cold becomes the preview, and the next one
 executes if nothing moved. There is no flag that skips the review, and a dry
-run rejects `,i(2),a(w);var T=e(w),ge=e(r(T),2);ge.nodeValue=` shows the plan instead, under an
-`,i(4),a(T);var _e=e(T);p(_e,{lang:null,content:`  UNREVIEWED — this plan is not the one that was reviewed.
+run rejects `,i(2),a(E);var D=e(E),O=r(D);O.nodeValue=`The preview is recorded when Zap prints it, not when anyone reads it. A dry run
+whose output couldn't be written is withdrawn, so the next wetrun run without
+`;var k=e(O,8);k.nodeValue=`
+with the hash on the preview's last line
+(`;var De=e(k);i(),a(D);var A=e(D),Oe=e(r(A),2);Oe.nodeValue=` shows the plan instead, under an
+`,i(4),a(A);var ke=e(A);p(ke,{lang:null,content:`  …
+
+  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
     no deploy plan has been previewed for this host.
-plan_hash: 1f98612fcbfacb69b9d31236457d549e00714e4ad0fb0a36e225c3fe6a5f4312
-Deploy this plan? Type 1f98612f, the start of its plan_hash, to confirm:`});var E=e(_e),ve=e(r(E),9);i(),a(E);var D=e(E,2),ye=e(r(D),2);ye.nodeValue=`
-(`;var O=e(ye),k=e(O);k.nodeValue=`), separate from the last-run report that
-`;var be=e(k,6);be.nodeValue=`
+
+  in short:
+    commit: Add the readiness gate
+    version: 3f2a9c1e7b04 (previous: 8d41e0a6c2f9)
+    host: app.example.com
+    user: app
+    tree: clean
+    preflight: no apply-managed resources declared — nothing to check
+plan_hash: 2d09162e11f59e2b2409f6d89dcf0f469a877baf09d6e9f770bf5218eb6fcb95
+Deploy this plan? Type 2d09162e, the start of its plan_hash, to confirm:`});var j=e(ke),Ae=e(r(j),9);i(),a(j);var M=e(j,2),N=e(r(M),2);N.nodeValue=`
+(`;var je=e(N),Me=e(je);Me.nodeValue=`), separate from the last-run report that
+`;var Ne=e(Me,6);Ne.nodeValue=`
 previewed before it needs a new preview before its wetrun. With no state
-directory nothing is recorded, the run says so, and only `,i(2),a(D);var A=e(D,2),j=e(r(A),2),xe=e(r(j),2);xe.nodeValue=` of the operator machine, recorded in
-`,i(2),a(j);var M=e(j,2),Se=e(r(M),2);Se.nodeValue=` links and
-`,i(2),a(M),i(),a(A);var N=e(A),P=e(r(N),2);P.nodeValue=`,
-`;var Ce=e(P,8);Ce.nodeValue=`
+directory nothing is recorded, the run says so, and only `,i(2),a(M);var P=e(M,2),Pe=e(r(P),2),Fe=e(r(Pe),2);Fe.nodeValue=` of the operator machine, recorded in
+`,i(2),a(Pe),i(4),a(P);var F=e(P),Ie=e(r(F),2);Ie.nodeValue=`,
+`;var Le=e(Ie,8);Le.nodeValue=`
 each make a different plan. The hash is printed, and the preview recorded, only
 when the steps are shown: an already-deployed dry run does neither, so a
-redeploy binds to the plan a `,i(2),a(N);var F=e(N,3),I=e(r(F),5);I.nodeValue=` and no recorded preview. The ways out:
-`;var we=e(I);i(),a(F);var L=e(F),Te=e(r(L),3);i(),a(L);var Ee=e(L);s(Ee,`id`,`preflight`);var R=e(Ee,2),De=e(r(R));s(De,`href`,`#binding-a-wetrun-to-a-reviewed-plan`);var Oe=e(De,3);Oe.nodeValue=`: the convergence pass against the config, before
+redeploy binds to the plan a `,i(2),a(F);var I=e(F,3),Re=e(r(I),5);Re.nodeValue=` and no recorded preview. The ways out:
+`;var ze=e(Re);i(),a(I);var L=e(I),Be=e(r(L),3);i(),a(L);var Ve=e(L);s(Ve,`id`,`preflight`);var R=e(Ve,2),He=e(r(R));s(He,`href`,`#binding-a-wetrun-to-a-reviewed-plan`);var Ue=e(He,3);Ue.nodeValue=`: the convergence pass against the config, before
 building or uploading. If apply-managed state (an nginx site, the
 env file, the service unit) was edited in the config but never applied, shipping
 a new artifact against it would be a silent mismatch; the preflight bails with
 exit 2, and a change held behind a resource it couldn't read counts as drift. A
-`,i(4),a(R);var z=e(R),ke=e(r(z),2);ke.nodeValue=`, converge with
-`;var Ae=e(ke,2);Ae.nodeValue=`, and re-run the deploy: its review still binds unless
-`,i(2),a(z);var B=e(z),je=e(r(B));je.nodeValue=` skips the drift preflight, and a config that declares no
+`,i(4),a(R);var z=e(R),We=e(r(z),2);We.nodeValue=`, converge with
+`;var Ge=e(We,2);Ge.nodeValue=`, and re-run the deploy: its review still binds unless
+`,i(2),a(z);var B=e(z),Ke=e(r(B));Ke.nodeValue=` skips the drift preflight, and a config that declares no
 apply-managed resources has nothing to check. Either way the plan says so on its
-`,i(2),a(B);var V=e(B),Me=e(r(V),8);Me.nodeValue=`
-names a release that is not on the host.`,a(V);var Ne=e(V);s(Ne,`id`,`dirty-trees`);var H=e(Ne,4),Pe=e(r(H),8);Pe.nodeValue=`,
-`;var Fe=e(Pe,4);Fe.nodeValue=` (a mode change counts),
-`;var Ie=e(Fe,2);Ie.nodeValue=` (line endings are not converted), and
-`;var Le=e(Ie,4);Le.nodeValue=` and
-`;var Re=e(Le,4);Re.nodeValue=`, a submodule's
-`;var ze=e(Re,4);ze.nodeValue=` don't narrow it either. So a
+`,i(2),a(B);var V=e(B),qe=e(r(V),8);qe.nodeValue=`
+names a release that is not on the host.`,a(V);var Je=e(V);s(Je,`id`,`dirty-trees`);var H=e(Je,4),Ye=e(r(H),4);Ye.nodeValue=`) counts like any
+other, and so does one whose timestamps the index's cache would take for
+unchanged. Each read compares against the objects the commit names, not ones a
+`;var Xe=e(Ye,6);Xe.nodeValue=`,
+`;var Ze=e(Xe,8);Ze.nodeValue=` (line endings are not converted), and
+`;var Qe=e(Ze,4);Qe.nodeValue=` and
+`;var $e=e(Qe,4);$e.nodeValue=`, a submodule's
+`;var et=e($e,4);et.nodeValue=` don't narrow it either. So a
 checkout on a filesystem without executable bits, or one checked out with
-`,i(4),a(H);var Be=e(H,4);s(Be,`id`,`the-release-mechanism`);var U=e(Be),Ve=e(r(U));s(Ve,`href`,`#preflight`),i(),a(U);var He=e(U);p(He,{lang:null,content:`build (local) → tarball → upload → extract + swap → restart → health → readiness`});var W=e(He),G=e(r(W),2),Ue=e(r(G),3);Ue.nodeValue=` as the connecting user, mode
-`,i(4),a(G);var K=e(G),We=e(r(K),2),q=r(We),Ge=e(r(q),3);Ge.nodeValue=` on
-`;var Ke=e(Ge,2);Ke.nodeValue=`, held until the script exits. The file is never
+`,i(4),a(H);var tt=e(H,4);s(tt,`id`,`the-release-mechanism`);var U=e(tt),nt=e(r(U));s(nt,`href`,`#preflight`),i(),a(U);var rt=e(U);p(rt,{lang:null,content:`build (local) → tarball → upload → extract + swap → restart → health → readiness`});var W=e(rt),G=e(r(W),2),it=e(r(G),3);it.nodeValue=` as the connecting user, mode
+`,i(4),a(G);var K=e(G),at=e(r(K),2),q=r(at),ot=e(r(q),3);ot.nodeValue=` on
+`;var st=e(ot,2);st.nodeValue=`, held until the script exits. The file is never
 removed and holds no data; when Zap creates it, other users get no
 permission on it. It is opened read-only, so the connecting user and its
 group can hold it, the group even under a umask that gives it read alone
 (022). A deploy that finds the lock held stops at once, before it touches
-`,i(8),a(q);var J=e(q),qe=e(r(J),5);qe.nodeValue=` that a killed
-`;var Je=e(qe,5);s(Je,`href`,`#preflight`),i(3),a(J);var Y=e(J),Ye=e(r(Y),5);Ye.nodeValue=`, no link and no file or directory, on a first
+`,i(8),a(q);var J=e(q),ct=e(r(J),5);ct.nodeValue=` that a killed
+`;var lt=e(ct,5);s(lt,`href`,`#preflight`),i(3),a(J);var Y=e(J),ut=e(r(Y),5);ut.nodeValue=`, no link and no file or directory, on a first
 deploy). A deploy planned before another one swapped stops here, saying
-`,i(6),a(Y);var X=e(Y,2),Xe=e(r(X),5);Xe.nodeValue=`
+`,i(6),a(Y);var X=e(Y,2),dt=e(r(X),5);dt.nodeValue=`
 into the new release (an apply-managed env file, for example); a release
-that ships a directory at a shared name fails the deploy here;`,a(X);var Z=e(X,2),Ze=e(r(Z),5);Ze.nodeValue=`, longer only where 12 would be ambiguous), with
-`,i(10),a(Z);var Qe=e(Z),$e=e(r(Qe),3);$e.nodeValue=` at the new release atomically. From
+that ships a directory at a shared name fails the deploy here;`,a(X);var Z=e(X,2),ft=e(r(Z),5);ft.nodeValue=`, longer only where 12 would be ambiguous), with
+`,i(10),a(Z);var pt=e(Z),mt=e(r(pt),3);mt.nodeValue=` at the new release atomically. From
 here the release is live, and the run goes on to restart and check it
 whatever the rest of the script does: what follows is housekeeping, and
 a failure there is a warning in the run's output, not a failed step. A
 script that fails after saying it swapped is taken as swapped only when
-`,i(2),a(Qe),i(2),a(We),a(K);var et=e(K,3),tt=e(r(et),9);tt.nodeValue=`
-means the app doesn't serve `,i(8),a(et),a(W);var nt=e(W);s(nt,`id`,`auto-rollback`);var Q=e(nt),rt=r(Q);rt.nodeValue=`If a step after the swap fails (the restart errors, health never goes green,
-`,i(6),a(Q);var $=e(Q),it=e(r($),6);it.nodeValue=`
-by hand, `,i(2),a($);var at=e($,4);s(at,`id`,`concurrent-deploys`),i(2),n((e,t,ee,n,r,te,i)=>{s(oe,`href`,e),s(se,`href`,t),s(fe,`href`,ee),s(ve,`href`,n),s(O,`href`,r),s(we,`href`,te),s(Te,`href`,i)},[()=>u(`docs/cli#zap-deploy`),()=>u(`docs/targets#what-the-target-needs`),()=>u(`docs/targets#the-bootstrap-user`),()=>u(`docs/cli#zap-apply`),()=>u(`docs/lock#on-disk-state`),()=>u(`docs/env#masked-hosts-and-review`),()=>u(`docs/security#escaped-output`)]),ne(t,o)},$$slots:{default:!0}})},$$slots:{default:!0}}),re()}export{h as t};
+`,i(2),a(pt),i(2),a(at),a(K);var ht=e(K,3),gt=e(r(ht),9);gt.nodeValue=`
+means the app doesn't serve `,i(8),a(ht),a(W);var _t=e(W);s(_t,`id`,`auto-rollback`);var Q=e(_t),vt=r(Q);vt.nodeValue=`If a step after the swap fails (the restart errors, health never goes green,
+`,i(6),a(Q);var yt=e(Q,2);p(yt,{lang:null,content:`→ preflight: checking 1 apply-managed resource for drift
+→ build: Build application
+→ tarball: Create tarball
+→ upload: Upload tarball
+→ extract_swap: Extract and swap release
+→ restart: Restart app
+→ health: Health check
+→ rollback: Roll back to def5678
+deploy — target host.example (wetrun)
+  version: abc1234 (previous: def5678)
+  ok    preflight     4.1s  1 apply-managed resource, no drift
+  ok    build         1.1s
+  ok    tarball       2.2s
+  ok    upload        3.3s  4.2 MB sent
+  ok    extract_swap  4.4s
+  ok    restart       5.5s
+  FAIL  health        6.6s  service did not become healthy at https://app.example.com/health within 15 attempts (last: HTTP 502)
+  ok    rollback      8.0s  def5678 restored and restarted, health OK
+  this deploy spent its review: before re-running, preview again with \`zap deploy\` (or pass --expect-plan with the hash that preview prints)
+deploy FAILED at health on host.example after 1m 23s — rolled back: def5678 is live again
+plan_hash: deadbeef`});var $=e(yt,2),bt=e(r($),6);bt.nodeValue=`
+by hand, `,i(2),a($);var xt=e($,5);s(xt,`id`,`concurrent-deploys`),i(2),ee((e,t,n,ee,r,te,i,a,o)=>{s(oe,`href`,e),s(se,`href`,t),s(fe,`href`,n),s(Te,`href`,ee),s(De,`href`,r),s(Ae,`href`,te),s(je,`href`,i),s(ze,`href`,a),s(Be,`href`,o)},[()=>u(`docs/cli#zap-deploy`),()=>u(`docs/targets#what-the-target-needs`),()=>u(`docs/cli#json-events`),()=>u(`docs/targets#the-bootstrap-user`),()=>u(`docs/concepts#a-wetrun-executes-only-the-plan-you-reviewed`),()=>u(`docs/cli#zap-apply`),()=>u(`docs/lock#on-disk-state`),()=>u(`docs/env#masked-hosts-and-review`),()=>u(`docs/security#escaped-output`)]),ne(t,o)},$$slots:{default:!0}})},$$slots:{default:!0}}),re()}export{h as t};

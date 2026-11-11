@@ -28,7 +28,7 @@
 		<link href="/_app/immutable/chunks/CkSeWg2M.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Cyt8LZpN.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/nqpJJcfP.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.DBBUTYbQ.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.DaSMZjRK.js" rel="modulepreload">
 		<link href="/_app/immutable/nodes/0.CBD02HwM.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/EpM2J4Cd.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Drx_RGrR.js" rel="modulepreload">
@@ -36,7 +36,7 @@
 		<link href="/_app/immutable/chunks/yWx_1vUe.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMVmPj5_.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJ6hHGax.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/2.CjS8qjKf.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/2.CTeavGnV.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CHEAhmp6.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BbCw5KVU.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BPVwp-J3.js" rel="modulepreload">
@@ -48,29 +48,29 @@
 		<link href="/_app/immutable/chunks/tQA3rDst.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/k6TRNp0w.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DH_LefOd.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CiI0WzPA.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DBPsyPf2.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CtsBFaJL.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/D1RK0gmx.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/C_fCHugf.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/opzu_emj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/GoVQbpeX.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/d9FfLdfy.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CABULNtq.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BY8Njl_U.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/F58SSrOj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/B34bN6Wl.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D2QvIx7t.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CH4seIGa.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CjACcmfS.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DHlLBREC.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CwC1awOQ.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/B60F4JOd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/df6WGb4l.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJMm7Txn.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BXoHXHa0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DKqhmjm7.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMnsbEWi.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Brh7-bty.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/9ZLJ-H4D.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/DRFOPxDd.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/sNOw6LX0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Ch_dVXHx.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/o9OBPhqj.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CTnnGNGJ.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/10.DYcuSQzw.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/10.BYuY9e2D.js" rel="modulepreload">
 		<!--12qhfyh--><!----><!--4fa0a9--><!--[-1--><!--]--><!----><!--mhazmq--><!----><title>Concepts — zap</title>
 		<link href="/_app/immutable/assets/0.C0PIgcC8.css" rel="stylesheet">
 		<link href="/_app/immutable/assets/Svg.DfrCKcO9.css" rel="stylesheet">
@@ -160,8 +160,9 @@ one. So <code>plan_hash</code> covers those values: the same config under anothe
 <code>APP_DIR</code> is another plan. A secret reference's value is never in the plan or its hash,
 so rotating one changes neither.</p><h3 id="a-wetrun-executes-only-the-plan-you-reviewed">A wetrun executes only the plan you reviewed</h3><p>A wetrun doesn't take a saved plan as input; it detects and plans again, because
 the machine may have moved. What it guarantees instead is that the plan it
-executes is the plan you saw. Before it changes anything, it compares its fresh
-<code>plan_hash</code> against the plan you reviewed:</p><ul><li><code>--expect-plan &lt;hash></code> names the reviewed plan explicitly, and the wetrun
+executes is a reviewed one: a plan whose hash you named, or one Zap printed as a
+preview. Before it changes anything, it compares its fresh <code>plan_hash</code> against
+the reviewed plan:</p><ul><li><code>--expect-plan &lt;hash></code> names the reviewed plan explicitly, and the wetrun
 executes only if the fresh plan has exactly that hash;</li><li>with no flag, the reviewed plan is the one in this host's
 <a href="#the-last-run-report">last-run report</a>, when the pass that wrote it was a
 <strong>preview</strong>: <code>zap plan</code>, a dry <code>zap apply</code>, or a wetrun that refused. Its
@@ -175,7 +176,15 @@ whether its changes succeed or fail, spends it, and of two started on one
 preview only one goes on. An agent given <code>--expect-plan</code> with the hash it
 showed you can execute only that plan: the same changes, on the same machine,
 as the same user, with the same values for every reference that isn't a secret.
-An empty plan needs no review.</p><p>On an interactive terminal, a wetrun whose plan has no review asks for the
+An empty plan needs no review.</p><p>A preview is recorded when Zap prints it, not when anyone reads it: Zap knows
+what it wrote, not what reached a reader. When the write itself fails (a full
+device, a pipe whose reader has gone), Zap withdraws the preview it recorded
+and says so, and the next wetrun run without <code>--expect-plan</code> refuses. A preview
+that was written but not read still binds that wetrun: one sent to <code>/dev/null</code>,
+or cut short by <code>head</code> after the pipe took it whole. When the output may be
+truncated, or the one who reads the preview isn't the one who runs the wetrun,
+bind with <code>--expect-plan</code>: its hash is the preview's last line, the first one a
+cut-short preview loses.</p><p>On an interactive terminal, a wetrun whose plan has no review asks for the
 first eight characters of its <code>plan_hash</code> instead of refusing
 (<a href="/docs/cli#binding-to-the-review">cli.md</a>).</p><p>A plan can only be reviewed if it names its machine. A plan whose host or
 connecting user resolves through a reference Zap masks has no <code>plan_hash</code>:
@@ -242,16 +251,16 @@ See <a href="/docs/deploy">deploy.md</a>.</p><!----><!----></div><!----><!----><
 			
 			<script>
 				{
-					__sveltekit_j41qhg = {
+					__sveltekit_h0s9s2 = {
 						base: "",
-						version: "7f2b1564d4335285d2562cc4ed2e47b383a12f1e"
+						version: "fa7283a6b9e6447582f73bdd3668dc027e726ae2"
 					};
 
 					const element = document.currentScript.parentElement;
 
 					import("/_app/immutable/entry/start.DMWmOBF_.js").then(async (kit) => {
-						kit.init(__sveltekit_j41qhg);
-						const app = await import("/_app/immutable/entry/app.DBBUTYbQ.js");
+						kit.init(__sveltekit_h0s9s2);
+						const app = await import("/_app/immutable/entry/app.DaSMZjRK.js");
 						kit.start(app, element, {
 							node_ids: [0, 2, 10],
 							data: [null,null,null],
