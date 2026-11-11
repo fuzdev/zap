@@ -1738,18 +1738,18 @@ fn the_crate_prints_only_where_it_is_known_to() {
         "stderr()",
     ];
     // (file, the line that prints): each prints a line a function built and a test
-    // reads — `skipped_line`, `observation_line`, `event_line`, `multiplexing_for`'s
-    // notice.
+    // reads — `skipped_line` and `observation_line` (through `log_line`), `event_line`,
+    // `multiplexing_for`'s notice — and each is best-effort, never a print macro, which
+    // would abort the run on a stream that can't take it.
     const KNOWN: &[(&str, &str)] = &[
         (
             "connection/ssh.rs",
-            r#"eprintln!("{}", escape_line(&notice));"#,
+            r#"let _ = writeln!(std::io::stderr().lock(), "{}", escape_line(&notice));"#,
         ),
         (
             "config/eval_cache.rs",
-            r#"eprintln!("{}", skipped_line(config_path));"#,
+            r#"let _ = writeln!(std::io::stderr().lock(), "{line}");"#,
         ),
-        ("config/eval_cache.rs", r#"eprintln!("{line}");"#),
         ("event.rs", "let mut out = std::io::stdout().lock();"),
     ];
     let mut known: Vec<(&str, &str)> = KNOWN.to_vec();

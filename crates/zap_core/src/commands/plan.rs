@@ -62,6 +62,16 @@ pub struct PlanReport {
     pub lock_standing: LockStanding,
 }
 
+/// A plan only answers.
+impl super::Delivered for PlanReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    fn changed(&self) -> bool {
+        false
+    }
+}
+
 impl PlanReport {
     /// Process exit code: `1` when the comparison was **unverifiable**, any resource was
     /// **held** (unprobeable), or the **lock standing** has errors; else `0`.

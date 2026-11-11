@@ -56,6 +56,16 @@ pub struct DetectReport {
     pub unrecorded: Option<String>,
 }
 
+/// A detection only answers.
+impl super::Delivered for DetectReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    fn changed(&self) -> bool {
+        false
+    }
+}
+
 impl DetectReport {
     /// Process exit code: `1` when the detection was **unverifiable**, any resource came
     /// back [`Undetermined`](Detection::Undetermined), or the **lock standing** has

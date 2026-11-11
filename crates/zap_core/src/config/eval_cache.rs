@@ -167,7 +167,7 @@ pub async fn eval_cached(
         && let Some(cached) = lookup_hit(zap_home, config_path, fgro).await
     {
         if std::env::var_os("ZAP_EVAL_CACHE_LOG").is_some() {
-            eprintln!("{}", skipped_line(config_path));
+            log_line(&skipped_line(config_path));
         }
         return Ok(cached);
     }
@@ -438,8 +438,17 @@ fn shown_path(path: &Path) -> String {
 fn log_observation(config_path: &Path, observation: &EvalCacheObservation) {
     let log = std::env::var_os("ZAP_EVAL_CACHE_LOG").is_some();
     if let Some(line) = observation_line(config_path, observation, log) {
-        eprintln!("{line}");
+        log_line(&line);
     }
+}
+
+/// One line of the eval-cache log on standard error, best-effort: a standard error that
+/// can't take it drops it, where a print macro would abort the run before it reached the
+/// machine.
+fn log_line(line: &str) {
+    use std::io::Write as _;
+
+    let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
 /// The eval-cache log line for `observation`. A

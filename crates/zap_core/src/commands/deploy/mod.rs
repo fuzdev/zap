@@ -421,6 +421,17 @@ impl DeployOutcome {
     }
 }
 
+/// A deploy changed the target when it reached its steps, which build, upload, and swap
+/// ([`DeployReport::streamed`]); one that stopped before them only answered.
+impl super::Delivered for DeployReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    fn changed(&self) -> bool {
+        self.streamed()
+    }
+}
+
 impl DeployReport {
     /// Whether the run reached its steps, and so emitted events: a `--json` wetrun that
     /// didn't has streamed nothing, and its caller needs the text render to learn why.

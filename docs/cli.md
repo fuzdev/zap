@@ -511,12 +511,16 @@ A report that can't be written (standard output a pipe whose reader has gone,
 or a full device) prints `error: the report could not be written:` and the
 reason on standard error.
 A run whose report is its answer (`plan`, `detect`, `status`, `lock --check`,
-`config validate`, a dry run, a refused wetrun) then exits 1 where it would
-have exited 0. A preview whose report couldn't be written was still recorded,
-and binds the next wetrun run without `--expect-plan`. A run that changed
-something (an `apply` or `deploy` wetrun that reached its work, `lock`,
-`update`) keeps its own code, which describes the machine or the lock. A
-non-zero code is kept either way.
+`config validate`, `version`, the help, a dry run, a refused wetrun) then exits
+1 where it would have exited 0. A preview whose report couldn't be written was
+still recorded, and binds the next wetrun run without `--expect-plan`. A run
+that changed something keeps its own code, which describes the machine or the
+lock: an `apply` wetrun that ran changes or pinned what the lock lacked, a
+`deploy` wetrun that reached its steps, `lock`, and an `update` that advanced or
+refreshed an entry. An `apply` wetrun with nothing to do, or an `update` that
+moved no entry, only answered. A non-zero code is kept either way. An error or a
+usage error that standard error can't take is lost, and exits with its own code
+all the same.
 
 An error prints as `error:` and its message; a message of several lines is
 indented under it, and any advice Zap adds follows at the left margin.

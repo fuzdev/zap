@@ -49,6 +49,22 @@ pub use render::REFERENCE_VALUE_SHOWN;
 pub use status::{render_status, run_status};
 pub use update::{UpdateReport, render_update, run_update};
 
+/// A command's report as the binary delivers it.
+///
+/// Its exit code, and whether its run changed something besides answering, which decides
+/// the exit code of a run whose report couldn't be written: a run that changed the machine
+/// or the lock keeps its own code, which describes them; one whose report was its answer
+/// fails where it would have succeeded, since the answer never arrived.
+///
+/// Each report says so beside its own type, where its fixtures can hold it to it, so the
+/// binary holds no per-report rule of its own.
+pub trait Delivered {
+    /// The report's own exit code.
+    fn exit_code(&self) -> u8;
+    /// Whether the run changed the machine or the lock.
+    fn changed(&self) -> bool;
+}
+
 // The helpers the command modules share, each reached from them as `super::<name>`.
 use checks::{
     APPLY_REFUSAL, LOCK_WITHHELD_FROM_COMPARISON, RefusalText, empty_changeset_line,

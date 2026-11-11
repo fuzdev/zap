@@ -260,13 +260,17 @@ fn multiplexing_for(zap_home: &Path, establish: bool) -> (Vec<String>, Option<St
 #[cfg(not(test))]
 fn multiplexing_args() -> &'static [String] {
     static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    use std::io::Write as _;
+
     ARGS.get_or_init(|| {
         let Some(home) = zap_home_default().ok().flatten() else {
             return Vec::new();
         };
         let (args, notice) = multiplexing_for(&home, true);
         if let Some(notice) = notice {
-            eprintln!("{}", escape_line(&notice));
+            // Best-effort: a standard error that can't take the notice drops it, where a
+            // print macro would abort the run.
+            let _ = writeln!(std::io::stderr().lock(), "{}", escape_line(&notice));
         }
         args
     })

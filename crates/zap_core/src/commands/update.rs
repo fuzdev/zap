@@ -109,6 +109,23 @@ pub struct UpdateReport {
     pub name_only: Vec<NameOnlyRefs>,
 }
 
+/// An update changed the lock when an entry advanced or was refreshed; one whose entries
+/// were all unchanged or failed wrote nothing (`update_over` writes only those two), and
+/// only answered.
+impl super::Delivered for UpdateReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    fn changed(&self) -> bool {
+        self.outcomes.iter().any(|outcome| {
+            matches!(
+                outcome,
+                UpdateOutcome::Advanced { .. } | UpdateOutcome::Refreshed { .. }
+            )
+        })
+    }
+}
+
 impl UpdateReport {
     /// `0` if no target failed; `1` if any failure is operational, which leaves that
     /// entry's answer unestablished (as an unestablished answer outranks an established
@@ -352,6 +369,39 @@ mod tests {
     };
     use crate::commands::tests::{fgro, fgro_available};
     use crate::error::Error;
+
+    /// An update changed the lock only when an entry advanced or was refreshed.
+    #[test]
+    fn an_update_changed_the_lock_only_when_an_entry_moved() {
+        use crate::commands::Delivered;
+
+        let id = || "zig".to_owned();
+        let changed = |outcomes: Vec<UpdateOutcome>| {
+            Delivered::changed(&UpdateReport {
+                outcomes,
+                name_only: Vec::new(),
+            })
+        };
+        let unchanged = || UpdateOutcome::Unchanged { id: id() };
+        let failed = || UpdateOutcome::Failed {
+            id: id(),
+            error: "unreachable".to_owned(),
+            class: FailureClass::Operational,
+        };
+        assert!(!changed(vec![]));
+        assert!(!changed(vec![unchanged(), failed()]));
+        let advanced = UpdateOutcome::Advanced {
+            id: id(),
+            from: None,
+            to: "abc".to_owned(),
+        };
+        assert!(changed(vec![unchanged(), advanced]));
+        let refreshed = UpdateOutcome::Refreshed {
+            id: id(),
+            pin: "abc".to_owned(),
+        };
+        assert!(changed(vec![failed(), refreshed]));
+    }
 
     const SECRET: &str = "hunter2-update-value";
     const TOKEN: &str = "[MASKED:ZAP_T_UPDATE_SECRET]";

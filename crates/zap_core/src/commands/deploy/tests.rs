@@ -7895,3 +7895,25 @@ async fn an_extract_with_no_archive_is_known_not_to_have_swapped() {
         target.issued_commands()
     );
 }
+
+/// What the binary reads of a deploy's report to deliver it: only a wetrun that reached
+/// its steps changed the target; every other outcome only answered. The code is the
+/// report's own.
+#[test]
+fn only_a_deploy_that_reached_its_steps_changed_the_target() {
+    use crate::commands::Delivered;
+
+    for (outcome, changed) in [
+        (deployed(), true),
+        (failed(FailureState::BeforeSwap), true),
+        (DeployOutcome::AlreadyDeployed, false),
+        (refused("stale"), false),
+        (DeployOutcome::PreflightDrift, false),
+        (DeployOutcome::PreflightUndetermined, false),
+        (DeployOutcome::DryRun, false),
+    ] {
+        let report = report(outcome.clone(), vec![]);
+        assert_eq!(Delivered::changed(&report), changed, "{outcome:?}");
+        assert_eq!(Delivered::exit_code(&report), report.exit_code());
+    }
+}

@@ -52,6 +52,16 @@ fn eligible(config: &ZapConfig) -> impl Iterator<Item = &Resource> {
     config.resources.iter().filter(|r| is_lock_eligible(r))
 }
 
+/// `zap lock` exits 0 once it has written the lock, which it always writes.
+impl super::Delivered for LockReport {
+    fn exit_code(&self) -> u8 {
+        0
+    }
+    fn changed(&self) -> bool {
+        true
+    }
+}
+
 /// Result of a `zap lock` re-baseline.
 #[derive(Debug, Clone)]
 pub struct LockReport {
@@ -263,6 +273,16 @@ pub struct LockCheckReport {
     /// The eligible resources whose address names a reference by name only — a note,
     /// never part of the verdict.
     pub name_only: Vec<NameOnlyRefs>,
+}
+
+/// The lock's check only answers.
+impl super::Delivered for LockCheckReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    fn changed(&self) -> bool {
+        false
+    }
 }
 
 impl LockCheckReport {

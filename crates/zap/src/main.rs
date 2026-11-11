@@ -20,11 +20,10 @@
 //! it.
 
 use std::io::IsTerminal as _;
-use std::io::Write as _;
 use std::sync::Arc;
 
 use argh::FromArgs;
-use zap_core::commands::Prompt;
+use zap_core::commands::{Delivered, Prompt};
 use zap_core::error::Error;
 use zap_core::escape::{escape_join, escape_line};
 use zap_core::progress::ProgressSink;
@@ -273,8 +272,9 @@ fn main() -> std::process::ExitCode {
         Ok(code) => std::process::ExitCode::from(code),
         Err(e) => {
             // The one place an error is printed: `Error::render` escapes whatever the
-            // message quotes.
-            eprint!("{}", e.render());
+            // message quotes. Best-effort: on a standard error that can't take it, the
+            // error's own code is all that is left to say.
+            say(&e.render());
             std::process::ExitCode::from(e.exit_code())
         }
     }
@@ -292,13 +292,14 @@ async fn run() -> Result<u8, Error> {
     let cmd: TopLevel = match parse_args(&raw) {
         Ok(cmd) => cmd,
         Err(early_exit) => {
-            // `status: Ok` = a help/version request (stdout, exit 0); `Err` = a usage
-            // error (stderr, exit 2 — `from_env` would exit 1).
+            // `status: Ok` = a help/version request (stdout, exit 0, or 1 when the help
+            // couldn't be written); `Err` = a usage error (stderr, best-effort, exit 2 —
+            // `from_env` would exit 1).
+            let text = format!("{}\n", early_exit.output);
             return Ok(if early_exit.status.is_ok() {
-                println!("{}", early_exit.output);
-                0
+                deliver(ReportTo::Stdout, &text, &Answer)
             } else {
-                eprintln!("{}", early_exit.output);
+                say(&text);
                 2
             });
         }
@@ -308,8 +309,7 @@ async fn run() -> Result<u8, Error> {
     zap_core::resolver::set_minisign_setting(std::env::var_os(zap_core::resolver::MINISIGN_VAR));
     // No subcommand → print the convergence loop and a usage hint.
     let Some(sub) = cmd.nested else {
-        print_overview();
-        return Ok(0);
+        return Ok(deliver(ReportTo::Stdout, OVERVIEW, &Answer));
     };
     match sub {
         Subcommand::Detect(args) => cmd_detect(&args).await,
@@ -320,7 +320,7 @@ async fn run() -> Result<u8, Error> {
         Subcommand::Config(args) => cmd_config(&args).await,
         Subcommand::Lock(args) => cmd_lock(&args).await,
         Subcommand::Update(args) => cmd_update(&args).await,
-        Subcommand::Version(_) => cmd_version(),
+        Subcommand::Version(_) => Ok(cmd_version()),
     }
 }
 
@@ -351,17 +351,18 @@ fn parse_args(raw: &[String]) -> Result<TopLevel, argh::EarlyExit> {
     })
 }
 
-fn print_overview() {
-    println!("zap — convergent machine-state management");
-    println!();
-    println!("  describe   declare desired state in a TypeScript config (zap.ts)");
-    println!("  detect     inspect what the machine actually looks like now");
-    println!("  plan       diff desired against actual — the dry run");
-    println!("  apply      converge the machine idempotently");
-    println!("  observe    structured events, not log soup");
-    println!();
-    println!("run `zap --help` for the command list");
-}
+/// What `zap` with no command prints: the convergence loop and a usage hint.
+const OVERVIEW: &str = "\
+zap — convergent machine-state management
+
+  describe   declare desired state in a TypeScript config (zap.ts)
+  detect     inspect what the machine actually looks like now
+  plan       diff desired against actual — the dry run
+  apply      converge the machine idempotently
+  observe    structured events, not log soup
+
+run `zap --help` for the command list
+";
 
 /// Install the `--env-file` overlay (if given) before any config resolution, so its
 /// `NAME=VALUE` pairs back the reference and secret reads, and print the warning for a
@@ -370,7 +371,7 @@ fn load_env_file(env_file: Option<&str>) -> Result<(), Error> {
     if let Some(path) = env_file {
         let loaded = zap_core::resolve::install_env_file(std::path::Path::new(path))?;
         if let Some(warning) = loaded.warning {
-            eprintln!("{}", escape_line(&warning));
+            say(&format!("{}\n", escape_line(&warning)));
         }
     }
     Ok(())
@@ -419,6 +420,13 @@ fn write_flushed(out: &mut impl std::io::Write, text: &str) -> std::io::Result<(
     out.flush()
 }
 
+/// `text` written to standard error, best-effort: a standard error that can't take it (a
+/// full device, a reader gone) drops it, where a print macro would abort the process.
+/// The exit code is then what is left to say the run went wrong.
+fn say(text: &str) {
+    let _ = write_flushed(&mut std::io::stderr().lock(), text);
+}
+
 /// What a command's run did besides answering: it decides the exit code of a run whose
 /// report couldn't be written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,79 +438,14 @@ enum Effect {
     Answered,
 }
 
-/// A command's report, as the binary delivers it: its exit code and what its run did.
-trait Delivered {
-    /// The report's own exit code.
-    fn exit_code(&self) -> u8;
-    /// What the run did besides answering.
-    fn effect(&self) -> Effect;
-}
-
-impl Delivered for zap_core::commands::apply::ApplyReport {
-    fn exit_code(&self) -> u8 {
-        Self::exit_code(self)
-    }
-    /// A wetrun that reached its changes changed the machine.
-    fn effect(&self) -> Effect {
-        if self.streamed() {
-            Effect::Changed
+impl Effect {
+    /// [`Changed`](Self::Changed) when `changed`, else [`Answered`](Self::Answered).
+    const fn changed_if(changed: bool) -> Self {
+        if changed {
+            Self::Changed
         } else {
-            Effect::Answered
+            Self::Answered
         }
-    }
-}
-
-impl Delivered for zap_core::commands::DeployReport {
-    fn exit_code(&self) -> u8 {
-        Self::exit_code(self)
-    }
-    /// A wetrun that reached its steps changed the target.
-    fn effect(&self) -> Effect {
-        if self.streamed() {
-            Effect::Changed
-        } else {
-            Effect::Answered
-        }
-    }
-}
-
-/// The reports that only answer: a plan, a detection, the last run, the lock's check.
-macro_rules! answered {
-    ($($report:ty),* $(,)?) => {$(
-        impl Delivered for $report {
-            fn exit_code(&self) -> u8 {
-                Self::exit_code(self)
-            }
-            fn effect(&self) -> Effect {
-                Effect::Answered
-            }
-        }
-    )*};
-}
-answered!(
-    zap_core::commands::plan::PlanReport,
-    zap_core::commands::detect::DetectReport,
-    zap_core::commands::status::StatusReport,
-    zap_core::commands::LockCheckReport,
-);
-
-impl Delivered for zap_core::commands::UpdateReport {
-    fn exit_code(&self) -> u8 {
-        Self::exit_code(self)
-    }
-    /// An update advances the lock.
-    fn effect(&self) -> Effect {
-        Effect::Changed
-    }
-}
-
-impl Delivered for zap_core::commands::LockReport {
-    fn exit_code(&self) -> u8 {
-        0
-    }
-    /// `zap lock` writes the lock.
-    fn effect(&self) -> Effect {
-        Effect::Changed
     }
 }
 
@@ -523,11 +466,13 @@ const fn exit_code_after(code: u8, effect: Effect, written: bool) -> u8 {
 fn deliver(to: ReportTo, rendered: &str, report: &impl Delivered) -> u8 {
     let written = to.write(rendered);
     if let Err(why) = &written {
-        let said =
-            escape_line(&format!("error: the report could not be written: {why}")).into_owned();
-        let _ = writeln!(std::io::stderr().lock(), "{said}");
+        say(&format!(
+            "{}\n",
+            escape_line(&format!("error: the report could not be written: {why}"))
+        ));
     }
-    exit_code_after(report.exit_code(), report.effect(), written.is_ok())
+    let effect = Effect::changed_if(report.changed());
+    exit_code_after(report.exit_code(), effect, written.is_ok())
 }
 
 /// The prompt a wetrun with no review asks on: this process's terminal, never under
@@ -552,9 +497,10 @@ struct StderrProgress;
 impl ProgressSink for StderrProgress {
     fn line(&self, line: &str) {
         // `line` is a render's return: masked and escaped where it was built. Written
-        // best-effort, as the sink's contract says: a closed or full standard error drops
-        // the line, where `eprintln!` would panic between two steps of a wetrun.
-        let _ = writeln!(std::io::stderr().lock(), "{line}");
+        // best-effort, as the sink's contract says: a full standard error, or one whose
+        // reader has gone, drops the line, where a print macro would abort the process
+        // between two steps of a wetrun.
+        say(&format!("{line}\n"));
     }
 }
 
@@ -658,15 +604,16 @@ async fn cmd_config(args: &Config) -> Result<u8, Error> {
     }
 }
 
-/// `zap config validate`'s report: a count, and an answer.
-struct Validated;
+/// A report that is an answer and nothing else, exit 0 when it arrives: the help, the
+/// overview, the version, `zap config validate`'s count.
+struct Answer;
 
-impl Delivered for Validated {
+impl Delivered for Answer {
     fn exit_code(&self) -> u8 {
         0
     }
-    fn effect(&self) -> Effect {
-        Effect::Answered
+    fn changed(&self) -> bool {
+        false
     }
 }
 
@@ -684,7 +631,7 @@ async fn cmd_config_validate(args: &ConfigValidate) -> Result<u8, Error> {
     Ok(deliver(
         ReportTo::Stdout,
         &format!("ok: {count} resource(s)\n"),
-        &Validated,
+        &Answer,
     ))
 }
 
@@ -712,12 +659,12 @@ async fn cmd_update(args: &Update) -> Result<u8, Error> {
     Ok(deliver(ReportTo::Stdout, &rendered, &report))
 }
 
-// Uniform `Result`-returning handler signature across all dispatch arms; the
-// other handlers delegate to the engine, while this one prints locally.
-#[allow(clippy::unnecessary_wraps)]
-fn cmd_version() -> Result<u8, Error> {
-    println!("zap {}", env!("CARGO_PKG_VERSION"));
-    Ok(0)
+fn cmd_version() -> u8 {
+    deliver(
+        ReportTo::Stdout,
+        concat!("zap ", env!("CARGO_PKG_VERSION"), "\n"),
+        &Answer,
+    )
 }
 
 #[cfg(test)]
@@ -795,52 +742,58 @@ mod tests {
         assert_eq!(ReportTo::of(true, false), ReportTo::Stderr);
     }
 
-    /// Every line of the binary that prints something other than a string literal is
-    /// one of these: a render's return, the early exit's text ([`parse_args`] escaped
-    /// it), the version, an escaped line. A new one fails here until what it prints is
-    /// looked at.
+    /// The binary prints through no print macro, which aborts the process on a stream
+    /// that can't take its text: every write to standard output or standard error is one
+    /// of these lines — the report's two (`deliver`, which says when one failed), the
+    /// best-effort one (`say`), and the prompt's, whose `ask_on` handles its own
+    /// failures. A new one fails here until what it writes, and how it fails, is looked
+    /// at.
     #[test]
-    fn the_binary_prints_only_what_is_listed() {
-        const PRINTS: &[&str] = &[
+    fn the_binary_writes_only_through_its_helpers() {
+        const MACROS: &[&str] = &[
             "print!(",
             "println!(",
             "eprint!(",
             "eprintln!(",
-            "write!(std::io::std",
-            "writeln!(std::io::std",
-            "write_flushed(&mut std::io::std",
+            "dbg!(",
+            "write!(",
+            "writeln!(",
         ];
+        // by the call, not its path: `io::stdout()`, or a `stdout()` imported, is a
+        // stream all the same
+        const STREAMS: &[&str] = &["stdout()", "stderr()"];
         const LISTED: &[&str] = &[
-            r#"eprint!("{}", e.render());"#,
-            r#"println!("{}", early_exit.output);"#,
-            r#"eprintln!("{}", early_exit.output);"#,
-            r#"let _ = writeln!(std::io::stderr().lock(), "{said}");"#,
             "Self::Stdout => write_flushed(&mut std::io::stdout().lock(), rendered),",
             "Self::Stderr => write_flushed(&mut std::io::stderr().lock(), rendered),",
-            r#"println!("zap {}", env!("CARGO_PKG_VERSION"));"#,
-            r#"eprintln!("{}", escape_line(&warning));"#,
-            r#"let _ = writeln!(std::io::stderr().lock(), "{line}");"#,
+            "let _ = write_flushed(&mut std::io::stderr().lock(), text);",
+            "std::io::stdin().is_terminal() && std::io::stderr().is_terminal()",
+            "let mut stderr = std::io::stderr();",
         ];
         let source = include_str!("main.rs");
         let (code, _tests) = source.split_once("#[cfg(test)]\nmod tests").unwrap();
-        let unlisted: Vec<&str> = code
+        let code: Vec<&str> = code
             .lines()
             .map(str::trim)
             .filter(|line| !line.starts_with("//"))
-            .filter(|line| PRINTS.iter().any(|print| line.contains(print)))
-            // A print of a literal alone, or of nothing, interpolates nothing; one with no
-            // literal prints a value.
-            .filter(|line| line.contains('{') || !(line.contains('"') || line.contains("!()")))
+            .collect();
+        let printed: Vec<&&str> = code
+            .iter()
+            .filter(|line| MACROS.iter().any(|print| line.contains(print)))
+            .collect();
+        assert!(printed.is_empty(), "main.rs prints: {printed:#?}");
+        let unlisted: Vec<&&str> = code
+            .iter()
+            .filter(|line| STREAMS.iter().any(|stream| line.contains(stream)))
             .filter(|line| !LISTED.contains(line))
             .collect();
-        assert!(unlisted.is_empty(), "main.rs prints: {unlisted:#?}");
+        assert!(unlisted.is_empty(), "main.rs writes: {unlisted:#?}");
         let stale: Vec<&&str> = LISTED
             .iter()
-            .filter(|listed| !code.lines().any(|line| line.trim() == **listed))
+            .filter(|listed| !code.contains(listed))
             .collect();
         assert!(
             stale.is_empty(),
-            "listed, but main.rs no longer prints: {stale:#?}"
+            "listed, but main.rs no longer writes: {stale:#?}"
         );
     }
 

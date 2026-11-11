@@ -114,6 +114,16 @@ pub struct StatusReport {
     pub lock_standing: LockStanding,
 }
 
+/// The last run, read offline, only answers.
+impl super::Delivered for StatusReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    fn changed(&self) -> bool {
+        false
+    }
+}
+
 impl StatusReport {
     /// Process exit code: `1` when anything is unestablished — the lock standing has
     /// errors, the last run or this one has **unverifiable** references, or a declared

@@ -67,8 +67,9 @@ fn lock_writes_beside_a_config_named_by_its_file_name() {
 
 /// A report that can't be written (standard output on a full device) says so on
 /// standard error, and fails a run whose report was its answer where it would have
-/// exited 0; a run that wrote the lock, or a wetrun that reached its work, keeps its
-/// own code. Requires `/dev/full`; skips without it.
+/// exited 0; a run that wrote the lock keeps its own code. An `update` with nothing to
+/// advance and a wetrun with nothing to do wrote nothing, and only answered. Requires
+/// `/dev/full`; skips without it.
 #[test]
 fn a_report_that_could_not_be_written_fails_only_an_answer_end_to_end() {
     if !fgro_available() {
@@ -115,8 +116,8 @@ fn a_report_that_could_not_be_written_fails_only_an_answer_end_to_end() {
         (&["lock", "--check"][..], 1),
         (&["config", "validate"][..], 1),
         (&["lock"][..], 0),
-        (&["update"][..], 0),
-        (&["apply", "--wetrun"][..], 0),
+        (&["update"][..], 1),
+        (&["apply", "--wetrun"][..], 1),
     ] {
         let output = zap(args, true);
         let stderr = String::from_utf8_lossy(&output.stderr);

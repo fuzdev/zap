@@ -168,6 +168,18 @@ impl ApplyReport {
         self.wetrun && self.refused.is_none()
     }
 
+    /// Whether the run changed the machine or the lock ([`super::Delivered`]): one that
+    /// reached execution with changes to make or pins to add to the lock (the rule and
+    /// its reasons are `changed_by`'s).
+    #[must_use]
+    pub const fn changed(&self) -> bool {
+        changed_by(
+            self.streamed(),
+            !self.plan.changes.is_empty(),
+            !self.auto_locked.is_empty(),
+        )
+    }
+
     /// Process exit code: a wetrun is `1` if any change failed, else `0`; a dry-run
     /// is `2` when changes are pending (drift), else `0`. Mirrors the convergence
     /// drift-code convention (0 converged / 2 drifted / 1 error) the design assigns
@@ -624,6 +636,28 @@ async fn apply_unmasked(
         refused: None,
         confirmation,
     })
+}
+
+impl super::Delivered for ApplyReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    fn changed(&self) -> bool {
+        Self::changed(self)
+    }
+}
+
+/// Whether an `apply` run changed the machine or the lock. One that `streamed` reached
+/// execution: it changed the machine when its plan had changes to make (`has_changes`;
+/// failed ones included, since they were attempted), and the lock when it pinned what the
+/// lock lacked (`minted`). Nothing else it writes counts: the lock write before execution
+/// merges in only the entries the lock lacks, which are the run's minted pins, so with
+/// none it rewrites the entries already there (a format upgrade at most), and the review
+/// it spends and the last-run report it writes are records under `~/.zap`, not the
+/// machine or the lock. An empty-plan wetrun that minted nothing only answered, as does
+/// every run that didn't reach execution (a dry run, a refusal).
+const fn changed_by(streamed: bool, has_changes: bool, minted: bool) -> bool {
+    streamed && (has_changes || minted)
 }
 
 /// The error a wetrun stops with when its plan names no one machine (`reason`, a
@@ -1377,6 +1411,66 @@ export default (zap) => {{
                 prior: Some(RunCommand::ApplyAfterChanges)
             })
         );
+    }
+
+    /// An apply changed something only when it reached execution with changes to make or
+    /// pins to add to the lock; anything else only answered.
+    #[test]
+    fn a_run_changed_something_only_when_it_reached_its_work() {
+        for (streamed, has_changes, minted, changed) in [
+            (true, true, false, true),
+            (true, false, true, true),
+            (true, true, true, true),
+            (true, false, false, false),
+            (false, true, false, false),
+            (false, false, true, false),
+            (false, true, true, false),
+            (false, false, false, false),
+        ] {
+            assert_eq!(
+                super::changed_by(streamed, has_changes, minted),
+                changed,
+                "{streamed} {has_changes} {minted}"
+            );
+        }
+    }
+
+    /// What the binary reads of an apply's report to deliver it: a refusal and a dry
+    /// run only answered, a wetrun that executed its change changed the machine, and one
+    /// over a converged target, with nothing to do and nothing to pin, only answered.
+    /// The code is the report's own.
+    #[tokio::test]
+    async fn only_a_wetrun_that_executed_a_change_changed_something() {
+        use crate::commands::Delivered;
+
+        let rig = Rig::on("a.example.com");
+        let refused = rig.apply(wetrun()).await.unwrap();
+        assert!(refused.refused.is_some());
+        let dry = rig.dry().await;
+        let ran = rig.apply(wetrun()).await.unwrap();
+        assert!(ran.refused.is_none() && !ran.plan.changes.is_empty());
+        for (report, changed) in [(&refused, false), (&dry, false), (&ran, true)] {
+            assert_eq!(Delivered::changed(report), changed, "{report:?}");
+            assert_eq!(Delivered::exit_code(report), report.exit_code());
+        }
+
+        let mut converged = Rig::on("a.example.com");
+        converged.target.answers.clear();
+        converged.target = converged.target.with_observation(
+            Query::operator_command("test -e /srv/ready"),
+            Observation::Command(CommandObservation {
+                code: 0,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            }),
+        );
+        let empty = converged.apply(wetrun()).await.unwrap();
+        assert!(
+            empty.streamed() && empty.plan.changes.is_empty(),
+            "{empty:?}"
+        );
+        assert!(empty.auto_locked.is_empty());
+        assert!(!Delivered::changed(&empty));
     }
 
     /// What a plan's references resolved to, by name.

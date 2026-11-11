@@ -100,7 +100,9 @@ bin's progress sink, and keeps no run log under `~/.zap`.
 - **Every detection pass over an identified host writes the last-run report**
   (none for a masked host or a failed pass; the write is advisory), and every
   command's exit code comes from its report, or from the `Error` it returns —
-  the bin maps, it doesn't decide. The codes are `docs/cli.md`'s.
+  the bin maps, it doesn't decide. The codes are `docs/cli.md`'s. Each report also says,
+  through `commands::Delivered` beside its type, whether its run changed something, which
+  decides the code of a run whose report couldn't be written.
 - **The engine reads no configuration-bearing env var.** Everything
   environment-dependent is a config-declared reference; its own reads (`HOME`,
   `PATH`, `ZAP_HOME`, `ZAP_EVAL_CACHE*`) feed no plan. `ZAP_FGRO` is read
