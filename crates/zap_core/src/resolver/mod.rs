@@ -166,9 +166,64 @@ fn unset_refs(declared: &str, env_get: impl Fn(&str) -> Option<String>) -> Vec<S
 }
 
 /// A `reqwest` error's text without the request url it would otherwise quote — the
-/// resolved one.
+/// resolved one — and, when one can be named, its cause in a few words of zap's own
+/// ([`transport_cause`]): `error sending request (the host name did not resolve)`.
 fn transport_message(error: reqwest::Error) -> String {
-    error.without_url().to_string()
+    let cause = transport_cause(&error);
+    let top = error.without_url().to_string();
+    match cause {
+        Some(cause) => format!("{top} ({cause})"),
+        None => top,
+    }
+}
+
+/// What kind of transport failure `error` was, classified from `reqwest`'s predicates
+/// and the kind of the first `std::io::Error` among its causes — never from the causes'
+/// text. That text is the resolver's, the socket's, or the TLS library's, and it can
+/// name the resolved host or url, which every error here keeps in its declared form
+/// (`rustls` names the server a certificate isn't valid for); the kind of an io error is
+/// std's fixed description of it. `None` when nothing says more than the top line.
+///
+/// A timeout is said first, since one can end a connect or a read; then a name that
+/// didn't resolve; a connection that couldn't be made (a TLS handshake that failed
+/// included), with its io kind when there is one (`connection refused`); a body that
+/// ended early, or couldn't be read or decoded; a redirect zap refused to follow; or,
+/// failing those, the io kind alone.
+fn transport_cause(error: &reqwest::Error) -> Option<String> {
+    let kind = io_kind_of(error);
+    let said = if error.is_timeout() {
+        return Some("timed out".to_owned());
+    } else if error.is_dns() {
+        return Some("the host name did not resolve".to_owned());
+    } else if error.is_connect() {
+        "could not connect"
+    } else if (error.is_body() || error.is_decode())
+        && kind == Some(std::io::ErrorKind::UnexpectedEof)
+    {
+        return Some("the body ended early".to_owned());
+    } else if error.is_body() {
+        "the body could not be read"
+    } else if error.is_decode() {
+        "the body could not be decoded"
+    } else if error.is_redirect() {
+        return Some("a redirect zap does not follow".to_owned());
+    } else {
+        return kind.map(|kind| kind.to_string());
+    };
+    Some(kind.map_or_else(|| said.to_owned(), |kind| format!("{said}: {kind}")))
+}
+
+/// The kind of the first `std::io::Error` among `error`'s causes, unless it is `Other`,
+/// which says nothing.
+fn io_kind_of(error: &reqwest::Error) -> Option<std::io::ErrorKind> {
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            return Some(io.kind()).filter(|kind| *kind != std::io::ErrorKind::Other);
+        }
+        source = cause.source();
+    }
+    None
 }
 
 /// Resolve remote content: serve the cached bytes when present and self-verifying,
@@ -1814,6 +1869,98 @@ mod tests {
                 "{message}"
             );
             assert!(!message.contains("zap_core"), "{message}");
+        }
+    }
+
+    /// A fetch that failed in transport says why in a few words of zap's own beside the
+    /// top line it always had: classified from the error, never quoting its causes,
+    /// whose text can name the resolved host (here the resolver's own message does).
+    #[tokio::test]
+    async fn a_transport_failure_names_its_cause_and_never_the_causes_text() {
+        use std::io::{Read as _, Write as _};
+        use std::time::Duration;
+
+        /// A resolver that answers no name, with a message that names the host.
+        struct NoAnswer;
+        impl reqwest::dns::Resolve for NoAnswer {
+            fn resolve(&self, _: reqwest::dns::Name) -> reqwest::dns::Resolving {
+                Box::pin(async {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "no address for resolved-secret.example",
+                    )
+                    .into())
+                })
+            }
+        }
+
+        let sent = async |client: &reqwest::Client, url: &str| {
+            super::transport_message(client.get(url).send().await.unwrap_err())
+        };
+        let client = crate::tls::build_http_client(Duration::from_secs(5)).unwrap();
+
+        // a port nothing listens on
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        assert_eq!(
+            sent(&client, &format!("http://127.0.0.1:{port}/f")).await,
+            "error sending request (could not connect: connection refused)"
+        );
+
+        // a name that doesn't resolve
+        let unresolving = reqwest::Client::builder()
+            .dns_resolver(std::sync::Arc::new(NoAnswer))
+            .build()
+            .unwrap();
+        let unresolved = sent(&unresolving, "http://resolved-secret.example/f").await;
+        assert_eq!(
+            unresolved,
+            "error sending request (the host name did not resolve)"
+        );
+
+        // a server that takes the connection and never answers
+        let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let impatient = crate::tls::build_http_client(Duration::from_millis(100)).unwrap();
+        assert_eq!(
+            sent(
+                &impatient,
+                &format!("http://{}/f", silent.local_addr().unwrap())
+            )
+            .await,
+            "error sending request (timed out)"
+        );
+        drop(silent);
+
+        // a body that ends before the length its headers promised, read whole and read
+        // as the fetch streams it
+        let short = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = short.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = short.accept().unwrap();
+                let mut request = [0_u8; 1024];
+                let _ = stream.read(&mut request);
+                let _ =
+                    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n0123456789");
+            }
+        });
+        let url = format!("http://{addr}/f");
+        let response = client.get(&url).send().await.unwrap();
+        let whole = super::transport_message(response.bytes().await.unwrap_err());
+        let mut response = client.get(&url).send().await.unwrap();
+        let streamed = loop {
+            match response.chunk().await {
+                Ok(Some(_)) => {}
+                Ok(None) => panic!("the body read to its end"),
+                Err(error) => break super::transport_message(error),
+            }
+        };
+        for cut in [whole, streamed] {
+            assert!(cut.ends_with(" (the body ended early)"), "{cut}");
+            assert!(!cut.contains(&addr.to_string()), "{cut}");
         }
     }
 }

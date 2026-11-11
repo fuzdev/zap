@@ -921,7 +921,9 @@ impl Error {
             )),
             Self::ToolchainUnpinned { .. } => Some(Cow::Borrowed(
                 "Run `zap lock` to pin the fgro build `--fgro` or `ZAP_FGRO` names in the \
-                 config's zap.lock, and commit it.",
+                 config's zap.lock, and commit it. `zap lock` also checks that the config \
+                 has a project (a package.json beside it or above it), and says what is \
+                 missing when it has none.",
             )),
             Self::ConfigEval {
                 kind, fgro_hint, ..
@@ -1822,6 +1824,15 @@ mod tests {
                 },
                 2,
                 "Run `zap lock`",
+            ),
+            // the command that pins one also says what else stops an eval, so the one it
+            // names first is never a step short of the answer
+            (
+                Error::ToolchainUnpinned {
+                    lock: "/p/zap.lock".to_owned(),
+                },
+                2,
+                "`zap lock` also checks that the config has a project",
             ),
         ] {
             assert_eq!(error.exit_code(), code, "{error:?}");

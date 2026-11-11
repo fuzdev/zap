@@ -81,13 +81,15 @@ pub(super) enum PinFrom<'a> {
 /// Evaluate `config_path` through the L0 cache with the operator's `fgro`, held to its
 /// pin: the one eval both seams share.
 ///
-/// The config's state is claimed first ([`claim_state`]), then the `fgro` setting and
-/// the pin are read — a missing setting before a missing pin, since `zap lock` needs
-/// the setting to pin one.
+/// The config's state is claimed first ([`claim_state`]), then the config is found
+/// ([`require_config`]), then the `fgro` setting and the pin are read — a missing
+/// config before either, and a missing setting before a missing pin, since `zap lock`
+/// needs the setting to pin one.
 ///
 /// # Errors
-/// [`Error::FgroUnset`] with no `fgro`; [`Error::ToolchainUnpinned`] (or the lock's
-/// read error) for [`PinFrom::Lock`] with no pin; the eval's errors.
+/// [`Error::ConfigNotFound`] with no config at `config_path`; [`Error::FgroUnset`] with
+/// no `fgro`; [`Error::ToolchainUnpinned`] (or the lock's read error) for
+/// [`PinFrom::Lock`] with no pin; the eval's errors.
 async fn eval_pinned(
     zap_home: Option<&Path>,
     fgro: Option<&Path>,
@@ -96,6 +98,7 @@ async fn eval_pinned(
     bust: bool,
 ) -> Result<ZapConfig> {
     claim_state(zap_home, config_path)?;
+    require_config(config_path)?;
     let path = require_fgro(fgro)?;
     let locked;
     let pin = match pin {
@@ -112,6 +115,22 @@ async fn eval_pinned(
         pin_cache: pin_cache.as_deref(),
     };
     eval_cached(zap_home, config_path, fgro, mode_from_env(), bust).await
+}
+
+/// Refuse a config that isn't there, as the eval would ([`Error::ConfigNotFound`]), before
+/// the lock's toolchain pin is read: a config path that names nothing is told so, rather
+/// than to pin a toolchain beside it. Only that it resolves is checked here; the eval
+/// resolves it again and settles its project.
+///
+/// # Errors
+/// [`Error::ConfigNotFound`] when `config_path` doesn't resolve on disk.
+pub(super) fn require_config(config_path: &Path) -> Result<()> {
+    std::fs::canonicalize(config_path)
+        .map(drop)
+        .map_err(|source| Error::ConfigNotFound {
+            path: config_path.display().to_string(),
+            source,
+        })
 }
 
 /// Hold the config's state under `zap_home`, when there is one, to being zap's own

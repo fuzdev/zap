@@ -222,6 +222,7 @@ pub async fn run_lock_check_in(
     config_path: &Path,
 ) -> Result<LockCheckReport> {
     crate::lock::refuse_lock_named_config(config_path)?;
+    super::target::require_config(config_path)?;
     let fgro_path = require_fgro(fgro)?;
     let pinned = locked_pin(config_path)?;
     let current = current_pin(fgro_path, pin_cache_dir(zap_home).as_deref()).await?;
@@ -365,6 +366,44 @@ mod tests {
 
     const SECRET: &str = "hunter2-lock-value";
     const TOKEN: &str = "[MASKED:ZAP_T_LOCK_SECRET]";
+
+    /// A config that isn't there is said to be missing before the lock is asked for a
+    /// toolchain pin it can't hold — by the eval every command but `zap lock` shares,
+    /// and by `zap lock --check` — and only a config that is there is told to pin one.
+    /// No `fgro` runs: the named one doesn't exist.
+    #[tokio::test]
+    async fn a_missing_config_is_refused_before_the_pin_is_read() {
+        use crate::commands::target::{PinFrom, eval_untargeted};
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("zap.ts");
+        let fgro = std::path::Path::new("/nonexistent/fgro");
+        let errors = async || {
+            [
+                eval_untargeted(None, Some(fgro), &config, PinFrom::Lock)
+                    .await
+                    .map(drop)
+                    .unwrap_err(),
+                run_lock_check_in(None, Some(fgro), &config)
+                    .await
+                    .map(drop)
+                    .unwrap_err(),
+            ]
+        };
+        for error in errors().await {
+            assert!(
+                matches!(&error, Error::ConfigNotFound { path, .. } if *path == config.display().to_string()),
+                "{error:?}"
+            );
+        }
+        std::fs::write(&config, "export default () => {};\n").unwrap();
+        for error in errors().await {
+            assert!(
+                matches!(error, Error::ToolchainUnpinned { .. }),
+                "{error:?}"
+            );
+        }
+    }
 
     /// A config that tracks one remote file and references the secret, so the command's
     /// own gates register it.
