@@ -240,7 +240,7 @@ a wetrun with no review and no `--expect-plan` shows the plan instead, under an
 `UNREVIEWED` banner with its `plan_hash`, and ends with the question:
 
 ```
-  UNREVIEWED — this plan is not the one that was reviewed.
+  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
     no deploy plan has been previewed for this host.
 plan_hash: 1f98612fcbfacb69b9d31236457d549e00714e4ad0fb0a36e225c3fe6a5f4312
 Deploy this plan? Type 1f98612f, the start of its plan_hash, to confirm:

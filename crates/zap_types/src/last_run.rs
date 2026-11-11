@@ -118,7 +118,7 @@ impl RunCommand {
             Self::Apply => "zap apply (dry run)",
             Self::ApplyBeforeChanges => "zap apply --wetrun, before its changes ran",
             Self::ApplyAfterChanges => "zap apply --wetrun, after its changes ran",
-            Self::ApplyRefused => "zap apply --wetrun, refused (its plan was not the reviewed one)",
+            Self::ApplyRefused => "zap apply --wetrun, refused before it ran",
             Self::DeployPreflight => "zap deploy --wetrun's drift preflight",
         }
     }

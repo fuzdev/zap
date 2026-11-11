@@ -99,13 +99,16 @@ have shown the plan and asked:
 $ zap apply --wetrun
 apply — target local (wetrun, awaiting confirmation)
   …
-  UNREVIEWED — this plan is not the one that was reviewed.
+
+  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
     no plan has been previewed on this host.
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 Apply this plan? Type 5bb79cc9, the start of its plan_hash, to confirm: n
 apply — target local (wetrun, declined)
   …
-  DECLINED — nothing ran: this plan was not confirmed, and is not the one that was reviewed.
+
+  DECLINED — nothing ran: this plan was not confirmed.
+    no plan has been previewed on this host.
   …
 ```
 

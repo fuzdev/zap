@@ -931,7 +931,7 @@ plan_hash: 7a1c0f3e5b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb1077
             "  RESIDUAL — 1 resource(s) do not read converged",
             "  UNBINDABLE — the target host `{env:H}` references `{env:H}`, a secret name",
             "  UNRECORDED — no last run is kept for this target",
-            "  REFUSED — nothing ran: this plan is not the one that was reviewed.",
+            "  REFUSED — nothing ran: this plan was not reviewed.",
             "  NOVEL — a verdict this harness has not met",
             "  UNDETERMINED — 1 resource(s) could not be probed",
         ] {
@@ -1134,7 +1134,7 @@ plan_hash: 7a1c0f3e5b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb1077
         for banner in [
             "  RESIDUAL — 1 resource(s) do not read converged after this apply:",
             "  RESIDUAL — the post-apply re-detection failed, so convergence was not established: x",
-            "  REFUSED — nothing ran: this plan is not the one that was reviewed.",
+            "  REFUSED — nothing ran: this plan was not reviewed.",
             "  UNRECORDED — no last run is kept for this target",
         ] {
             let text = HELD_WETRUN.replace("plan_hash: ", &format!("{banner}\nplan_hash: "));

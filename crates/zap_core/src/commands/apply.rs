@@ -2728,7 +2728,8 @@ export default (zap) => {
         // The plan, then the banner and the reason it is asked.
         assert!(
             shown.contains(&format!(
-                "      > {RUN}\n  UNREVIEWED — this plan is not the one that was reviewed.\n    "
+                "      > {RUN}\n\n  UNREVIEWED — nothing has run: this plan runs only once it \
+                 is confirmed below.\n    "
             )),
             "{shown}"
         );
@@ -2877,10 +2878,9 @@ export default (zap) => {
             );
             assert!(
                 rendered.contains(&format!(
-                    "  DECLINED — nothing ran: this plan was not confirmed, and is not the one \
-                     that was reviewed.\n    no plan has been previewed on this host.\n  review \
-                     the plan above, then re-run `zap apply --wetrun` (it binds to this \
-                     preview) or pass --expect-plan {}\n",
+                    "\n  DECLINED — nothing ran: this plan was not confirmed.\n    no plan has \
+                     been previewed on this host.\n  review the plan above, then re-run `zap \
+                     apply --wetrun` (it binds to this preview) or pass --expect-plan {}\n",
                     hash_of(&declined)
                 )),
                 "{rendered}"

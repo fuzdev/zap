@@ -43,9 +43,7 @@ impl DeployPreviewPass {
     pub const fn label(self) -> &'static str {
         match self {
             Self::DryRun => "zap deploy (dry run)",
-            Self::RefusedWetrun => {
-                "zap deploy --wetrun, refused (its plan was not the reviewed one)"
-            }
+            Self::RefusedWetrun => "zap deploy --wetrun, refused before it ran",
         }
     }
 }

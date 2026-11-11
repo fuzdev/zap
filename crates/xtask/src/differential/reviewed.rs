@@ -319,7 +319,7 @@ pub mod tests {
             "  RESIDUAL — 1 resource(s) do not read converged",
             "  UNBINDABLE — the target host `{env:H}` references `{env:H}`, a secret name",
             "  UNRECORDED — no last run is kept for this target",
-            "  REFUSED — nothing ran: this plan is not the one that was reviewed.",
+            "  REFUSED — nothing ran: this plan was not reviewed.",
         ] {
             let text = format!("{banner}\n  (no changes — converged)\n");
             assert!(only_imperative_changes(&text).is_err(), "{banner}");
@@ -462,7 +462,7 @@ pub mod tests {
             wetrun_problem(&captured(0, WETRUN_REPORT), "1234"),
             Err("ran plan_hash 9f0e, not the reviewed 1234".to_owned())
         );
-        let refused = "  REFUSED — nothing ran: this plan is not the one that was reviewed.\n";
+        let refused = "  REFUSED — nothing ran: this plan was not reviewed.\n";
         assert!(
             wetrun_problem(&captured(1, refused), "9f0e")
                 .expect_err("refused")

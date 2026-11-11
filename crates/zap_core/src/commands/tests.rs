@@ -1253,7 +1253,7 @@ fn the_shared_renders_escape_config_and_command_line_text() {
     };
     render_refused(&mut out, &reason, &super::APPLY_REFUSAL, None);
     assert!(
-        out.ends_with("    --expect-plan abc<U+000A>plan_hash: abc does not match it.\n"),
+        out.ends_with("    --expect-plan abc<U+000A>plan_hash: abc is not this plan's hash.\n"),
         "{out}"
     );
 
@@ -1843,56 +1843,87 @@ fn a_declared_line_cannot_forge_another() {
     assert_eq!(out.lines().count(), 2, "{out}");
 }
 
-/// `apply`'s refusal, word for word, for each reason — and a recorded time or hash
-/// read back from disk is escaped like any other text.
+/// `apply`'s refusal, word for word, for each banner over each reason: the banner says
+/// what follows for this run and the line under it why, so no cell says a plan was
+/// reviewed that its reason says never was. A recorded time or hash read back from disk
+/// is escaped like any other text.
 #[test]
-fn the_apply_refusal_reads_the_same_for_each_reason() {
-    use super::{APPLY_REFUSAL, render_refused};
+fn the_apply_refusal_reads_true_for_each_banner_and_reason() {
+    use super::{APPLY_REFUSAL, Confirmation, render_refused};
     use zap_types::last_run::{PlanUnreviewed, RunCommand};
 
-    const BANNER: &str = "  REFUSED — nothing ran: this plan is not the one that was reviewed.\n";
-    let rendered = |reason: &PlanUnreviewed| {
+    let rendered = |reason: &PlanUnreviewed, confirmation: Option<Confirmation>| {
         let mut out = String::new();
-        render_refused(&mut out, reason, &APPLY_REFUSAL, None);
-        out.strip_prefix(BANNER)
-            .unwrap_or_else(|| panic!("{out}"))
-            .to_owned()
+        render_refused(&mut out, reason, &APPLY_REFUSAL, confirmation);
+        out
     };
+    let banners = [
+        (None, "REFUSED — nothing ran: this plan was not reviewed."),
+        (
+            Some(Confirmation::Asking),
+            "UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.",
+        ),
+        (
+            Some(Confirmation::Declined),
+            "DECLINED — nothing ran: this plan was not confirmed.",
+        ),
+    ];
+    let reasons = [
+        (
+            PlanUnreviewed::Expected {
+                expected: "abc".to_owned(),
+            },
+            "--expect-plan abc is not this plan's hash.",
+        ),
+        (
+            PlanUnreviewed::NoPreview { prior: None },
+            "no plan has been previewed on this host.",
+        ),
+        (
+            PlanUnreviewed::NoPreview {
+                prior: Some(RunCommand::DeployPreflight),
+            },
+            "the last run on this host (zap deploy --wetrun's drift preflight) previewed no \
+             plan.",
+        ),
+        (
+            PlanUnreviewed::Changed {
+                reviewed: "abc".to_owned(),
+                command: RunCommand::Apply,
+                ran_at: "2026-09-28T12:00:00Z".to_owned(),
+            },
+            "the last preview (zap apply (dry run) at 2026-09-28T12:00:00Z) planned abc; the \
+             config, the target, or the user the run connects as changed since.",
+        ),
+    ];
+    for (confirmation, banner) in banners {
+        for (reason, why) in &reasons {
+            // set apart from the plan above it by a blank line
+            assert_eq!(
+                rendered(reason, confirmation),
+                format!("\n  {banner}\n    {why}\n"),
+                "{confirmation:?} {reason:?}"
+            );
+        }
+    }
+    // An accepted confirmation clears the refusal, so no report renders one under it.
     assert_eq!(
-        rendered(&PlanUnreviewed::Expected {
-            expected: "abc".to_owned()
-        }),
-        "    --expect-plan abc does not match it.\n"
+        rendered(&reasons[1].0, Some(Confirmation::Accepted)),
+        rendered(&reasons[1].0, None)
     );
     assert_eq!(
-        rendered(&PlanUnreviewed::NoPreview { prior: None }),
-        "    no plan has been previewed on this host.\n"
-    );
-    assert_eq!(
-        rendered(&PlanUnreviewed::NoPreview {
-            prior: Some(RunCommand::DeployPreflight)
-        }),
-        "    the last run on this host (zap deploy --wetrun's drift preflight) previewed \
-         no plan.\n"
-    );
-    assert_eq!(
-        rendered(&PlanUnreviewed::Changed {
-            reviewed: "abc".to_owned(),
-            command: RunCommand::Apply,
-            ran_at: "2026-09-28T12:00:00Z".to_owned(),
-        }),
-        "    the last preview (zap apply (dry run) at 2026-09-28T12:00:00Z) planned abc; \
-         the config, the target, or the user the run connects as changed since.\n"
-    );
-    assert_eq!(
-        rendered(&PlanUnreviewed::Changed {
-            reviewed: "abc\nplan_hash: 0".to_owned(),
-            command: RunCommand::ApplyRefused,
-            ran_at: "now\u{1b}[2K".to_owned(),
-        }),
-        "    the last preview (zap apply --wetrun, refused (its plan was not the reviewed \
-         one) at now<U+001B>[2K) planned abc<U+000A>plan_hash: 0; the config, the \
-         target, or the user the run connects as changed since.\n"
+        rendered(
+            &PlanUnreviewed::Changed {
+                reviewed: "abc\nplan_hash: 0".to_owned(),
+                command: RunCommand::ApplyRefused,
+                ran_at: "now\u{1b}[2K".to_owned(),
+            },
+            None
+        ),
+        "\n  REFUSED — nothing ran: this plan was not reviewed.\n    the last preview (zap \
+         apply --wetrun, refused before it ran at now<U+001B>[2K) planned \
+         abc<U+000A>plan_hash: 0; the config, the target, or the user the run connects as \
+         changed since.\n"
     );
 }
 

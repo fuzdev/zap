@@ -299,8 +299,9 @@ const GOLDEN_REFUSED: &str = r#"deploy — target host.example (wetrun, refused)
         printf 'Deployed version %s\n' 'abc1234'
   - Restart app (restart)
       target$ sudo systemctl daemon-reload && sudo systemctl restart app
-  REFUSED — nothing ran: this plan is not the one that was reviewed.
-    --expect-plan stale does not match it.
+
+  REFUSED — nothing ran: this plan was not reviewed.
+    --expect-plan stale is not this plan's hash.
   review the plan above, then re-run with --expect-plan deadbeef, or without --expect-plan (it binds to this preview)
 plan_hash: deadbeef
 "#;
@@ -2266,7 +2267,7 @@ async fn a_wetrun_expecting_another_plan_refuses_before_the_preflight_and_every_
         );
         assert!(
             rendered.contains(&format!(
-                "    --expect-plan {} does not match it.",
+                "    --expect-plan {} is not this plan's hash.",
                 dry.plan_hash
             )),
             "{rendered}"
@@ -2327,12 +2328,14 @@ async fn a_wetrun_after_a_dry_run_binds_to_its_preview_and_deploys() {
     assert_eq!(rig.previews_on_disk(), Vec::<String>::new());
 }
 
-const GOLDEN_NO_PREVIEW_TAIL: &str = "  REFUSED — nothing ran: this plan is not the one that was reviewed.
+const GOLDEN_NO_PREVIEW_TAIL: &str = "
+  REFUSED — nothing ran: this plan was not reviewed.
     no deploy plan has been previewed for this host.
   review the plan above, then re-run `zap deploy --wetrun` with the same flags (it binds to this preview) or pass --expect-plan deadbeef
 plan_hash: deadbeef
 ";
-const GOLDEN_CHANGED_TAIL: &str = "  REFUSED — nothing ran: this plan is not the one that was reviewed.
+const GOLDEN_CHANGED_TAIL: &str = "
+  REFUSED — nothing ran: this plan was not reviewed.
     the last preview (zap deploy (dry run) at 2026-09-28T12:00:00Z) planned 0123abcd; the config, `zap.lock`, the checkout, the flags, the target, or the environment its host, user, or health domain resolve from changed since.
   review the plan above, then re-run `zap deploy --wetrun` with the same flags (it binds to this preview) or pass --expect-plan deadbeef
 plan_hash: deadbeef
@@ -2379,8 +2382,8 @@ fn a_refusal_for_want_of_a_preview_says_why_and_how_to_bind() {
     ));
     assert!(
         hostile.contains(
-            "    the last preview (zap deploy --wetrun, refused (its plan was not the \
-             reviewed one) at now<U+001B>[2K) planned abc<U+000A>plan_hash: 0000; the config"
+            "    the last preview (zap deploy --wetrun, refused before it ran at \
+             now<U+001B>[2K) planned abc<U+000A>plan_hash: 0000; the config"
         ),
         "{hostile}"
     );
@@ -2391,6 +2394,75 @@ fn a_refusal_for_want_of_a_preview_says_why_and_how_to_bind() {
             .count(),
         1
     );
+}
+
+/// `deploy`'s refusal, word for word, for each banner over each reason a deploy wetrun
+/// can be refused for: no cell says a plan was reviewed that its reason says never was.
+#[test]
+fn the_deploy_refusal_reads_true_for_each_banner_and_reason() {
+    use crate::commands::{Confirmation, render_refused};
+    use zap_types::deploy_preview::{DeployPreviewPass, DeployUnreviewed};
+
+    let banners = [
+        (None, "REFUSED — nothing ran: this plan was not reviewed."),
+        (
+            Some(Confirmation::Asking),
+            "UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.",
+        ),
+        (
+            Some(Confirmation::Declined),
+            "DECLINED — nothing ran: this plan was not confirmed.",
+        ),
+    ];
+    let reasons: [(DeployUnreviewed, &str); 4] = [
+        (
+            PlanUnreviewed::Expected {
+                expected: "abc".to_owned(),
+            },
+            "--expect-plan abc is not this plan's hash.",
+        ),
+        (
+            PlanUnreviewed::NoPreview { prior: None },
+            "no deploy plan has been previewed for this host.",
+        ),
+        (
+            PlanUnreviewed::Changed {
+                reviewed: "abc".to_owned(),
+                command: DeployPreviewPass::DryRun,
+                ran_at: "2026-09-28T12:00:00Z".to_owned(),
+            },
+            "the last preview (zap deploy (dry run) at 2026-09-28T12:00:00Z) planned abc; the \
+             config, `zap.lock`, the checkout, the flags, the target, or the environment its \
+             host, user, or health domain resolve from changed since.",
+        ),
+        (
+            PlanUnreviewed::Changed {
+                reviewed: "abc".to_owned(),
+                command: DeployPreviewPass::RefusedWetrun,
+                ran_at: "2026-09-28T12:00:00Z".to_owned(),
+            },
+            "the last preview (zap deploy --wetrun, refused before it ran at \
+             2026-09-28T12:00:00Z) planned abc; the config, `zap.lock`, the checkout, the \
+             flags, the target, or the environment its host, user, or health domain resolve \
+             from changed since.",
+        ),
+    ];
+    for (confirmation, banner) in banners {
+        for (reason, why) in &reasons {
+            let mut out = String::new();
+            render_refused(
+                &mut out,
+                reason,
+                &super::render::DEPLOY_REFUSAL,
+                confirmation,
+            );
+            assert_eq!(
+                out,
+                format!("\n  {banner}\n    {why}\n"),
+                "{confirmation:?} {reason:?}"
+            );
+        }
+    }
 }
 
 /// A wetrun fired with nothing previewed refuses — exit 2, the plan rendered, no
@@ -5707,7 +5779,7 @@ async fn a_cold_wetrun_on_a_terminal_deploys_the_plan_whose_hash_start_is_typed(
         "{shown}"
     );
     assert!(
-        shown.contains("  UNREVIEWED — this plan is not the one that was reviewed.\n    the last preview (zap deploy (dry run) at "),
+        shown.contains("\n\n  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.\n    the last preview (zap deploy (dry run) at "),
         "{shown}"
     );
     assert!(shown.contains("  - Create tarball (tarball)"), "{shown}");
@@ -5769,9 +5841,8 @@ async fn a_declined_prompt_refuses_records_the_plan_it_showed_and_the_next_deplo
             rendered.ends_with(
                 &GOLDEN_NO_PREVIEW_TAIL
                     .replace(
-                        "  REFUSED — nothing ran: this plan is not the one that was reviewed.",
-                        "  DECLINED — nothing ran: this plan was not confirmed, and is not the \
-                         one that was reviewed."
+                        "  REFUSED — nothing ran: this plan was not reviewed.",
+                        "  DECLINED — nothing ran: this plan was not confirmed."
                     )
                     .replace("deadbeef", &declined.plan_hash)
             ),

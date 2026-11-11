@@ -249,10 +249,14 @@ pub(super) const APPLY_REFUSAL: RefusalText = RefusalText {
 };
 
 /// Render a wetrun's refusal — the banner under the plan it rendered instead of running,
-/// and the reason the plan isn't the reviewed one, in the command's wording (`text`).
-/// The banner says how the review stands: refused with no question asked, asked at the
-/// prompt, or declined there (`confirmation`). The caller follows a refusal with its own
-/// command's way to bind the next wetrun, and a question with the question.
+/// set apart from the plan by a blank line, and the reason the plan has no review, in
+/// the command's wording (`text`).
+///
+/// The banner says what follows for this run, and nothing about a review the reason
+/// may say never happened: refused with no question asked, asked at the prompt, or
+/// declined there (`confirmation`). The reason line under it says why, so each banner
+/// reads true over each reason. The caller follows a refusal with its own command's way
+/// to bind the next wetrun, and a question with the question.
 pub(super) fn render_refused<P: PassLabel, N: PassLabel>(
     out: &mut String,
     reason: &PlanUnreviewed<P, N>,
@@ -260,21 +264,18 @@ pub(super) fn render_refused<P: PassLabel, N: PassLabel>(
     confirmation: Option<Confirmation>,
 ) {
     let banner = match confirmation {
-        None | Some(Confirmation::Accepted) => {
-            "REFUSED — nothing ran: this plan is not the one that was reviewed."
+        None | Some(Confirmation::Accepted) => "REFUSED — nothing ran: this plan was not reviewed.",
+        Some(Confirmation::Asking) => {
+            "UNREVIEWED — nothing has run: this plan runs only once it is confirmed below."
         }
-        Some(Confirmation::Asking) => "UNREVIEWED — this plan is not the one that was reviewed.",
-        Some(Confirmation::Declined) => {
-            "DECLINED — nothing ran: this plan was not confirmed, and is not the one that \
-             was reviewed."
-        }
+        Some(Confirmation::Declined) => "DECLINED — nothing ran: this plan was not confirmed.",
     };
-    let _ = writeln!(out, "  {banner}");
+    let _ = writeln!(out, "\n  {banner}");
     match reason {
         PlanUnreviewed::Expected { expected } => {
             let _ = writeln!(
                 out,
-                "    --expect-plan {} does not match it.",
+                "    --expect-plan {} is not this plan's hash.",
                 escape_line(expected)
             );
         }

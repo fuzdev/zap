@@ -226,7 +226,8 @@ apply — target local (wetrun, awaiting confirmation)
   [+] hello  (file)
       path: ~/notes/hello.txt
       content: inline (15 bytes, sha512 0c7463f032f1dc98…)
-  UNREVIEWED — this plan is not the one that was reviewed.
+
+  UNREVIEWED — nothing has run: this plan runs only once it is confirmed below.
     no plan has been previewed on this host.
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 Apply this plan? Type 5bb79cc9, the start of its plan_hash, to confirm: 5bb79cc9
@@ -480,7 +481,7 @@ What a pass couldn't establish, or why it didn't act, leads its report:
 | `UNDETERMINED` | resources detection couldn't read, each with why, then the changes held behind them, each with what it waits on or would trigger; all held out of the plan | 1; 2 in a deploy's preflight |
 | `UNVERIFIABLE` | referenced variables that were unset or empty | 1; a wetrun refuses with 2 |
 | `LOCK` | a tracked pin that is missing, stale, or unverifiable | 1; `apply` and a deploy wetrun refuse with 2 |
-| `UNREVIEWED` | a wetrun's plan isn't the reviewed one; on a terminal, Zap asks | |
+| `UNREVIEWED` | a wetrun's plan has no review; on a terminal, Zap asks | |
 | `REFUSED` | a wetrun that didn't execute; its plan becomes the preview | 2 (1 when a resource is held) |
 | `DECLINED` | the confirmation wasn't the plan's hash prefix | 2 |
 | `RESIDUAL` | resources that still don't read converged after a wetrun | 1 |

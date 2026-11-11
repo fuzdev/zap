@@ -156,7 +156,7 @@ pub fn render_deploy(report: &DeployReport) -> String {
 /// `zap.lock` (through the preflight's digest), the checkout (the version and tree
 /// state), the invocation's flags, what the target serves, and the environment values
 /// the host, the connecting user, and the health domain resolve from.
-const DEPLOY_REFUSAL: RefusalText = RefusalText {
+pub(super) const DEPLOY_REFUSAL: RefusalText = RefusalText {
     no_preview: "no deploy plan has been previewed for this host.",
     moved: "the config, `zap.lock`, the checkout, the flags, the target, or the \
             environment its host, user, or health domain resolve from",
