@@ -20,12 +20,14 @@
 //! it.
 
 use std::io::IsTerminal as _;
+use std::io::Write as _;
 use std::sync::Arc;
 
 use argh::FromArgs;
 use zap_core::commands::Prompt;
 use zap_core::error::Error;
 use zap_core::escape::{escape_join, escape_line};
+use zap_core::progress::ProgressSink;
 
 /// zap — convergent machine-state management.
 ///
@@ -398,13 +400,132 @@ impl ReportTo {
         }
     }
 
-    fn write(self, rendered: &str) {
+    /// Write the report, flushed, so a closed or full stream is an error here rather
+    /// than a panic, or a loss nobody hears of at exit.
+    fn write(self, rendered: &str) -> std::io::Result<()> {
         match self {
-            Self::Stdout => print!("{rendered}"),
-            Self::Stderr => eprint!("{rendered}"),
-            Self::Nowhere => {}
+            Self::Stdout => write_flushed(&mut std::io::stdout().lock(), rendered),
+            Self::Stderr => write_flushed(&mut std::io::stderr().lock(), rendered),
+            Self::Nowhere => Ok(()),
         }
     }
+}
+
+/// `text` written to `out` and flushed.
+fn write_flushed(out: &mut impl std::io::Write, text: &str) -> std::io::Result<()> {
+    out.write_all(text.as_bytes())?;
+    out.flush()
+}
+
+/// What a command's run did besides answering: it decides the exit code of a run whose
+/// report couldn't be written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Effect {
+    /// The run changed the machine or the lock, so its own exit code describes them,
+    /// whether or not its report arrived.
+    Changed,
+    /// The report is the run's product, so one that never arrived is a failed run.
+    Answered,
+}
+
+/// A command's report, as the binary delivers it: its exit code and what its run did.
+trait Delivered {
+    /// The report's own exit code.
+    fn exit_code(&self) -> u8;
+    /// What the run did besides answering.
+    fn effect(&self) -> Effect;
+}
+
+impl Delivered for zap_core::commands::apply::ApplyReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    /// A wetrun that reached its changes changed the machine.
+    fn effect(&self) -> Effect {
+        if self.streamed() {
+            Effect::Changed
+        } else {
+            Effect::Answered
+        }
+    }
+}
+
+impl Delivered for zap_core::commands::DeployReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    /// A wetrun that reached its steps changed the target.
+    fn effect(&self) -> Effect {
+        if self.streamed() {
+            Effect::Changed
+        } else {
+            Effect::Answered
+        }
+    }
+}
+
+/// The reports that only answer: a plan, a detection, the last run, the lock's check.
+macro_rules! answered {
+    ($($report:ty),* $(,)?) => {$(
+        impl Delivered for $report {
+            fn exit_code(&self) -> u8 {
+                Self::exit_code(self)
+            }
+            fn effect(&self) -> Effect {
+                Effect::Answered
+            }
+        }
+    )*};
+}
+answered!(
+    zap_core::commands::plan::PlanReport,
+    zap_core::commands::detect::DetectReport,
+    zap_core::commands::status::StatusReport,
+    zap_core::commands::LockCheckReport,
+);
+
+impl Delivered for zap_core::commands::UpdateReport {
+    fn exit_code(&self) -> u8 {
+        Self::exit_code(self)
+    }
+    /// An update advances the lock.
+    fn effect(&self) -> Effect {
+        Effect::Changed
+    }
+}
+
+impl Delivered for zap_core::commands::LockReport {
+    fn exit_code(&self) -> u8 {
+        0
+    }
+    /// `zap lock` writes the lock.
+    fn effect(&self) -> Effect {
+        Effect::Changed
+    }
+}
+
+/// The exit code of a run with report code `code` and `effect` whose report was
+/// `written` or not: a run that changed something keeps its code, which describes the
+/// machine or the lock; one whose report was its answer fails (`1`) where it would have
+/// succeeded, since the answer never arrived. A non-zero code is kept either way.
+const fn exit_code_after(code: u8, effect: Effect, written: bool) -> u8 {
+    match (written, effect, code) {
+        (false, Effect::Answered, 0) => 1,
+        _ => code,
+    }
+}
+
+/// Write `report` (rendered as `rendered`) to `to`, and return the run's exit code
+/// ([`exit_code_after`]). A write that fails says so on standard error, best-effort:
+/// when standard error is the stream that failed, nothing more can be said.
+fn deliver(to: ReportTo, rendered: &str, report: &impl Delivered) -> u8 {
+    let written = to.write(rendered);
+    if let Err(why) = &written {
+        let said =
+            escape_line(&format!("error: the report could not be written: {why}")).into_owned();
+        let _ = writeln!(std::io::stderr().lock(), "{said}");
+    }
+    exit_code_after(report.exit_code(), report.effect(), written.is_ok())
 }
 
 /// The prompt a wetrun with no review asks on: this process's terminal, never under
@@ -412,6 +533,27 @@ impl ReportTo {
 fn terminal_prompt(json: bool) -> Option<Arc<dyn Prompt>> {
     let prompt: Arc<dyn Prompt> = Arc::new(TerminalPrompt);
     (!json).then_some(prompt)
+}
+
+/// Where a wetrun shows each phase as it starts: this process's standard error, never
+/// under `--json` (`json`), whose stdout is the event stream.
+fn terminal_progress(json: bool) -> Option<Arc<dyn ProgressSink>> {
+    let progress: Arc<dyn ProgressSink> = Arc::new(StderrProgress);
+    (!json).then_some(progress)
+}
+
+/// Progress on standard error, so stdout carries the report alone and stays a complete
+/// record when it is redirected.
+#[derive(Debug)]
+struct StderrProgress;
+
+impl ProgressSink for StderrProgress {
+    fn line(&self, line: &str) {
+        // `line` is a render's return: masked and escaped where it was built. Written
+        // best-effort, as the sink's contract says: a closed or full standard error drops
+        // the line, where `eprintln!` would panic between two steps of a wetrun.
+        let _ = writeln!(std::io::stderr().lock(), "{line}");
+    }
 }
 
 /// The operator's terminal: the question on standard error, the answer from standard
@@ -439,8 +581,8 @@ async fn cmd_detect(args: &Detect) -> Result<u8, Error> {
     let report =
         zap_core::commands::run_detect(path, fgro.as_deref(), args.no_cache, args.bootstrap)
             .await?;
-    print!("{}", zap_core::commands::render_detect(&report));
-    Ok(report.exit_code())
+    let rendered = zap_core::commands::render_detect(&report);
+    Ok(deliver(ReportTo::Stdout, &rendered, &report))
 }
 
 async fn cmd_plan(args: &Plan) -> Result<u8, Error> {
@@ -454,8 +596,7 @@ async fn cmd_plan(args: &Plan) -> Result<u8, Error> {
     } else {
         zap_core::commands::render_plan(&report)
     };
-    print!("{rendered}");
-    Ok(report.exit_code())
+    Ok(deliver(ReportTo::Stdout, &rendered, &report))
 }
 
 async fn cmd_apply(args: &Apply) -> Result<u8, Error> {
@@ -470,11 +611,12 @@ async fn cmd_apply(args: &Apply) -> Result<u8, Error> {
         bootstrap: args.bootstrap,
         no_cache: args.no_cache,
         prompt: terminal_prompt(args.json),
+        progress: terminal_progress(args.json),
     };
     let report = zap_core::commands::run_apply(path, fgro.as_deref(), options).await?;
     let to = ReportTo::of(args.json && args.wetrun, report.streamed());
-    to.write(&zap_core::commands::render_apply(&report));
-    Ok(report.exit_code())
+    let rendered = zap_core::commands::render_apply(&report);
+    Ok(deliver(to, &rendered, &report))
 }
 
 async fn cmd_deploy(args: &Deploy) -> Result<u8, Error> {
@@ -491,11 +633,12 @@ async fn cmd_deploy(args: &Deploy) -> Result<u8, Error> {
         emit_json: args.json,
         no_cache: args.no_cache,
         prompt: terminal_prompt(args.json),
+        progress: terminal_progress(args.json),
     };
     let report = zap_core::commands::run_deploy(path, fgro.as_deref(), &options).await?;
     let to = ReportTo::of(args.json && args.wetrun, report.streamed());
-    to.write(&zap_core::commands::render_deploy(&report));
-    Ok(report.exit_code())
+    let rendered = zap_core::commands::render_deploy(&report);
+    Ok(deliver(to, &rendered, &report))
 }
 
 async fn cmd_status(args: &Status) -> Result<u8, Error> {
@@ -503,13 +646,25 @@ async fn cmd_status(args: &Status) -> Result<u8, Error> {
     let path = std::path::Path::new(args.config.as_deref().unwrap_or("zap.ts"));
     let fgro = zap_core::config::fgro::fgro_setting(args.fgro.as_deref())?;
     let report = zap_core::commands::run_status(path, fgro.as_deref()).await?;
-    print!("{}", zap_core::commands::render_status(&report));
-    Ok(report.exit_code())
+    let rendered = zap_core::commands::render_status(&report);
+    Ok(deliver(ReportTo::Stdout, &rendered, &report))
 }
 
 async fn cmd_config(args: &Config) -> Result<u8, Error> {
     match &args.nested {
         ConfigSub::Validate(validate) => cmd_config_validate(validate).await,
+    }
+}
+
+/// `zap config validate`'s report: a count, and an answer.
+struct Validated;
+
+impl Delivered for Validated {
+    fn exit_code(&self) -> u8 {
+        0
+    }
+    fn effect(&self) -> Effect {
+        Effect::Answered
     }
 }
 
@@ -524,8 +679,11 @@ async fn cmd_config_validate(args: &ConfigValidate) -> Result<u8, Error> {
     // bare eval — `config validate` is the pre-flight an operator/CI runs to catch a
     // hardcoded secret, a dangling reference, or a cycle before a real plan/apply.
     let count = zap_core::commands::run_config_validate(path, fgro.as_deref()).await?;
-    println!("ok: {count} resource(s)");
-    Ok(0)
+    Ok(deliver(
+        ReportTo::Stdout,
+        &format!("ok: {count} resource(s)\n"),
+        &Validated,
+    ))
 }
 
 async fn cmd_lock(args: &Lock) -> Result<u8, Error> {
@@ -534,12 +692,12 @@ async fn cmd_lock(args: &Lock) -> Result<u8, Error> {
     let fgro = zap_core::config::fgro::fgro_setting(args.fgro.as_deref())?;
     if args.check {
         let report = zap_core::commands::run_lock_check(path, fgro.as_deref()).await?;
-        print!("{}", zap_core::commands::render_lock_check(&report));
-        Ok(report.exit_code())
+        let rendered = zap_core::commands::render_lock_check(&report);
+        Ok(deliver(ReportTo::Stdout, &rendered, &report))
     } else {
         let report = zap_core::commands::run_lock(path, fgro.as_deref()).await?;
-        print!("{}", zap_core::commands::render_lock(&report));
-        Ok(0)
+        let rendered = zap_core::commands::render_lock(&report);
+        Ok(deliver(ReportTo::Stdout, &rendered, &report))
     }
 }
 
@@ -548,8 +706,8 @@ async fn cmd_update(args: &Update) -> Result<u8, Error> {
     let path = std::path::Path::new(args.config.as_deref().unwrap_or("zap.ts"));
     let fgro = zap_core::config::fgro::fgro_setting(args.fgro.as_deref())?;
     let report = zap_core::commands::run_update(path, fgro.as_deref(), &args.ids).await?;
-    print!("{}", zap_core::commands::render_update(&report));
-    Ok(report.exit_code())
+    let rendered = zap_core::commands::render_update(&report);
+    Ok(deliver(ReportTo::Stdout, &rendered, &report))
 }
 
 // Uniform `Result`-returning handler signature across all dispatch arms; the
@@ -637,27 +795,29 @@ mod tests {
 
     /// Every line of the binary that prints something other than a string literal is
     /// one of these: a render's return, the early exit's text ([`parse_args`] escaped
-    /// it), a count, the version. A new one fails here until what it prints is looked
-    /// at.
+    /// it), the version, an escaped line. A new one fails here until what it prints is
+    /// looked at.
     #[test]
     fn the_binary_prints_only_what_is_listed() {
-        const PRINTS: &[&str] = &["print!(", "println!(", "eprint!(", "eprintln!("];
+        const PRINTS: &[&str] = &[
+            "print!(",
+            "println!(",
+            "eprint!(",
+            "eprintln!(",
+            "write!(std::io::std",
+            "writeln!(std::io::std",
+            "write_flushed(&mut std::io::std",
+        ];
         const LISTED: &[&str] = &[
             r#"eprint!("{}", e.render());"#,
-            r#"eprint!("{text}");"#,
             r#"println!("{}", early_exit.output);"#,
             r#"eprintln!("{}", early_exit.output);"#,
-            r#"Self::Stdout => print!("{rendered}"),"#,
-            r#"Self::Stderr => eprint!("{rendered}"),"#,
-            r#"print!("{}", zap_core::commands::render_detect(&report));"#,
-            r#"print!("{rendered}");"#,
-            r#"print!("{}", zap_core::commands::render_status(&report));"#,
-            r#"println!("ok: {count} resource(s)");"#,
-            r#"print!("{}", zap_core::commands::render_lock_check(&report));"#,
-            r#"print!("{}", zap_core::commands::render_lock(&report));"#,
-            r#"print!("{}", zap_core::commands::render_update(&report));"#,
+            r#"let _ = writeln!(std::io::stderr().lock(), "{said}");"#,
+            "Self::Stdout => write_flushed(&mut std::io::stdout().lock(), rendered),",
+            "Self::Stderr => write_flushed(&mut std::io::stderr().lock(), rendered),",
             r#"println!("zap {}", env!("CARGO_PKG_VERSION"));"#,
             r#"eprintln!("{}", escape_line(&warning));"#,
+            r#"let _ = writeln!(std::io::stderr().lock(), "{line}");"#,
         ];
         let source = include_str!("main.rs");
         let (code, _tests) = source.split_once("#[cfg(test)]\nmod tests").unwrap();
@@ -666,10 +826,53 @@ mod tests {
             .map(str::trim)
             .filter(|line| !line.starts_with("//"))
             .filter(|line| PRINTS.iter().any(|print| line.contains(print)))
-            // A print of a literal alone interpolates nothing.
-            .filter(|line| line.contains('{'))
+            // A print of a literal alone, or of nothing, interpolates nothing; one with no
+            // literal prints a value.
+            .filter(|line| line.contains('{') || !(line.contains('"') || line.contains("!()")))
             .filter(|line| !LISTED.contains(line))
             .collect();
         assert!(unlisted.is_empty(), "main.rs prints: {unlisted:#?}");
+        let stale: Vec<&&str> = LISTED
+            .iter()
+            .filter(|listed| !code.lines().any(|line| line.trim() == **listed))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "listed, but main.rs no longer prints: {stale:#?}"
+        );
+    }
+
+    /// A report that couldn't be written fails a run that only answered, where it would
+    /// have succeeded, and leaves every other code as the report has it: a run that
+    /// changed the machine or the lock is described by its own code.
+    #[test]
+    fn a_report_that_could_not_be_written_fails_only_an_answer() {
+        use super::{Effect, exit_code_after};
+
+        for (code, effect, written, exit) in [
+            (0, Effect::Answered, true, 0),
+            (2, Effect::Answered, true, 2),
+            (0, Effect::Answered, false, 1),
+            (1, Effect::Answered, false, 1),
+            (2, Effect::Answered, false, 2),
+            (0, Effect::Changed, true, 0),
+            (0, Effect::Changed, false, 0),
+            (1, Effect::Changed, false, 1),
+            (2, Effect::Changed, false, 2),
+        ] {
+            assert_eq!(
+                exit_code_after(code, effect, written),
+                exit,
+                "{code} {effect:?} {written}"
+            );
+        }
+    }
+
+    /// A wetrun shows its progress on standard error unless it streams `--json`, whose
+    /// stdout is the event stream and whose stderr carries only what didn't stream.
+    #[test]
+    fn progress_shows_except_under_json() {
+        assert!(super::terminal_progress(false).is_some());
+        assert!(super::terminal_progress(true).is_none());
     }
 }

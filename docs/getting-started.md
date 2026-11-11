@@ -70,6 +70,9 @@ same plan with a change count and exits 0: it reports, where `apply` judges.
 
 ```
 $ zap apply --wetrun
+→ notes: create directory
+→ hello: create file
+→ re-detect: reading 2 declared resources back to confirm what the changes left
 apply — target local (wetrun)
   user: ops
   home: /home/ops
@@ -80,7 +83,9 @@ applied: 2 ok, 0 failed, 0 skipped (of 2)
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 ```
 
-After the changes ran, Zap read both resources again and found them converged,
+The `→` lines are progress, printed to standard error as each change and the
+re-detection start; the report under them is standard output. After the changes
+ran, Zap read both resources again and found them converged,
 which is why the exit was 0. Had anything still read wrong, the report would
 say `RESIDUAL` and exit 1.
 

@@ -14,7 +14,7 @@ const NOT_A_LINK_EXIT: i32 = 4;
 /// The read `server_version` runs: `readlink` of `current` when it is a link, else exit
 /// [`NOT_A_LINK_EXIT`] when something else is there, or [`NOT_DEPLOYED_EXIT`] when
 /// nothing is.
-fn server_version_command(app_path: &str) -> String {
+pub(super) fn server_version_command(app_path: &str) -> String {
     let current = single_quote(&format!("{app_path}/current"));
     format!(
         "if [ -L {current} ]; then readlink -- {current}; elif [ -e {current} ]; then exit {NOT_A_LINK_EXIT}; else exit {NOT_DEPLOYED_EXIT}; fi"

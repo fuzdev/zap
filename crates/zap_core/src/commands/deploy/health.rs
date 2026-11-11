@@ -31,7 +31,7 @@ pub(super) async fn http_health_check(
     for attempt in 1..=attempts {
         match client.get(&resolved).send().await {
             Ok(response) if response.status().is_success() => {
-                return Ok(format!("healthy after {attempt} attempt(s)"));
+                return Ok(format!("healthy after {}", attempts_of(attempt)));
             }
             Ok(response) => {
                 let status = response.status().as_u16();
@@ -52,8 +52,14 @@ pub(super) async fn http_health_check(
     }
     // The resolved URL: the declared one carries its references' inert markers.
     Err(format!(
-        "service did not become healthy at {resolved} within {attempts} attempt(s) (last: {last})"
+        "service did not become healthy at {resolved} within {} (last: {last})",
+        attempts_of(attempts)
     ))
+}
+
+/// `n` attempts, in words that agree with it: `1 attempt`, `3 attempts`.
+fn attempts_of(n: u32) -> String {
+    crate::progress::count(n as usize, "attempt", "attempts")
 }
 
 /// What a probe's failure message adds to a `3xx`: that zap didn't follow it.
@@ -148,15 +154,18 @@ fn classify_readiness(last_status: Option<u16>, url: &str, attempts: u32) -> Rea
     match last_status {
         Some(404) => ReadinessOutcome::Absent,
         Some(503) => ReadinessOutcome::NotReady(format!(
-            "{url} returned HTTP 503 (schema drift or DB unreachable) within {attempts} attempt(s)"
+            "{url} returned HTTP 503 (schema drift or DB unreachable) within {}",
+            attempts_of(attempts)
         )),
         Some(code) => ReadinessOutcome::NotReady(format!(
-            "{url} returned an unexpected HTTP {code}{} within {attempts} attempt(s)",
-            redirect_note(code)
+            "{url} returned an unexpected HTTP {code}{} within {}",
+            redirect_note(code),
+            attempts_of(attempts)
         )),
-        None => {
-            ReadinessOutcome::NotReady(format!("{url} unreachable within {attempts} attempt(s)"))
-        }
+        None => ReadinessOutcome::NotReady(format!(
+            "{url} unreachable within {}",
+            attempts_of(attempts)
+        )),
     }
 }
 
@@ -207,8 +216,8 @@ mod tests {
         served.join().unwrap();
         // refused, or timed out if the listener's close comes late
         assert!(
-            error.ends_with("within 2 attempt(s) (last: connection failed (last HTTP status 502))")
-                || error.ends_with("within 2 attempt(s) (last: timed out (last HTTP status 502))"),
+            error.ends_with("within 2 attempts (last: connection failed (last HTTP status 502))")
+                || error.ends_with("within 2 attempts (last: timed out (last HTTP status 502))"),
             "{error}"
         );
     }

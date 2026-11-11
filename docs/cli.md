@@ -198,6 +198,11 @@ With `--wetrun`, apply:
 9. re-detects every resource and reports any that still isn't converged as
    `RESIDUAL`.
 
+While steps 8 and 9 run, each change and the re-detection print one line to
+standard error as they start (`→ notes: create directory`); the report, on
+standard output when the run ends, holds every outcome. `--json` prints no such
+line.
+
 ### Binding to the review
 
 A wetrun executes only the plan you reviewed: the plan it computes must equal,
@@ -225,6 +230,9 @@ apply — target local (wetrun, awaiting confirmation)
     no plan has been previewed on this host.
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 Apply this plan? Type 5bb79cc9, the start of its plan_hash, to confirm: 5bb79cc9
+→ notes: create directory
+→ hello: create file
+→ re-detect: reading 2 declared resources back to confirm what the changes left
 apply — target local (wetrun, confirmed)
   user: ops
   home: /home/ops
@@ -235,7 +243,8 @@ applied: 2 ok, 0 failed, 0 skipped (of 2)
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 ```
 
-The plan and the question go to standard error; the report goes where it
+The plan and the question go to standard error, as do the `→` lines a wetrun
+prints as each change and the re-detection starts; the report goes where it
 always does. The answer is the first eight characters of the plan's
 `plan_hash`, in either case. Input typed before the question appears is
 discarded, so neither a `y` nor an earlier run's answer typed ahead while Zap
@@ -306,6 +315,13 @@ for the start of the `plan_hash` instead). A wetrun that passes withdraws the
 preview before its first step, so one recorded preview covers one execution.
 `zap status` doesn't show the deploy preview. The rules are in
 [deploy.md](./deploy.md#binding-a-wetrun-to-a-reviewed-plan).
+
+A wetrun prints one line to standard error as each phase starts (the drift
+preflight, each step, a rollback), and its report to standard output when it
+ends: a table of the preflight, each step, and any rollback, each with its
+status and how long it took, then a closing line naming the version live on the
+host, or, after a failure, the step that failed and the state the target is in. Samples:
+[deploy.md](./deploy.md#what-a-wetrun-prints).
 
 Flags:
 
@@ -485,6 +501,15 @@ established answer and 1 is not:
 `plan`, `detect`, and a deploy dry run report rather than judge: pending changes
 exit 0 there.
 
+A report that can't be written (standard output a pipe whose reader has gone,
+or a full device) prints `error: the report could not be written:` and the
+reason on standard error.
+A run whose report is its answer (`plan`, `detect`, `status`, `lock --check`,
+`config validate`, a dry run, a refused wetrun) then exits 1 where it would
+have exited 0. A run that changed something (an `apply` or `deploy` wetrun
+that reached its work, `lock`, `update`) keeps its own code, which describes
+the machine or the lock. A non-zero code is kept either way.
+
 An error prints as `error:` and its message; a message of several lines is
 indented under it, and any advice Zap adds follows at the left margin.
 
@@ -553,6 +578,10 @@ by the error the system returned (a symbolic link or anything else in the way,
 or a full disk, is `conflict`; a timeout is `transient`); a command, or `ssh`,
 by its exit code and what it printed. Every value is masked: a resolved secret
 never appears in an event.
+
+Events carry no duration: a consumer reading the stream live can time it by
+when each line arrives. The `→` progress lines a text-mode wetrun prints to
+standard error are not events and are not in the stream.
 
 A run that streamed events doesn't print its text report, and the report's
 `warning:` lines go with it: the stream carries a warning only where an event

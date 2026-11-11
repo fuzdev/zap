@@ -69,6 +69,10 @@ apply — target local (dry-run)
 plan_hash: d317a15e82f2f1117f0d9fa1fdafc079b70f9e3ac5e3103c4b3333f1b6afeab0
 
 $ zap apply --wetrun
+→ cache-update-apt: create script
+→ gitconfig: create file
+→ ripgrep: create package
+→ re-detect: reading 2 declared resources back to confirm what the changes left
 apply — target local (wetrun)
   user: ada
   home: /home/ada

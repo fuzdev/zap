@@ -477,6 +477,7 @@ export default (zap) => {{
             bootstrap: false,
             no_cache: false,
             prompt: None,
+            progress: None,
         },
     )
     .await

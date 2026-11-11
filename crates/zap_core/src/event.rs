@@ -14,8 +14,15 @@
 //!   [`SecretMasker`] (via [`Event::map_text`]), then forward
 //!   to an inner handler. **Masking at the emission boundary** — `execute_plan` stays
 //!   masking-unaware, exactly as `mask_outcomes` masks the batch report.
+//! - [`EventHandler::Progress`] — show the operator each phase as it starts, one line
+//!   to a [`ProgressSink`] the binary supplies (`crate::progress`): the text-mode
+//!   wetrun's live output, where the engine itself prints nothing.
 //! - [`EventHandler::Null`] — drop everything (the default for non-streaming runs and
 //!   tests).
+//!
+//! A run also announces the phases that are no event of the stream, such as a deploy's
+//! drift preflight, as a [`Notice`] ([`EventHandler::notice`]): only the progress arm
+//! shows one, so the `--json` stream carries its documented events and nothing else.
 //!
 //! Emission is **best-effort**: a write failure is dropped, never surfaced — an
 //! observability sink must not fail a convergence run.
@@ -23,10 +30,12 @@
 //! zap emits events and keeps none: there is no run log under `~/.zap`.
 
 use std::io::Write as _;
+use std::sync::Arc;
 
 use zap_types::event::Event;
 
 use crate::escape::escape_json_line;
+use crate::progress::{Notice, Progress, ProgressSink, render_progress};
 use crate::secret::SecretMasker;
 
 /// A sink for run [`Event`]s — a closed, composable set (see the module docs).
@@ -44,13 +53,46 @@ pub enum EventHandler {
         /// The handler that receives the masked event.
         inner: Box<Self>,
     },
+    /// Show each event and notice that starts a phase as one line of progress
+    /// ([`render_progress`]) on the sink, and drop the rest: an outcome is the final
+    /// report's.
+    Progress(Arc<dyn ProgressSink>),
     /// Test-only sink that records every event it receives (the observable seam,
     /// mirroring `Connection::Mock`).
     #[cfg(test)]
-    Capture(std::sync::Arc<std::sync::Mutex<Vec<Event>>>),
+    Capture(Arc<std::sync::Mutex<Vec<Event>>>),
 }
 
 impl EventHandler {
+    /// The sink a wetrun emits to: the JSON-lines stream under `--json` (`emit_json`),
+    /// else the operator's `progress` lines when there are any, else nothing.
+    #[must_use]
+    pub fn for_run(emit_json: bool, progress: Option<&Arc<dyn ProgressSink>>) -> Self {
+        if emit_json {
+            Self::Stdout
+        } else {
+            progress.map_or(Self::Null, |sink| Self::Progress(Arc::clone(sink)))
+        }
+    }
+
+    /// Announce a phase that is no event ([`Notice`]). Only the progress arm shows it;
+    /// the stream's sinks drop it. Best-effort, as [`emit`](Self::emit) is.
+    pub fn notice(&self, notice: Notice) {
+        match self {
+            Self::Null | Self::Stdout => {}
+            Self::Masking { masker, inner } => {
+                inner.notice(notice.map_text(|text| masker.mask(text)));
+            }
+            Self::Progress(sink) => {
+                if let Some(line) = render_progress(Progress::Notice(notice)) {
+                    sink.line(&line);
+                }
+            }
+            #[cfg(test)]
+            Self::Capture(_) => {}
+        }
+    }
+
     /// Emit one event. Best-effort — a write error is silently dropped so emission
     /// never fails a run.
     pub fn emit(&self, event: &Event) {
@@ -66,6 +108,11 @@ impl EventHandler {
             }
             Self::Masking { masker, inner } => {
                 inner.emit(&event.map_text(|text| masker.mask(text)));
+            }
+            Self::Progress(sink) => {
+                if let Some(line) = render_progress(Progress::Event(event)) {
+                    sink.line(&line);
+                }
             }
             #[cfg(test)]
             Self::Capture(events) => {
@@ -108,6 +155,7 @@ mod tests {
     use zap_types::schema::ResourceId;
 
     use super::{EventHandler, mask_handler};
+    use crate::progress::{Notice, ProgressSink, RecordedProgress};
     use crate::secret::SecretRegistry;
 
     fn capture() -> (EventHandler, Arc<Mutex<Vec<Event>>>) {
@@ -178,6 +226,56 @@ mod tests {
             super::event_line(&plain).unwrap(),
             serde_json::to_string(&plain).unwrap()
         );
+    }
+
+    /// A progress line is masked at the same boundary an event is, then escaped: a
+    /// secret or a control character in a step's name reaches the operator's terminal
+    /// as its token and its respelling, never raw. An outcome shows nothing live, and a
+    /// notice passes the mask to the sink.
+    #[test]
+    fn a_progress_line_is_masked_then_escaped() {
+        let mut registry = SecretRegistry::new();
+        registry.register("SECRET_X", "tok-12345678");
+        let masker = registry.freeze().unwrap();
+        let sink = RecordedProgress::new();
+        let progress: Arc<dyn ProgressSink> = Arc::<RecordedProgress>::clone(&sink);
+        let handler = mask_handler(masker, EventHandler::for_run(false, Some(&progress)));
+
+        handler.notice(Notice::DriftPreflight { resources: 2 });
+        handler.emit(&Event::StepStarted {
+            step: "rollback".to_owned(),
+            name: "Roll back to tok-12345678\r\u{1b}[2Kforged".to_owned(),
+        });
+        handler.emit(&Event::StepCompleted {
+            step: "rollback".to_owned(),
+            output: "done".to_owned(),
+        });
+        assert_eq!(
+            sink.lines(),
+            [
+                "→ preflight: checking 2 apply-managed resources for drift",
+                "→ rollback: Roll back to [MASKED:SECRET_X]<U+000D><U+001B>[2Kforged",
+            ]
+        );
+    }
+
+    /// `--json` streams events and shows no progress; a text run with a sink shows
+    /// progress; one without shows nothing.
+    #[test]
+    fn a_run_streams_json_or_shows_progress() {
+        let progress: Arc<dyn ProgressSink> = RecordedProgress::new();
+        assert!(matches!(
+            EventHandler::for_run(true, Some(&progress)),
+            EventHandler::Stdout
+        ));
+        assert!(matches!(
+            EventHandler::for_run(false, Some(&progress)),
+            EventHandler::Progress(_)
+        ));
+        assert!(matches!(
+            EventHandler::for_run(false, None),
+            EventHandler::Null
+        ));
     }
 
     #[test]

@@ -18,8 +18,9 @@ use crate::lock::LockStanding;
 use zap_types::last_run::PlanUnreviewed;
 
 use super::{
-    DeployOptions, DeployOutcome, DeployReport, ReleaseArchive, Text, execute_deploy_plan,
-    render_deploy, server_version,
+    DeployOptions, DeployOutcome, DeployReport, DeployRun, FailureState, ReleaseArchive, Rollback,
+    RollbackOutcome, StepSummary, SwapFailure, Text, execute_deploy_plan, render_deploy,
+    server_version,
 };
 use crate::connection::{CommandOutput, Connection, MockConnection};
 use crate::event::EventHandler;
@@ -91,6 +92,19 @@ fn checks() -> DriftPreflight {
     }
 }
 
+/// A deployed outcome, with nothing measured.
+fn deployed() -> DeployOutcome {
+    DeployOutcome::Deployed(DeployRun::default())
+}
+
+/// A failed outcome that left the target `left`, with nothing measured.
+fn failed(left: FailureState) -> DeployOutcome {
+    DeployOutcome::Failed {
+        run: DeployRun::default(),
+        left,
+    }
+}
+
 fn report(outcome: DeployOutcome, step_outcomes: Vec<StepOutcome>) -> DeployReport {
     DeployReport {
         target: "host.example".to_owned(),
@@ -117,7 +131,7 @@ fn exit_codes_map_each_outcome() {
     assert_eq!(report(DeployOutcome::DryRun, vec![]).exit_code(), 0);
     // A plan that names no one machine was still only previewed.
     assert_eq!(report(unbindable(), vec![]).exit_code(), 0);
-    assert_eq!(report(DeployOutcome::Deployed, vec![]).exit_code(), 0);
+    assert_eq!(report(deployed(), vec![]).exit_code(), 0);
     assert_eq!(
         report(DeployOutcome::AlreadyDeployed, vec![]).exit_code(),
         0
@@ -131,7 +145,10 @@ fn exit_codes_map_each_outcome() {
         report(DeployOutcome::PreflightUndetermined, vec![]).exit_code(),
         2
     );
-    assert_eq!(report(DeployOutcome::Failed, vec![]).exit_code(), 1);
+    assert_eq!(
+        report(failed(FailureState::BeforeSwap), vec![]).exit_code(),
+        1
+    );
 }
 
 /// An incomplete preflight names what it couldn't check, and says plainly that
@@ -951,8 +968,8 @@ fn every_change_to_a_plan_that_moves_its_hash_moves_its_render() {
 #[test]
 fn only_a_wetrun_that_reached_its_steps_streamed() {
     for (outcome, streamed) in [
-        (DeployOutcome::Deployed, true),
-        (DeployOutcome::Failed, true),
+        (deployed(), true),
+        (failed(FailureState::BeforeSwap), true),
         (DeployOutcome::AlreadyDeployed, false),
         (refused("stale"), false),
         (
@@ -982,14 +999,14 @@ fn the_plan_hash_is_rendered_only_with_the_steps() {
     for (outcome, outcomes, steps, hash, recorded) in [
         (DeployOutcome::DryRun, vec![], true, true, true),
         (refused("stale"), vec![], true, true, true),
+        (deployed(), completed.clone(), true, true, false),
         (
-            DeployOutcome::Deployed,
-            completed.clone(),
+            failed(FailureState::BeforeSwap),
+            completed,
             true,
             true,
             false,
         ),
-        (DeployOutcome::Failed, completed, true, true, false),
         // A plan that names no one machine is shown, with no handle on it.
         (unbindable(), vec![], true, false, false),
         (DeployOutcome::AlreadyDeployed, vec![], false, false, false),
@@ -1052,10 +1069,16 @@ fn wetrun_render_shows_outcomes() {
             reason: "aborted after `upload` failed".to_owned(),
         },
     ];
-    let rendered = render_deploy(&report(DeployOutcome::Failed, outcomes));
-    assert!(rendered.contains("ok    build"));
-    assert!(rendered.contains("FAIL  upload  — the put refused"));
-    assert!(rendered.contains("skip  extract_swap"));
+    let rendered = render_deploy(&report(failed(FailureState::BeforeSwap), outcomes));
+    assert!(rendered.contains("\n  ok    build\n"), "{rendered}");
+    assert!(
+        rendered.contains("\n  FAIL  upload        the put refused\n"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("\n  skip  extract_swap  aborted after `upload` failed\n"),
+        "{rendered}"
+    );
 }
 
 /// A step that declines to run reports `Skipped`, not `Completed`: a readiness gate
@@ -1106,7 +1129,8 @@ async fn a_step_that_declines_to_run_is_skipped_not_completed() {
         &EventHandler::Null,
         &mut warnings,
     )
-    .await;
+    .await
+    .outcomes;
     let [StepOutcome::Skipped { step, reason }] = outcomes.as_slice() else {
         panic!("an unserved readiness gate must not report as completed: {outcomes:?}");
     };
@@ -1158,7 +1182,8 @@ async fn the_script_marked_warnings_reach_the_run() {
             &EventHandler::Null,
             &mut warnings,
         )
-        .await;
+        .await
+        .outcomes;
         assert_eq!(
             outcomes.last().is_some_and(StepOutcome::is_failure),
             failed,
@@ -1213,7 +1238,8 @@ async fn walk_swap(
         &EventHandler::Null,
         &mut warnings,
     )
-    .await;
+    .await
+    .outcomes;
     (outcomes, warnings)
 }
 
@@ -1570,7 +1596,8 @@ async fn the_archive_is_made_privately_uploaded_whole_and_named_to_the_script_by
         &EventHandler::Null,
         &mut warnings,
     )
-    .await;
+    .await
+    .outcomes;
     assert!(
         outcomes
             .iter()
@@ -1641,7 +1668,8 @@ async fn a_failed_archive_step_leaves_no_archive_behind() {
                 &EventHandler::Null,
                 &mut warnings,
             )
-            .await;
+            .await
+            .outcomes;
             assert_eq!(names(&scratch), Vec::<String>::new());
             let Connection::Mock(target) = target else {
                 unreachable!()
@@ -1710,9 +1738,15 @@ async fn a_failed_archive_step_leaves_no_archive_behind() {
         ),
         "{outcomes:?}"
     );
+    // between them, `current` read back to tell what the failure left
     assert_eq!(
         issued,
-        [upload_put(remote), "the script".to_owned(), cleanup],
+        [
+            upload_put(remote),
+            "the script".to_owned(),
+            super::live::server_version_command("/root/app"),
+            cleanup,
+        ],
         "a script that may never have started leaves its archive to this"
     );
 
@@ -1738,7 +1772,8 @@ async fn a_failed_archive_step_leaves_no_archive_behind() {
         &EventHandler::Null,
         &mut Vec::new(),
     )
-    .await;
+    .await
+    .outcomes;
     assert!(
         matches!(
             outcomes.first(),
@@ -2175,7 +2210,7 @@ async fn a_wetrun_expecting_the_dry_runs_hash_deploys() {
 
     let rig = Rig::new("def5678").recording(&dry.plan);
     let wet = rig.deploy(&wetrun_expecting(&dry.plan_hash)).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
     assert_eq!(wet.plan_hash, dry.plan_hash);
     assert_eq!(wet.exit_code(), 0);
     assert_eq!(wet.step_outcomes.len(), dry.plan.steps.len());
@@ -2282,7 +2317,7 @@ async fn a_wetrun_after_a_dry_run_binds_to_its_preview_and_deploys() {
 
     let rig = rig.recording(&dry.plan);
     let wet = rig.deploy(&wetrun()).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
     assert_eq!(wet.plan_hash, dry.plan_hash);
     assert_eq!(wet.exit_code(), 0);
     assert!(rig.local.issued("make"));
@@ -2392,7 +2427,7 @@ async fn a_cold_wetrun_refuses_records_its_plan_and_the_next_deploys() {
     assert_eq!(preview.pass, DeployPreviewPass::RefusedWetrun);
 
     let wet = rig.deploy(&wetrun()).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
     assert_eq!(wet.plan_hash, cold.plan_hash);
 }
 
@@ -2517,7 +2552,7 @@ async fn expect_plan_binds_alone_whatever_is_recorded() {
         })
         .await
         .unwrap();
-    assert_eq!(right.outcome, DeployOutcome::Deployed, "{right:?}");
+    assert!(right.outcome.is_deployed(), "{right:?}");
     assert!(!rig.local.issued("make"));
     // An executed deploy spends whatever preview is recorded, bound to it or not.
     assert_eq!(rig.preview(), None);
@@ -2539,7 +2574,7 @@ async fn the_deploy_preview_and_the_convergence_preview_do_not_replace_each_othe
     assert_eq!(rig.preview(), Some(recorded), "`zap plan` left it alone");
     let rig = rig.recording(&dry.plan);
     let wet = rig.deploy(&wetrun()).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
 
     // The other way round, through the rule and the record `apply`'s gate uses.
     let rig = Rig::new("def5678");
@@ -2642,7 +2677,7 @@ async fn a_preflight_bail_records_nothing_and_leaves_the_preview() {
         // would make another plan.
         assert_eq!(
             rendered.contains(
-                "warning: 1 apply-managed resource(s) have drifted — review the changes \
+                "warning: 1 apply-managed resource has drifted — review the changes \
                  with `zap apply`, converge with `zap apply --wetrun`, then re-run this \
                  deploy: its review still binds unless `zap.lock` changed\n"
             ),
@@ -2659,7 +2694,7 @@ async fn a_preflight_bail_records_nothing_and_leaves_the_preview() {
         rig.target = clean;
         let rig = rig.recording(&plan.plan);
         let wet = rig.deploy(&wetrun()).await.unwrap();
-        assert_eq!(wet.outcome, DeployOutcome::Deployed, "{bail:?}: {wet:?}");
+        assert!(wet.outcome.is_deployed(), "{bail:?}: {wet:?}");
     }
 }
 
@@ -2701,7 +2736,7 @@ async fn a_drifted_resource_held_behind_an_unread_one_is_drift() {
     assert_eq!(held, [("data", true), ("logs", false)]);
     let rendered = render_deploy(&report);
     assert!(
-        rendered.contains("warning: 1 apply-managed resource(s) have drifted — "),
+        rendered.contains("warning: 1 apply-managed resource has drifted — "),
         "{rendered}"
     );
 }
@@ -2720,7 +2755,7 @@ async fn a_pipeline_is_not_preflight_drift() {
     let dry = rig.deploy(&DeployOptions::default()).await.unwrap();
     let rig = rig.recording(&dry.plan);
     let wet = rig.deploy(&wetrun()).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
 }
 
 /// [`Rig::new`] on systemd whose config adds a `migrate` pipeline and, per
@@ -2787,12 +2822,12 @@ async fn deploy_reviewed(rig: Rig) -> DeployReport {
 #[tokio::test]
 async fn a_service_triggered_only_by_a_pipeline_is_not_preflight_drift() {
     let wet = deploy_reviewed(triggered_rig(&[("app", "migrate", true)], "")).await;
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
     assert!(wet.warnings.is_empty(), "{:?}", wet.warnings);
 
     let spread = triggered_rig(&[("app", "migrate", true), ("web", "app", true)], "");
     let wet = deploy_reviewed(spread).await;
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
     assert!(wet.warnings.is_empty(), "{:?}", wet.warnings);
 }
 
@@ -2806,7 +2841,7 @@ async fn a_triggered_service_owed_a_restart_or_drifted_is_preflight_drift() {
     assert!(
         wet.warnings
             .iter()
-            .any(|w| w.starts_with("1 apply-managed resource(s) have drifted")),
+            .any(|w| w.starts_with("1 apply-managed resource has drifted")),
         "{:?}",
         wet.warnings
     );
@@ -2873,7 +2908,7 @@ async fn a_held_triggered_service_that_drifted_is_preflight_drift() {
     assert!(
         wet.warnings
             .iter()
-            .any(|w| w.starts_with("1 apply-managed resource(s) have drifted")),
+            .any(|w| w.starts_with("1 apply-managed resource has drifted")),
         "{:?}",
         wet.warnings
     );
@@ -3123,7 +3158,7 @@ async fn an_executed_deploy_spends_its_preview_whether_it_succeeds_or_fails() {
     let dry = rig.deploy(&DeployOptions::default()).await.unwrap();
     let rig = rig.recording(&dry.plan);
     let wet = rig.deploy(&wetrun()).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
     let again = rig.deploy(&wetrun()).await.unwrap();
     assert_eq!(again.plan_hash, dry.plan_hash);
     assert_eq!(
@@ -3135,7 +3170,7 @@ async fn an_executed_deploy_spends_its_preview_whether_it_succeeds_or_fails() {
     let rig = Rig::new("def5678");
     let dry = rig.deploy(&DeployOptions::default()).await.unwrap();
     let failed = rig.deploy(&wetrun()).await.unwrap();
-    assert_eq!(failed.outcome, DeployOutcome::Failed, "{failed:?}");
+    assert!(failed.outcome.is_failed(), "{failed:?}");
     assert_eq!(failed.exit_code(), 1);
     assert!(
         matches!(failed.step_outcomes.first(), Some(StepOutcome::Failed { step, .. }) if step == "build"),
@@ -3289,7 +3324,7 @@ async fn without_a_state_directory_only_expect_plan_binds() {
         })
         .await
         .unwrap();
-    assert_eq!(bound.outcome, DeployOutcome::Deployed, "{bound:?}");
+    assert!(bound.outcome.is_deployed(), "{bound:?}");
 }
 
 /// What the drift preflight checks is part of the plan: the preview shows how many
@@ -3570,7 +3605,7 @@ async fn neither_force_nor_skip_preflight_reaches_past_the_recorded_review() {
             "{options:?}"
         );
         let wet = rig.deploy(&options).await.unwrap();
-        assert_eq!(wet.outcome, DeployOutcome::Deployed, "{options:?}: {wet:?}");
+        assert!(wet.outcome.is_deployed(), "{options:?}: {wet:?}");
     }
 }
 
@@ -3589,7 +3624,7 @@ async fn a_refused_expect_plan_records_the_plan_it_rendered() {
     assert_eq!(preview.plan_hash, wrong.plan_hash);
     assert_eq!(preview.pass, DeployPreviewPass::RefusedWetrun);
     let wet = rig.deploy(&wetrun()).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
 }
 
 /// A wetrun of a masked-host config is refused before the lock is read: an
@@ -3905,7 +3940,7 @@ async fn a_redeploy_binds_to_the_forced_dry_run_that_showed_it() {
         })
         .await
         .unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
 }
 
 /// A `current` naming this version's release, which is missing from the host (a
@@ -3946,7 +3981,7 @@ async fn a_current_naming_a_missing_release_is_redeployed_without_force() {
 
     let rig = missing(Rig::new("abc1234")).recording(&dry.plan);
     let wet = rig.deploy(&wetrun_expecting(&dry.plan_hash)).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
 }
 
 /// The plan is for one host: the same release reviewed against one target doesn't
@@ -4025,7 +4060,7 @@ async fn skipping_the_build_is_a_different_plan() {
         })
         .await
         .unwrap();
-    assert_eq!(report.outcome, DeployOutcome::Deployed, "{report:?}");
+    assert!(report.outcome.is_deployed(), "{report:?}");
     assert!(!rig.local.issued("make"));
     assert!(
         report
@@ -4444,7 +4479,7 @@ async fn skipping_the_preflight_is_a_different_plan() {
         })
         .await
         .unwrap();
-    assert_eq!(report.outcome, DeployOutcome::Deployed, "{report:?}");
+    assert!(report.outcome.is_deployed(), "{report:?}");
     assert!(rig.target.issued_queries().is_empty());
 }
 
@@ -5217,7 +5252,7 @@ async fn a_secret_in_a_step_renders_masked() {
         }
     }
     let wet = rig.deploy(&wetrun_expecting(&dry.plan_hash)).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
     assert!(!render_deploy(&wet).contains("hunter2hunter2"));
 }
 
@@ -5646,7 +5681,7 @@ async fn a_cold_wetrun_on_a_terminal_deploys_the_plan_whose_hash_start_is_typed(
 
     let prompt = ScriptedPrompt::confirming();
     let wet = rig.deploy(&asking(&prompt)).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
     assert_eq!(wet.confirmation, Some(Confirmation::Accepted));
     assert_ne!(wet.plan_hash, other.plan_hash);
     assert!(wet.streamed());
@@ -5745,7 +5780,7 @@ async fn a_declined_prompt_refuses_records_the_plan_it_showed_and_the_next_deplo
 
         let again = ScriptedPrompt::confirming();
         let wet = rig.deploy(&asking(&again)).await.unwrap();
-        assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+        assert!(wet.outcome.is_deployed(), "{wet:?}");
         assert_eq!(wet.confirmation, None);
         assert!(again.shown().is_empty());
     }
@@ -5810,7 +5845,7 @@ async fn a_deploy_asks_only_on_a_terminal_with_nothing_reviewed_or_named() {
     // Now bound to the refusal's preview: deploys, unasked.
     let prompt = ScriptedPrompt::confirming();
     let wet = rig.deploy(&asking(&prompt)).await.unwrap();
-    assert_eq!(wet.outcome, DeployOutcome::Deployed, "{wet:?}");
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
     assert_eq!(wet.confirmation, None);
     assert!(prompt.shown().is_empty());
 
@@ -5927,7 +5962,7 @@ async fn a_failed_health_check_after_the_swap_rolls_back_restarts_and_rechecks()
         })
         .await
         .unwrap();
-    assert_eq!(report.outcome, DeployOutcome::Failed, "{report:?}");
+    assert!(report.outcome.is_failed(), "{report:?}");
     assert_eq!(report.exit_code(), 1);
 
     // Past the plan's own steps: the swap back, then the restart of what it restored.
@@ -5997,7 +6032,16 @@ async fn a_rollback_that_cannot_start_is_skipped_between_the_failed_health_check
         })
         .await
         .unwrap();
-    assert_eq!(report.outcome, DeployOutcome::Failed, "{report:?}");
+    assert!(
+        matches!(
+            report.outcome,
+            DeployOutcome::Failed {
+                left: FailureState::AfterSwap(Rollback::NotStarted),
+                ..
+            }
+        ),
+        "{report:?}"
+    );
     let restart = restart_of(&dry.plan);
     assert_eq!(
         rig.target
@@ -6064,7 +6108,7 @@ async fn a_failed_restart_after_the_swap_rolls_back() {
         })
         .await
         .unwrap();
-    assert_eq!(report.outcome, DeployOutcome::Failed, "{report:?}");
+    assert!(report.outcome.is_failed(), "{report:?}");
     assert_eq!(report.exit_code(), 1);
 
     // Past the plan's own steps: the swap back, then the restart of what it restored.
@@ -6081,6 +6125,21 @@ async fn a_failed_restart_after_the_swap_rolls_back() {
     assert!(
         warning.contains("rolled `current` back to def5678 but the restart FAILED"),
         "{warning}"
+    );
+    // the release it restored was not restarted, so it is not confirmed serving
+    assert!(
+        matches!(
+            report.outcome,
+            DeployOutcome::Failed {
+                left: FailureState::AfterSwap(Rollback::Ran {
+                    outcome: RollbackOutcome::Unconfirmed,
+                    ..
+                }),
+                ..
+            }
+        ),
+        "{:?}",
+        report.outcome
     );
     assert_eq!(
         event_labels(&events),
@@ -6134,7 +6193,7 @@ async fn a_rollback_whose_swap_back_finds_nothing_to_do_starts_then_is_skipped()
             })
             .await
             .unwrap();
-        assert_eq!(report.outcome, DeployOutcome::Failed, "{said}: {report:?}");
+        assert!(report.outcome.is_failed(), "{said}: {report:?}");
         assert_eq!(report.exit_code(), 1);
         let issued = rig.target.issued_commands();
         assert_eq!(issued.last(), Some(&swap_back), "{said}: {issued:?}");
@@ -6209,7 +6268,7 @@ async fn a_failure_before_the_swap_rolls_nothing_back() {
         })
         .await
         .unwrap();
-    assert_eq!(report.outcome, DeployOutcome::Failed, "{report:?}");
+    assert!(report.outcome.is_failed(), "{report:?}");
     let labels = event_labels(&events);
     assert!(
         labels.contains(&"step_failed upload".to_owned()),
@@ -6224,5 +6283,990 @@ async fn a_failure_before_the_swap_rolls_nothing_back() {
         !report.warnings.iter().any(|w| w.contains("roll")),
         "{:?}",
         report.warnings
+    );
+}
+
+/// A text-mode wetrun shows each phase on its progress sink as the phase starts — the
+/// drift preflight first, then each step — and says no outcome there: those are the
+/// report's, which times the preflight and each step and closes on what is live.
+#[tokio::test]
+async fn a_text_wetrun_shows_each_phase_as_it_starts() {
+    use crate::progress::{ProgressSink, RecordedProgress};
+
+    let dry = Rig::new("def5678")
+        .deploy(&DeployOptions::default())
+        .await
+        .unwrap();
+    let rig = Rig::new("def5678").recording(&dry.plan);
+    let sink = RecordedProgress::new();
+    let progress: std::sync::Arc<dyn ProgressSink> =
+        std::sync::Arc::<RecordedProgress>::clone(&sink);
+    let wet = rig
+        .deploy(&DeployOptions {
+            progress: Some(progress),
+            ..wetrun_expecting(&dry.plan_hash)
+        })
+        .await
+        .unwrap();
+    let DeployOutcome::Deployed(run) = &wet.outcome else {
+        panic!("{wet:?}");
+    };
+    assert_eq!(
+        sink.lines(),
+        [
+            "→ preflight: checking 1 apply-managed resource for drift",
+            "→ build: Build application",
+            "→ tarball: Create tarball",
+            "→ upload: Upload tarball",
+            "→ extract_swap: Extract and swap release",
+        ]
+    );
+    assert!(run.preflight.is_some());
+    let timed: Vec<DeployStepId> = run.steps.iter().map(|record| record.id).collect();
+    assert_eq!(
+        timed,
+        [
+            DeployStepId::Build,
+            DeployStepId::Tarball,
+            DeployStepId::Upload,
+            DeployStepId::ExtractSwap,
+        ]
+    );
+    // the upload is summarized by what it sent; the commands' output is no summary
+    let summaries: Vec<Option<&StepSummary>> = run
+        .steps
+        .iter()
+        .map(|record| record.summary.as_ref())
+        .collect();
+    assert!(
+        matches!(
+            summaries.as_slice(),
+            [None, None, Some(StepSummary::Uploaded { .. }), None]
+        ),
+        "{summaries:?}"
+    );
+    assert!(
+        run.total
+            >= run
+                .steps
+                .iter()
+                .map(|record| record.took)
+                .sum::<std::time::Duration>()
+    );
+
+    let rendered = render_deploy(&wet);
+    assert!(rendered.contains("\n  ok    preflight    "), "{rendered}");
+    assert!(
+        rendered.contains("  1 apply-managed resource, no drift\n"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("\ndeployed abc1234 to app.example.com (previous: def5678) in "),
+        "{rendered}"
+    );
+    // The report is the record: no progress line is in it.
+    assert!(!rendered.contains('→'), "{rendered}");
+
+    // A dry run shows nothing live.
+    let sink = RecordedProgress::new();
+    let progress: std::sync::Arc<dyn ProgressSink> =
+        std::sync::Arc::<RecordedProgress>::clone(&sink);
+    Rig::new("def5678")
+        .deploy(&DeployOptions {
+            progress: Some(progress),
+            ..DeployOptions::default()
+        })
+        .await
+        .unwrap();
+    assert!(sink.lines().is_empty(), "{:?}", sink.lines());
+}
+
+/// The upload's event says where the archive went, as the stream always has; its row's
+/// size is the text report's alone.
+#[tokio::test]
+async fn the_uploads_event_names_the_archive_it_installed() {
+    let dry = Rig::new("def5678")
+        .deploy(&DeployOptions::default())
+        .await
+        .unwrap();
+    let remote = dry
+        .plan
+        .steps
+        .iter()
+        .find_map(|step| match &step.action {
+            DeployAction::Upload { remote } => Some(remote.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let rig = Rig::new("def5678").recording(&dry.plan);
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let wet = rig
+        .deploy(&DeployOptions {
+            capture: Some(std::sync::Arc::clone(&events)),
+            ..wetrun_expecting(&dry.plan_hash)
+        })
+        .await
+        .unwrap();
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
+    let uploaded = events.lock().unwrap().iter().find_map(|event| match event {
+        zap_types::event::Event::StepCompleted { step, output } if step == "upload" => {
+            Some(output.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(uploaded, Some(format!("uploaded {remote}")));
+}
+
+/// A `--json` wetrun streams its events and shows no progress, even with a sink.
+#[tokio::test]
+async fn a_json_wetrun_shows_no_progress() {
+    use crate::progress::{ProgressSink, RecordedProgress};
+
+    let dry = Rig::new("def5678")
+        .deploy(&DeployOptions::default())
+        .await
+        .unwrap();
+    let rig = Rig::new("def5678").recording(&dry.plan);
+    let sink = RecordedProgress::new();
+    let progress: std::sync::Arc<dyn ProgressSink> =
+        std::sync::Arc::<RecordedProgress>::clone(&sink);
+    let wet = rig
+        .deploy(&DeployOptions {
+            progress: Some(progress),
+            emit_json: true,
+            ..wetrun_expecting(&dry.plan_hash)
+        })
+        .await
+        .unwrap();
+    assert!(wet.outcome.is_deployed(), "{wet:?}");
+    assert!(sink.lines().is_empty(), "{:?}", sink.lines());
+}
+
+/// A wetrun that fails its health check after the swap shows the rollback start live,
+/// and its report gives the rollback a row and closes on the state it left: rolled
+/// back, but the restored release's own health check failed too, so it is not
+/// confirmed serving.
+#[tokio::test]
+async fn a_rollback_shows_live_and_the_verdict_says_what_it_left() {
+    use crate::progress::{ProgressSink, RecordedProgress};
+
+    let port = refusing_port();
+    let dry = unhealthy_rig(port, "def5678")
+        .deploy(&DeployOptions::default())
+        .await
+        .unwrap();
+    let mut rig = unhealthy_rig(port, "def5678").recording(&dry.plan);
+    let swap_back = zap_types::deploy::rollback_swap_command("/srv/app", &dry.version, "def5678");
+    rig.target = rig.target.with(swap_back, ok("rolled_back\n"));
+    let sink = RecordedProgress::new();
+    let progress: std::sync::Arc<dyn ProgressSink> =
+        std::sync::Arc::<RecordedProgress>::clone(&sink);
+    let report = rig
+        .deploy(&DeployOptions {
+            progress: Some(progress),
+            ..wetrun_expecting(&dry.plan_hash)
+        })
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            report.outcome,
+            DeployOutcome::Failed {
+                left: FailureState::AfterSwap(Rollback::Ran {
+                    outcome: RollbackOutcome::Unconfirmed,
+                    ..
+                }),
+                ..
+            }
+        ),
+        "{report:?}"
+    );
+    let lines = sink.lines();
+    assert_eq!(
+        lines[lines.len() - 3..],
+        [
+            "→ restart: Restart app",
+            "→ health: Health check",
+            "→ rollback: Roll back to def5678",
+        ]
+    );
+    // the rollback's row times the rollback itself, inside the run's total
+    let DeployOutcome::Failed {
+        run,
+        left: FailureState::AfterSwap(Rollback::Ran { took, .. }),
+    } = &report.outcome
+    else {
+        panic!("{report:?}");
+    };
+    assert!(
+        *took > std::time::Duration::ZERO && *took <= run.total,
+        "{report:?}"
+    );
+    let rendered = render_deploy(&report);
+    let row = |status: &str, id: &str| {
+        rendered
+            .lines()
+            .find(|line| line.starts_with(&format!("  {status:<6}{id} ")))
+            .unwrap_or_else(|| panic!("no {status} {id} row:\n{rendered}"))
+            .to_owned()
+    };
+    assert!(
+        row("FAIL", "rollback")
+            .ends_with("s  def5678 restored, but not confirmed serving (see the warnings below)"),
+        "{rendered}"
+    );
+    // The skipped readiness gate was never attempted, so it has no time.
+    assert!(
+        row("skip", "readiness").ends_with("        aborted after `health` failed"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("\ndeploy FAILED at health on app.example.com after ")
+            && rendered.contains(
+                " — rolled back to def5678, which is not confirmed serving — manual \
+                 intervention required\nplan_hash: "
+            ),
+        "{rendered}"
+    );
+}
+
+/// A failure before the swap released nothing; one at the swap may follow a swap that
+/// happened, so it claims neither, and neither rolls back.
+#[tokio::test]
+async fn a_failure_before_or_at_the_swap_is_told_apart() {
+    let failing = || CommandOutput {
+        success: false,
+        code: 1,
+        stdout: String::new(),
+        stderr: "boom".to_owned(),
+    };
+    let dry = Rig::new("def5678")
+        .deploy(&DeployOptions::default())
+        .await
+        .unwrap();
+    let mut before = Rig::new("def5678").recording(&dry.plan);
+    before.local = before.local.with("make", failing());
+    let mut at = Rig::new("def5678").recording(&dry.plan);
+    let script = dry
+        .plan
+        .steps
+        .iter()
+        .find_map(|step| match &step.action {
+            DeployAction::ExtractSwap { script } => Some(script.clone()),
+            _ => None,
+        })
+        .unwrap();
+    at.target = at.target.with(script, failing());
+    // the last step before the swap: the target holds the archive, and nothing more
+    let mut uploading = Rig::new("def5678").recording(&dry.plan);
+    let remote = dry
+        .plan
+        .steps
+        .iter()
+        .find_map(|step| match &step.action {
+            DeployAction::Upload { remote } => Some(remote.clone()),
+            _ => None,
+        })
+        .unwrap();
+    uploading.target = uploading.target.with(upload_put(&remote), failing());
+    for (rig, left, step, state) in [
+        (
+            before,
+            FailureState::BeforeSwap,
+            "build",
+            "nothing was released, and `current` was not moved",
+        ),
+        (
+            uploading,
+            FailureState::BeforeSwap,
+            "upload",
+            "nothing was released, and `current` was not moved",
+        ),
+        // `current`, read back, still names the old release: this one is not live
+        (
+            at,
+            FailureState::AtSwap(SwapFailure::NotSwapped),
+            "extract_swap",
+            "`current` does not name this release, so nothing was released",
+        ),
+    ] {
+        let report = rig.deploy(&wetrun_expecting(&dry.plan_hash)).await.unwrap();
+        let DeployOutcome::Failed { left: got, .. } = &report.outcome else {
+            panic!("{report:?}");
+        };
+        assert_eq!(got, &left);
+        let rendered = render_deploy(&report);
+        let verdict = rendered.lines().rev().nth(1).unwrap();
+        assert!(
+            verdict.starts_with(&format!(
+                "deploy FAILED at {step} on app.example.com after "
+            )) && verdict.ends_with(&format!(" — {state}")),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("rollback"), "{rendered}");
+    }
+}
+
+/// [`plan`], with a health check after its restart.
+fn plan_with_health() -> DeployPlan {
+    let mut plan = plan();
+    plan.steps.push(DeployStep {
+        id: DeployStepId::Health,
+        name: "Health check".to_owned(),
+        action: DeployAction::Health {
+            url: "https://app.example.com/health".to_owned(),
+            url_label: "https://app.example.com/health".to_owned(),
+            attempts: 15,
+            interval_ms: 2000,
+        },
+    });
+    plan
+}
+
+/// A wetrun's report as the binary prints it, its times as measured: `plan_with_health`
+/// run to `outcomes`, each attempted step timed in tenths of a second by its place, the
+/// upload summarized by its size and the health check by its attempts.
+fn timed_report(outcomes: Vec<StepOutcome>, left: Option<FailureState>) -> DeployReport {
+    use std::time::Duration;
+
+    let steps = outcomes
+        .iter()
+        .enumerate()
+        .filter_map(|(at, outcome)| {
+            let (StepOutcome::Completed { step, .. } | StepOutcome::Failed { step, .. }) = outcome
+            else {
+                return None;
+            };
+            let id = [
+                DeployStepId::Build,
+                DeployStepId::Tarball,
+                DeployStepId::Upload,
+                DeployStepId::ExtractSwap,
+                DeployStepId::Restart,
+                DeployStepId::Health,
+            ]
+            .into_iter()
+            .find(|id| id.as_str() == step)?;
+            let summary = match (id, outcome) {
+                (DeployStepId::Upload, StepOutcome::Completed { .. }) => {
+                    Some(StepSummary::Uploaded { bytes: 4_213_000 })
+                }
+                (DeployStepId::Health, StepOutcome::Completed { output, .. }) => {
+                    Some(StepSummary::Said(output.clone()))
+                }
+                _ => None,
+            };
+            Some(super::StepRecord {
+                id,
+                took: Duration::from_millis(1_100 * (u64::try_from(at).unwrap() + 1)),
+                summary,
+            })
+        })
+        .collect();
+    let run = DeployRun {
+        preflight: Some(Duration::from_millis(4_100)),
+        steps,
+        total: Duration::from_millis(83_400),
+    };
+    DeployReport {
+        plan: plan_with_health(),
+        ..report(
+            match left {
+                None => DeployOutcome::Deployed(run),
+                Some(left) => DeployOutcome::Failed { run, left },
+            },
+            outcomes,
+        )
+    }
+}
+
+fn completed(step: &str, output: &str) -> StepOutcome {
+    StepOutcome::Completed {
+        step: step.to_owned(),
+        output: output.to_owned(),
+    }
+}
+
+/// The steps of [`plan_with_health`] up to its health check, completed, the build with
+/// a log of its own.
+fn completed_until_health() -> Vec<StepOutcome> {
+    vec![
+        completed("build", "vite v6\nbuilt in 9.1s\n"),
+        completed("tarball", "created the release archive"),
+        completed(
+            "upload",
+            "uploaded /root/app/.zap-deploy-deploy-abc1234.tar.gz",
+        ),
+        completed("extract_swap", "Deployed"),
+        completed("restart", ""),
+    ]
+}
+
+/// A deployed wetrun's report: a table of the preflight and each step, with its time
+/// and, where the engine has one, its summary — never a command's log — and the verdict
+/// that names what is live where, what it replaced, and the time the run took.
+#[test]
+fn a_deployed_report_times_each_step_and_closes_on_what_is_live() {
+    let mut outcomes = completed_until_health();
+    outcomes.push(completed("health", "healthy after 2 attempts"));
+    let rendered = render_deploy(&timed_report(outcomes, None));
+    assert_eq!(
+        rendered,
+        "deploy — target host.example (wetrun)
+  version: abc1234 (previous: def5678)
+  ok    preflight     4.1s  1 apply-managed resource, no drift
+  ok    build         1.1s
+  ok    tarball       2.2s
+  ok    upload        3.3s  4.2 MB sent
+  ok    extract_swap  4.4s
+  ok    restart       5.5s
+  ok    health        6.6s  healthy after 2 attempts
+deployed abc1234 to host.example (previous: def5678) in 1m 23s
+plan_hash: deadbeef
+"
+    );
+}
+
+/// A failed wetrun's report: the failed step's error under its row, the rollback's own
+/// row after it, and a verdict that says what state the target is in.
+#[test]
+fn a_failed_report_says_what_state_the_target_is_in() {
+    use std::time::Duration;
+
+    let mut outcomes = completed_until_health();
+    outcomes.push(StepOutcome::Failed {
+        step: "health".to_owned(),
+        error: "service did not become healthy at https://app.example.com/health within 15 \
+                attempts (last: HTTP 502)"
+            .to_owned(),
+    });
+    let after = |outcome| {
+        Some(FailureState::AfterSwap(Rollback::Ran {
+            outcome,
+            took: Duration::from_millis(8_000),
+        }))
+    };
+    let rolled_back = after(RollbackOutcome::RolledBack {
+        health_checked: true,
+    });
+    // the rollback that went as planned is its row and the verdict, with no warning
+    assert_eq!(
+        render_deploy(&timed_report(outcomes.clone(), rolled_back)),
+        "deploy — target host.example (wetrun)
+  version: abc1234 (previous: def5678)
+  ok    preflight     4.1s  1 apply-managed resource, no drift
+  ok    build         1.1s
+  ok    tarball       2.2s
+  ok    upload        3.3s  4.2 MB sent
+  ok    extract_swap  4.4s
+  ok    restart       5.5s
+  FAIL  health        6.6s  service did not become healthy at https://app.example.com/health within 15 attempts (last: HTTP 502)
+  ok    rollback      8.0s  def5678 restored and restarted, health OK
+  this deploy spent its review: before re-running, preview again with `zap deploy` (or pass --expect-plan with the hash that preview prints)
+deploy FAILED at health on host.example after 1m 23s — rolled back: def5678 is live again
+plan_hash: deadbeef
+"
+    );
+
+    let ends = |left: Option<FailureState>| {
+        let rendered = render_deploy(&timed_report(outcomes.clone(), left));
+        let lines: Vec<&str> = rendered.lines().collect();
+        let row = lines
+            .iter()
+            .find(|line| line.starts_with("  ") && line[8..].starts_with("rollback"))
+            .map(|line| (*line).to_owned());
+        (row, lines[lines.len() - 2].to_owned())
+    };
+    let lead = "deploy FAILED at health on host.example after 1m 23s — ";
+    for (left, row, state) in [
+        (
+            Some(FailureState::BeforeSwap),
+            None,
+            "nothing was released, and `current` was not moved",
+        ),
+        (
+            Some(FailureState::AtSwap(SwapFailure::NotSwapped)),
+            None,
+            "`current` does not name this release, so nothing was released",
+        ),
+        (
+            Some(FailureState::AtSwap(SwapFailure::Unknown)),
+            None,
+            "the swap is not known to have completed, and nothing was rolled back (see the \
+             step's error above)",
+        ),
+        (
+            Some(FailureState::AfterSwap(Rollback::NotStarted)),
+            Some("  skip  rollback            nothing known to return to (see the warnings below)"),
+            "not rolled back: no release was known to return to, so the failed release is live \
+             — manual intervention required (see the warnings above)",
+        ),
+        (
+            after(RollbackOutcome::RolledBack {
+                health_checked: false,
+            }),
+            Some("  ok    rollback      8.0s  def5678 restored and restarted"),
+            "rolled back: def5678 restored and restarted (no health check)",
+        ),
+        (
+            after(RollbackOutcome::Unconfirmed),
+            Some(
+                "  FAIL  rollback      8.0s  def5678 restored, but not confirmed serving (see \
+                 the warnings below)",
+            ),
+            "rolled back to def5678, which is not confirmed serving — manual intervention \
+             required",
+        ),
+        (
+            after(RollbackOutcome::NotDone),
+            Some("  skip  rollback      8.0s  not rolled back (see the warnings below)"),
+            "not rolled back, so `current` is as the warnings above say — check it by hand",
+        ),
+        (
+            after(RollbackOutcome::Failed),
+            Some(
+                "  FAIL  rollback      8.0s  could not re-point `current` (see the warnings below)",
+            ),
+            "the rollback failed, so the host may be serving the failed release — manual \
+             intervention required (see the warnings above)",
+        ),
+    ] {
+        let (got_row, verdict) = ends(left.clone());
+        assert_eq!(got_row.as_deref(), row, "{left:?}");
+        assert_eq!(verdict, format!("{lead}{state}"), "{left:?}");
+    }
+
+    // the rows point down at the warnings, and the closing line, under them, points up
+    let mut skipped = timed_report(outcomes, after(RollbackOutcome::NotDone));
+    skipped.warnings = vec!["the rollback was skipped".to_owned()];
+    let rendered = render_deploy(&skipped);
+    let at = |text: &str| {
+        rendered
+            .lines()
+            .position(|line| line.contains(text))
+            .unwrap_or_else(|| panic!("{text:?}:\n{rendered}"))
+    };
+    assert!(at("rollback      8.0s") < at("warning: the rollback was skipped"));
+    assert!(at("warning: the rollback was skipped") < at("deploy FAILED at health"));
+}
+
+/// A wetrun's preflight row is a skip when the preflight checked nothing, saying why.
+#[test]
+fn a_wetrun_report_says_why_its_preflight_checked_nothing() {
+    for (preflight, why) in [
+        (DriftPreflight::Skipped, "--skip-preflight"),
+        (
+            DriftPreflight::NothingDeclared,
+            "no apply-managed resources declared",
+        ),
+    ] {
+        let mut report = timed_report(completed_until_health(), None);
+        report.plan.preflight = preflight;
+        assert_eq!(
+            render_deploy(&report),
+            format!(
+                "deploy — target host.example (wetrun)
+  version: abc1234 (previous: def5678)
+  skip  preflight           {why}
+  ok    build         1.1s
+  ok    tarball       2.2s
+  ok    upload        3.3s  4.2 MB sent
+  ok    extract_swap  4.4s
+  ok    restart       5.5s
+deployed abc1234 to host.example (previous: def5678) in 1m 23s
+plan_hash: deadbeef
+"
+            )
+        );
+    }
+}
+
+/// A step's summary is one line, cut to a bound, however much the poll said.
+#[test]
+fn a_step_summary_is_one_bounded_line() {
+    let long = format!("healthy {}\nsecond line", "x".repeat(200));
+    let mut outcomes = completed_until_health();
+    outcomes.push(completed("health", &long));
+    let rendered = render_deploy(&timed_report(outcomes, None));
+    let line = rendered
+        .lines()
+        .find(|line| line.starts_with("  ok    health"))
+        .unwrap();
+    assert!(line.ends_with("x…"), "{line}");
+    assert!(
+        line.ends_with(&format!("6.6s  healthy {}…", "x".repeat(112))),
+        "{line}"
+    );
+    assert!(!rendered.contains("second line"), "{rendered}");
+
+    // a first line under the bound is the summary alone
+    let mut outcomes = completed_until_health();
+    outcomes.push(completed("health", "healthy after 2 attempts\nsecond line"));
+    let rendered = render_deploy(&timed_report(outcomes, None));
+    assert!(
+        rendered.contains("\n  ok    health        6.6s  healthy after 2 attempts\n"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("second line"), "{rendered}");
+}
+
+/// The duration column is as wide as its widest time, each right-aligned in it, so a
+/// minute-long step and a sub-second one end in the same column.
+#[test]
+fn the_duration_column_right_aligns_every_width() {
+    use std::time::Duration;
+
+    let mut report = timed_report(completed_until_health(), None);
+    let DeployOutcome::Deployed(run) = &mut report.outcome else {
+        panic!("{report:?}");
+    };
+    run.steps[0].took = Duration::from_secs(83);
+    run.steps[1].took = Duration::from_millis(900);
+    run.steps[2].took = Duration::from_millis(12_300);
+    let rendered = render_deploy(&report);
+    for row in [
+        "  ok    preflight       4.1s  1 apply-managed resource, no drift\n",
+        "  ok    build         1m 23s\n",
+        "  ok    tarball         0.9s\n",
+        "  ok    upload           12s  4.2 MB sent\n",
+    ] {
+        assert!(rendered.contains(row), "{row:?}\n{rendered}");
+    }
+}
+
+/// A duration reads in tenths of a second, then whole seconds, then minutes and hours.
+#[test]
+fn a_duration_reads_at_the_scale_it_is() {
+    use std::time::Duration;
+
+    use super::render::format_elapsed;
+
+    for (millis, shown) in [
+        (0, "0.0s"),
+        (49, "0.0s"),
+        (420, "0.4s"),
+        (9_999, "9.9s"),
+        (10_000, "10s"),
+        (59_999, "59s"),
+        (60_000, "1m 00s"),
+        (187_000, "3m 07s"),
+        (3_600_000, "1h 00m"),
+        (3_720_000, "1h 02m"),
+    ] {
+        assert_eq!(format_elapsed(Duration::from_millis(millis)), shown);
+    }
+}
+
+/// A size reads in bytes under a thousand, then in tenths of its largest decimal unit.
+#[test]
+fn a_size_reads_at_the_scale_it_is() {
+    use super::render::format_size;
+
+    for (bytes, shown) in [
+        (0, "0 B"),
+        (999, "999 B"),
+        (1_000, "1.0 kB"),
+        (999_999, "999.9 kB"),
+        (1_000_000, "1.0 MB"),
+        (4_213_000, "4.2 MB"),
+        (999_999_999, "999.9 MB"),
+        (1_500_000_000, "1.5 GB"),
+        (2_000_000_000_000, "2.0 TB"),
+    ] {
+        assert_eq!(format_size(bytes), shown);
+    }
+}
+
+/// A readiness gate the target serves summarizes what it found in a few words, while
+/// its event output keeps the URL it read; the health check's summary is its attempts.
+#[tokio::test]
+async fn a_poll_that_passes_is_summarized_by_what_it_found() {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for mut sock in listener.incoming().flatten() {
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf);
+            let _ = sock
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+        }
+    });
+    let poll = |id, path: &str| {
+        let url = format!("{origin}{path}");
+        DeployStep {
+            id,
+            name: path.to_owned(),
+            action: if id == DeployStepId::Health {
+                DeployAction::Health {
+                    url_label: url.clone(),
+                    url,
+                    attempts: 1,
+                    interval_ms: 0,
+                }
+            } else {
+                DeployAction::Readiness {
+                    url_label: url.clone(),
+                    url,
+                    attempts: 1,
+                    interval_ms: 0,
+                }
+            },
+        }
+    };
+    // a command's output is the event's, never the row's: the restart says something
+    let restart = DeployStep {
+        id: DeployStepId::Restart,
+        name: "Restart app".to_owned(),
+        action: DeployAction::Restart {
+            command: "systemctl restart app".to_owned(),
+        },
+    };
+    let plan = DeployPlan {
+        steps: vec![
+            restart,
+            poll(DeployStepId::Health, "/health"),
+            poll(DeployStepId::Readiness, "/ready"),
+        ],
+        ..plan()
+    };
+    let scratch = tempfile::tempdir().unwrap();
+    let walked = execute_deploy_plan(
+        &Connection::Mock(MockConnection::new("local")),
+        &Connection::Mock(
+            MockConnection::new("host").with("systemctl restart app", ok("restarted app\n")),
+        ),
+        super::AppLive {
+            app: "/root/app",
+            previous: None,
+        },
+        &plan,
+        ReleaseArchive::under(scratch.path()),
+        &EventHandler::Null,
+        &mut Vec::new(),
+    )
+    .await;
+    let summaries: Vec<Option<StepSummary>> = walked
+        .records
+        .iter()
+        .map(|record| record.summary.clone())
+        .collect();
+    assert_eq!(
+        summaries,
+        [
+            None,
+            Some(StepSummary::Said("healthy after 1 attempt".to_owned())),
+            Some(StepSummary::Said("live schema matches".to_owned())),
+        ]
+    );
+    assert!(
+        matches!(
+            walked.outcomes.as_slice(),
+            [_, _, StepOutcome::Completed { output, .. }]
+                if *output == format!("ready: live schema matches at {origin}/ready")
+        ),
+        "{:?}",
+        walked.outcomes
+    );
+}
+
+/// The drift warning's count agrees with its verb.
+#[test]
+fn the_drift_warning_agrees_with_its_count() {
+    use super::drift_warning;
+
+    assert!(drift_warning(1).starts_with("1 apply-managed resource has drifted — "));
+    assert!(drift_warning(2).starts_with("2 apply-managed resources have drifted — "));
+}
+
+/// What a failed swap establishes is what `current`, read back, says: naming another
+/// release, or none, this run's is not live; naming this version, or unreadable, the
+/// swap is not known either way — whatever the script's exit said.
+#[tokio::test]
+async fn a_failed_swap_is_classified_by_reading_current_back() {
+    use super::SwapFailure;
+
+    let failed = || Ok(script_output("", "tar: short read\n", false));
+    let ended = || Ok(script_output("Deployed version abc1234\n", "", true));
+    let lost = || {
+        Err(crate::error::Error::Config(
+            "the connection closed".to_owned(),
+        ))
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let app_on = |live: Option<&str>| {
+        let app = dir.path().join(live.unwrap_or("none"));
+        std::fs::create_dir(&app).unwrap();
+        if let Some(live) = live {
+            std::os::unix::fs::symlink(app.join(format!("releases/{live}")), app.join("current"))
+                .unwrap();
+        }
+        app.to_string_lossy().into_owned()
+    };
+    let old = app_on(Some("def5678"));
+    let new = app_on(Some("abc1234"));
+    let none = app_on(None);
+    // No recording for the read: it fails as a transport would.
+    let unreachable = Connection::Mock(MockConnection::new("host"));
+    for (conn, app, ran, swap, said) in [
+        (
+            &Connection::Local,
+            &old,
+            failed(),
+            SwapFailure::NotSwapped,
+            "tar: short read",
+        ),
+        (
+            &Connection::Local,
+            &none,
+            failed(),
+            SwapFailure::NotSwapped,
+            "tar: short read",
+        ),
+        (
+            &Connection::Local,
+            &new,
+            failed(),
+            SwapFailure::Unknown,
+            "tar: short read",
+        ),
+        (
+            &unreachable,
+            &old,
+            failed(),
+            SwapFailure::Unknown,
+            "tar: short read",
+        ),
+        (
+            &Connection::Local,
+            &old,
+            lost(),
+            SwapFailure::NotSwapped,
+            "the connection closed",
+        ),
+        (
+            &unreachable,
+            &old,
+            lost(),
+            SwapFailure::Unknown,
+            "the connection closed",
+        ),
+        (
+            &Connection::Local,
+            &old,
+            ended(),
+            SwapFailure::NotSwapped,
+            "ended without swapping `current`, so nothing was released",
+        ),
+        (
+            &unreachable,
+            &old,
+            ended(),
+            SwapFailure::Unknown,
+            "ended without its swap line, and `current` could not be read back",
+        ),
+    ] {
+        let release = super::walk::Release {
+            app,
+            version: "abc1234",
+            previous: Some("def5678"),
+        };
+        let (got, error) = super::walk::swap_ran(conn, release, ran).await.unwrap_err();
+        assert_eq!(got, swap, "{app}: {error}");
+        assert!(error.contains(said), "{app}: {error}");
+    }
+}
+
+/// A forced redeploy of the version `current` already names can't tell from `current`
+/// whether its failed swap happened: the walk carries that through to the report, which
+/// claims neither way.
+#[tokio::test]
+async fn a_failed_swap_over_the_same_version_is_not_known_to_have_swapped() {
+    let forced = |options: DeployOptions| DeployOptions {
+        force: true,
+        ..options
+    };
+    let version = Rig::new("def5678")
+        .deploy(&DeployOptions::default())
+        .await
+        .unwrap()
+        .version;
+    let dry = Rig::new(&version)
+        .deploy(&forced(DeployOptions::default()))
+        .await
+        .unwrap();
+    let script = dry
+        .plan
+        .steps
+        .iter()
+        .find_map(|step| match &step.action {
+            DeployAction::ExtractSwap { script } => Some(script.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let mut rig = Rig::new(&version).recording(&dry.plan);
+    rig.target = rig.target.with(
+        script,
+        CommandOutput {
+            success: false,
+            code: 1,
+            stdout: String::new(),
+            stderr: "tar: short read".to_owned(),
+        },
+    );
+    let report = rig
+        .deploy(&forced(wetrun_expecting(&dry.plan_hash)))
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            report.outcome,
+            DeployOutcome::Failed {
+                left: FailureState::AtSwap(SwapFailure::Unknown),
+                ..
+            }
+        ),
+        "{report:?}"
+    );
+}
+
+/// An extract-and-swap with no archive uploaded never runs its script, so `current` is
+/// as it was: the walk says the swap did not happen, and reads nothing back.
+#[tokio::test]
+async fn an_extract_with_no_archive_is_known_not_to_have_swapped() {
+    let plan = DeployPlan {
+        steps: vec![DeployStep {
+            id: DeployStepId::ExtractSwap,
+            name: "Extract and swap release".to_owned(),
+            action: DeployAction::ExtractSwap {
+                script: "the script".to_owned(),
+            },
+        }],
+        ..plan()
+    };
+    let target = MockConnection::new("host");
+    let scratch = tempfile::tempdir().unwrap();
+    let walked = execute_deploy_plan(
+        &Connection::Mock(MockConnection::new("local")),
+        &Connection::Mock(target.clone()),
+        super::AppLive {
+            app: "/root/app",
+            previous: None,
+        },
+        &plan,
+        ReleaseArchive::under(scratch.path()),
+        &EventHandler::Null,
+        &mut Vec::new(),
+    )
+    .await;
+    assert_eq!(
+        walked.failed,
+        Some(super::walk::Stopped::AtSwap(SwapFailure::NotSwapped))
+    );
+    assert!(
+        target.issued_commands().is_empty(),
+        "{:?}",
+        target.issued_commands()
     );
 }

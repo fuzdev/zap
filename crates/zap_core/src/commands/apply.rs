@@ -54,6 +54,7 @@ use crate::event::{EventHandler, mask_handler};
 use crate::home::{last_run_path_for, zap_home_default};
 use crate::last_run::{read_last_run, read_last_run_file};
 use crate::lock::{ColdStart, lock_path_for, update_zap_lock};
+use crate::progress::{Notice, ProgressSink};
 use crate::resource::{Markers, execute_plan};
 use crate::secret::mask_outcomes;
 
@@ -85,6 +86,10 @@ pub struct ApplyOptions {
     /// Where a wetrun with no review asks its operator to confirm the plan instead of
     /// refusing it (module docs). `None` never asks — every run but an interactive one.
     pub prompt: Option<Arc<dyn Prompt>>,
+    /// Where a text-mode wetrun shows each change, and the re-detect after them, as it
+    /// starts (`crate::progress`): the binary's standard error. `None` shows nothing
+    /// live; `--json` streams events instead.
+    pub progress: Option<Arc<dyn ProgressSink>>,
 }
 
 /// The outcome of an apply — the plan that was (or would be) applied, plus the
@@ -295,6 +300,7 @@ async fn apply_unmasked(
         bootstrap: _,
         no_cache: _,
         prompt,
+        progress,
     } = options;
 
     // Fail-fast env preflight: a referenced variable with no value resolves to an
@@ -543,13 +549,10 @@ async fn apply_unmasked(
         // Stream events live as the plan executes. The `mask_handler` decorator masks
         // each event at the emission boundary, reusing the run's masker — so the
         // stream is masked exactly as `mask_outcomes` masks the batch report below.
-        // `emit_json` selects the stdout JSON-lines sink; otherwise events go nowhere
-        // (the text report is the output). `execute_plan` itself stays masking-unaware.
-        let inner = if emit_json {
-            EventHandler::Stdout
-        } else {
-            EventHandler::Null
-        };
+        // `emit_json` selects the stdout JSON-lines sink; otherwise each change shows on
+        // the operator's progress lines as it starts, and the text report is the record.
+        // `execute_plan` itself stays masking-unaware.
+        let inner = EventHandler::for_run(emit_json, progress.as_ref());
         let handler = mask_handler(masker.clone(), inner);
         handler.emit(&Event::RunStarted {
             target: target_location(&config.target),
@@ -573,6 +576,9 @@ async fn apply_unmasked(
         // (`post_detect_error`): "converged" was not established. Masked like every
         // other engine output that interpolates engine-read values (an undetermined
         // reason names a seam-resolved path; a drift carries observed state).
+        handler.notice(Notice::Redetect {
+            resources: config.resources.len(),
+        });
         let (residual, post_detect_error) = match detect_pass(
             conn,
             config,
@@ -3087,5 +3093,53 @@ export default (zap) => {
             !issued.iter().any(|c| c.contains("/var/lib/zap/pending")),
             "no marker is armed: {issued:?}"
         );
+    }
+
+    /// A text-mode wetrun shows each change as it starts, and the re-detect after them,
+    /// on its progress sink; the outcomes stay the report's. A `--json` wetrun streams
+    /// events instead and shows nothing there, and a dry run shows nothing at all.
+    #[tokio::test]
+    async fn a_text_wetrun_shows_each_change_and_the_redetect_as_they_start() {
+        use crate::progress::{ProgressSink, RecordedProgress};
+
+        let with = |sink: &Arc<RecordedProgress>, options: ApplyOptions| {
+            let progress: Arc<dyn ProgressSink> = Arc::<RecordedProgress>::clone(sink);
+            ApplyOptions {
+                progress: Some(progress),
+                ..options
+            }
+        };
+        let rig = Rig::on("a.example.com");
+        let sink = RecordedProgress::new();
+        rig.apply(with(&sink, ApplyOptions::default()))
+            .await
+            .unwrap();
+        assert!(sink.lines().is_empty(), "{:?}", sink.lines());
+        let ran = rig.apply(with(&sink, wetrun())).await.unwrap();
+        assert!(rig.ran() && ran.streamed());
+        assert_eq!(
+            sink.lines(),
+            [
+                "→ go: create script",
+                "→ re-detect: reading 1 declared resource back to confirm what the changes left",
+            ]
+        );
+        assert!(!render_apply(&ran).contains('→'));
+
+        let rig = Rig::on("a.example.com");
+        let sink = RecordedProgress::new();
+        rig.dry().await;
+        let ran = rig
+            .apply(with(
+                &sink,
+                ApplyOptions {
+                    emit_json: true,
+                    ..wetrun()
+                },
+            ))
+            .await
+            .unwrap();
+        assert!(rig.ran() && ran.streamed());
+        assert!(sink.lines().is_empty(), "{:?}", sink.lines());
     }
 }

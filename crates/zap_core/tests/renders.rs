@@ -30,7 +30,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::local_machine;
 use zap_core::commands::apply::ApplyReport;
-use zap_core::commands::deploy::{DeployOutcome, DeployReport};
+use zap_core::commands::deploy::{
+    DeployOutcome, DeployReport, DeployRun, FailureState, Rollback, RollbackOutcome, StepRecord,
+    StepSummary,
+};
 use zap_core::commands::detect::{DetectLine, DetectReport};
 use zap_core::commands::plan::PlanReport;
 use zap_core::commands::status::{LastRunInfo, ResourceStatus, Standing, StatusReport};
@@ -45,6 +48,7 @@ use zap_core::escape::render_block;
 use zap_core::lock::{
     LockStanding, NameOnlyRef, NameOnlyRefs, UnverifiableEntry, render_name_only_refs,
 };
+use zap_core::progress::{Notice, Progress, render_progress};
 use zap_types::deploy::{DeployAction, DeployPlan, DeployStep, DeployStepId, DriftPreflight};
 use zap_types::deploy_preview::DeployPreviewPass;
 use zap_types::detected::{
@@ -52,7 +56,7 @@ use zap_types::detected::{
     UserDrift,
 };
 use zap_types::error_code::ErrorCode;
-use zap_types::event::{ChangeOutcome, RunSummary, StepOutcome};
+use zap_types::event::{ChangeOutcome, Event, RunSummary, StepOutcome};
 use zap_types::last_run::{PlanUnreviewed, RunCommand, Verdict};
 use zap_types::plan::{
     Change, ChangeAction, HeldResource, HoldCause, Machine, Plan, PlanStep, ReferenceValue,
@@ -909,7 +913,7 @@ fn deploy_plan() -> DeployPlan {
         references: references("deploy.body.reference"),
         version: h("deploy.version"),
         target: target(),
-        host: h("deploy.body.host"),
+        host: h("deploy.host"),
         dirty: true,
         preflight: DriftPreflight::Checks {
             resources: 1,
@@ -981,7 +985,7 @@ fn deploy_report(outcome: DeployOutcome) -> DeployReport {
         outcome,
         DeployOutcome::DryRun | DeployOutcome::DryRunUnbindable(_) | DeployOutcome::DryRunDirty
     );
-    let stepped = matches!(outcome, DeployOutcome::Deployed | DeployOutcome::Failed);
+    let stepped = outcome.run().is_some();
     DeployReport {
         target: h("report.target"),
         wetrun,
@@ -1020,6 +1024,28 @@ fn deploy_report(outcome: DeployOutcome) -> DeployReport {
     }
 }
 
+/// What a hostile wetrun measured: its preflight and its total, and `steps`.
+fn deploy_run(steps: Vec<StepRecord>) -> DeployRun {
+    let second = std::time::Duration::from_secs(1);
+    DeployRun {
+        preflight: Some(second),
+        steps,
+        total: second * 2,
+    }
+}
+
+/// A wetrun that failed after its swap and whose rollback was not done, so the report
+/// has a rollback row and a verdict to say it in.
+fn failed_after_swap() -> DeployOutcome {
+    DeployOutcome::Failed {
+        run: deploy_run(Vec::new()),
+        left: FailureState::AfterSwap(Rollback::Ran {
+            outcome: RollbackOutcome::NotDone,
+            took: std::time::Duration::from_secs(1),
+        }),
+    }
+}
+
 /// What no deploy render prints: the report's own copy of the version (the render reads
 /// the plan's).
 const DEPLOY_NEVER_PRINTS: &[&str] = &["report.version"];
@@ -1028,8 +1054,13 @@ const DEPLOY_NEVER_PRINTS: &[&str] = &["report.version"];
 /// — which a deploy preview prints and a render without one leaves out.
 const DEPLOY_PLAN_BODY: &[&str] = &["deploy.body.", "target."];
 
-/// A completed step's output, which the outcome lines leave out.
+/// A completed step's output, which the outcome lines leave out unless the step's
+/// action has a summary.
 const STEP_OUTPUT: &[&str] = &["step_outcome.completed.output"];
+
+/// The host the plan names, which a preview and a wetrun's verdict print and a
+/// preflight bail leaves out.
+const DEPLOY_HOST: &[&str] = &["deploy.host"];
 
 fn hashed() -> PlanAddress {
     PlanAddress::Hash("deadbeef".to_owned())
@@ -1447,14 +1478,70 @@ const CASES: &[Case] = &[
     Case {
         render: "commands::deploy::render::render_deploy",
         name: "a wetrun that failed a step",
-        run: || render_deploy(&deploy_report(DeployOutcome::Failed)),
+        run: || render_deploy(&deploy_report(failed_after_swap())),
         unprinted: &[DEPLOY_NEVER_PRINTS, DEPLOY_PLAN_BODY, STEP_OUTPUT, ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
         name: "a wetrun that stopped at its preflight",
         run: || render_deploy(&deploy_report(DeployOutcome::PreflightUndetermined)),
-        unprinted: &[DEPLOY_NEVER_PRINTS, DEPLOY_PLAN_BODY, ORPHANS],
+        unprinted: &[DEPLOY_NEVER_PRINTS, DEPLOY_PLAN_BODY, DEPLOY_HOST, ORPHANS],
+    },
+    Case {
+        render: "commands::deploy::render::render_deploy",
+        name: "a deployed wetrun whose health check says how it went",
+        run: || {
+            // the summary's first line holds the controls: only it is shown
+            let summary = h("step_record.health.summary").replace(&format!("\n{FORGED}"), "");
+            let mut report = deploy_report(DeployOutcome::Deployed(deploy_run(vec![StepRecord {
+                id: DeployStepId::Health,
+                took: std::time::Duration::from_secs(1),
+                summary: Some(StepSummary::Said(summary)),
+            }])));
+            report.step_outcomes = vec![StepOutcome::Completed {
+                step: DeployStepId::Health.as_str().to_owned(),
+                output: h("step_outcome.health.output"),
+            }];
+            render_deploy(&report)
+        },
+        unprinted: &[
+            DEPLOY_NEVER_PRINTS,
+            DEPLOY_PLAN_BODY,
+            ORPHANS,
+            // a step's output, and the outcomes this report's replaced
+            &["step_outcome."],
+        ],
+    },
+    Case {
+        render: "progress::render_progress",
+        name: "the lines a wetrun shows as its phases start",
+        run: || {
+            let step = Event::StepStarted {
+                step: h("progress.step.step"),
+                name: h("progress.step.name"),
+            };
+            let change = Event::ChangeStarted {
+                resource_id: ResourceId(h("progress.change.resource_id")),
+                action: ChangeAction::Update,
+                kind: ResourceType::Service,
+            };
+            let outcome = Event::StepCompleted {
+                step: h("progress.outcome.step"),
+                output: h("progress.outcome.output"),
+            };
+            [
+                Progress::Notice(Notice::DriftPreflight { resources: 2 }),
+                Progress::Event(&step),
+                Progress::Event(&change),
+                Progress::Event(&outcome),
+                Progress::Notice(Notice::Redetect { resources: 1 }),
+            ]
+            .into_iter()
+            .filter_map(render_progress)
+            .map(|line| line + "\n")
+            .collect()
+        },
+        unprinted: &[&["progress.outcome."]],
     },
 ];
 
@@ -1548,7 +1635,10 @@ const HELPERS: &[&str] = &[
     "commands::deploy::render::render_plan_preview",
     "commands::deploy::render::render_action",
     "commands::deploy::render::render_poll",
-    "commands::deploy::render::render_step_outcomes",
+    "commands::deploy::render::render_run",
+    "commands::deploy::render::render_rows",
+    "commands::deploy::render::render_summary",
+    "commands::deploy::render::render_verdict",
 ];
 
 /// Where a file's own inline test module starts: the first `#[cfg(test)]` — or

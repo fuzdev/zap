@@ -5,24 +5,46 @@
 //! event per step.
 
 use std::path::Path;
+use std::time::Instant;
 
 use zap_types::deploy::{
-    ARCHIVE_ENV, DeployAction, DeployPlan, DeployStep, SCRIPT_ERROR_PREFIX, SCRIPT_WARNING_PREFIX,
-    SWAPPED_LINE,
+    ARCHIVE_ENV, DeployAction, DeployPlan, DeployStep, DeployStepId, SCRIPT_ERROR_PREFIX,
+    SCRIPT_WARNING_PREFIX, SWAPPED_LINE,
 };
 use zap_types::event::{Event, StepOutcome};
 use zap_types::shell::single_quote;
 
-use super::health;
 use super::live::{LiveReadError, server_version};
+use super::{StepRecord, StepSummary, SwapFailure, health};
 use crate::connection::{CommandOutput, Connection, RunOptions};
 use crate::error::Result;
 use crate::event::EventHandler;
 
+/// What a walk of the deploy plan did: each step's outcome, in plan order, the record of
+/// each attempted step, and the step that failed, if one did.
+pub(super) struct Walked {
+    /// Every step's outcome.
+    pub(super) outcomes: Vec<StepOutcome>,
+    /// Each attempted step's time and summary, in the order run.
+    pub(super) records: Vec<StepRecord>,
+    /// The step that failed and stopped the walk.
+    pub(super) failed: Option<Stopped>,
+}
+
+/// Where a walk stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Stopped {
+    /// A step other than the extract-and-swap failed.
+    At(DeployStepId),
+    /// The extract-and-swap step failed, with what is known of the swap.
+    AtSwap(SwapFailure),
+}
+
 /// Walk the deploy plan, executing each step's IO. Stops at the first failure
 /// (later steps become `Skipped`), emitting a started + outcome event per attempted
-/// step through `handler` (where masking happens). `archive` is dropped when the walk
-/// ends, however it ends: the operator's copy of the release goes with it.
+/// step through `handler` (where masking happens), and timing each attempted step.
+/// `archive` is dropped when the walk ends, however it ends: the operator's copy of the
+/// release goes with it.
 pub(super) async fn execute_deploy_plan(
     local: &Connection,
     target: &Connection,
@@ -31,12 +53,17 @@ pub(super) async fn execute_deploy_plan(
     mut archive: ReleaseArchive,
     handler: &EventHandler,
     warnings: &mut Vec<String>,
-) -> Vec<StepOutcome> {
+) -> Walked {
     let mut outcomes = Vec::with_capacity(plan.steps.len());
-    let mut aborted_by: Option<String> = None;
+    let mut records = Vec::with_capacity(plan.steps.len());
+    let mut failed: Option<Stopped> = None;
 
     for step in &plan.steps {
-        let outcome = if let Some(failed) = &aborted_by {
+        let outcome = if let Some(failed) = failed {
+            let failed = match failed {
+                Stopped::At(id) => id,
+                Stopped::AtSwap(_) => DeployStepId::ExtractSwap,
+            };
             StepOutcome::Skipped {
                 step: step.id.to_string(),
                 reason: format!("aborted after `{failed}` failed"),
@@ -51,28 +78,50 @@ pub(super) async fn execute_deploy_plan(
                 version: &plan.version,
                 previous: live.previous,
             };
-            match run_step(local, target, release, step, &mut archive, warnings).await {
-                Ok(StepRun::Ran(output)) => StepOutcome::Completed {
-                    step: step.id.to_string(),
-                    output,
-                },
+            let started = Instant::now();
+            let ran = run_step(local, target, release, step, &mut archive, warnings).await;
+            let mut record = StepRecord {
+                id: step.id,
+                took: started.elapsed(),
+                summary: None,
+            };
+            let outcome = match ran {
+                Ok(StepRun::Ran { output, summary }) => {
+                    record.summary = summary;
+                    StepOutcome::Completed {
+                        step: step.id.to_string(),
+                        output,
+                    }
+                }
                 Ok(StepRun::NotRun(reason)) => StepOutcome::Skipped {
                     step: step.id.to_string(),
                     reason,
                 },
-                Err(error) => {
-                    aborted_by = Some(step.id.to_string());
+                Err(StepFailure { error, swap }) => {
+                    failed = Some(match (step.id, swap) {
+                        (DeployStepId::ExtractSwap, swap) => {
+                            // a swap failure that said nothing of the swap is unknown
+                            Stopped::AtSwap(swap.unwrap_or(SwapFailure::Unknown))
+                        }
+                        (id, _) => Stopped::At(id),
+                    });
                     StepOutcome::Failed {
                         step: step.id.to_string(),
                         error,
                     }
                 }
-            }
+            };
+            records.push(record);
+            outcome
         };
         handler.emit(&Event::from_step_outcome(&outcome));
         outcomes.push(outcome);
     }
-    outcomes
+    Walked {
+        outcomes,
+        records,
+        failed,
+    }
 }
 
 /// Whether a step actually ran — the distinction [`StepOutcome`] draws between
@@ -83,10 +132,26 @@ pub(super) async fn execute_deploy_plan(
 /// that the step *passed* — the schema-drift check reporting success without having run.
 /// The reason rides the variant, so "not run" can't be written without saying why.
 enum StepRun {
-    /// The step ran, with this summary.
-    Ran(String),
+    /// The step ran: what it printed or did (the event's `output`), and the summary its
+    /// outcome line shows, when the engine has one to give.
+    Ran {
+        /// The command's output, or what the engine did.
+        output: String,
+        /// The outcome line's summary.
+        summary: Option<StepSummary>,
+    },
     /// The step deliberately did not run, for this reason.
     NotRun(String),
+}
+
+impl StepRun {
+    /// A run whose output is a command's, or a fact with nothing to summarize.
+    const fn output(output: String) -> Self {
+        Self::Ran {
+            output,
+            summary: None,
+        }
+    }
 }
 
 /// The release archive of one run: the operator's copy, and what the target was sent.
@@ -173,7 +238,23 @@ pub(super) struct Release<'a> {
     pub(super) previous: Option<&'a str>,
 }
 
-/// Execute one deploy step. `Ok` carries whether it ran ([`StepRun`]); `Err(message)`
+/// Why a step failed: its message, and for the extract-and-swap step, what is known of
+/// the swap.
+struct StepFailure {
+    /// The step's error.
+    error: String,
+    /// What a failed extract-and-swap establishes about `current`; `None` for every
+    /// other step.
+    swap: Option<SwapFailure>,
+}
+
+impl From<String> for StepFailure {
+    fn from(error: String) -> Self {
+        Self { error, swap: None }
+    }
+}
+
+/// Execute one deploy step. `Ok` carries whether it ran ([`StepRun`]); `Err`
 /// fails the step (and aborts the deploy).
 ///
 /// `archive` carries the release from the step that creates it to the one that uploads
@@ -185,9 +266,11 @@ async fn run_step(
     step: &DeployStep,
     archive: &mut ReleaseArchive,
     warnings: &mut Vec<String>,
-) -> std::result::Result<StepRun, String> {
+) -> std::result::Result<StepRun, StepFailure> {
     match &step.action {
-        DeployAction::Build { command } => run_captured(local, command).await.map(StepRun::Ran),
+        DeployAction::Build { command } => {
+            Ok(run_captured(local, command).await.map(StepRun::output)?)
+        }
         DeployAction::Tarball { command } => {
             let path = archive.create().map_err(|error| {
                 format!("no private directory for the release archive: {error}")
@@ -199,7 +282,7 @@ async fn run_step(
                 ..RunOptions::default()
             };
             captured(local.run(command, &options).await)?;
-            Ok(StepRun::Ran("created the release archive".to_owned()))
+            Ok(StepRun::output("created the release archive".to_owned()))
         }
         DeployAction::Upload { remote } => {
             let bytes = archive.read().await?;
@@ -211,13 +294,19 @@ async fn run_step(
             archive.uploaded = Some((remote.clone(), digest));
             // The target holds it; the operator's copy has no further use.
             archive.dir = None;
-            Ok(StepRun::Ran(format!("uploaded {remote}")))
+            Ok(StepRun::Ran {
+                output: format!("uploaded {remote}"),
+                summary: Some(StepSummary::Uploaded {
+                    bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+                }),
+            })
         }
         DeployAction::ExtractSwap { script } => {
-            let (remote, digest) = archive
-                .uploaded
-                .as_ref()
-                .ok_or_else(|| "no release archive was uploaded to extract".to_owned())?;
+            // never ran: `current` is as it was
+            let (remote, digest) = archive.uploaded.as_ref().ok_or_else(|| StepFailure {
+                error: "no release archive was uploaded to extract".to_owned(),
+                swap: Some(SwapFailure::NotSwapped),
+            })?;
             // The digest is the script's stdin, never its text: the plan was hashed
             // before the archive existed.
             let ran = target
@@ -240,9 +329,15 @@ async fn run_step(
                     .run_default(&format!("rm -f -- {}", single_quote(remote)))
                     .await;
             }
-            ran.map(|(output, _)| StepRun::Ran(output))
+            ran.map(|(output, _)| StepRun::output(output))
+                .map_err(|(swap, error)| StepFailure {
+                    error,
+                    swap: Some(swap),
+                })
         }
-        DeployAction::Restart { command } => run_captured(target, command).await.map(StepRun::Ran),
+        DeployAction::Restart { command } => {
+            Ok(run_captured(target, command).await.map(StepRun::output)?)
+        }
         // The health/readiness URLs carry the declared `deploy.health.domain`, which may
         // be a reference; the pollers resolve it themselves (the plan stays
         // inert, so the dry-run render shows what was declared). An unset reference
@@ -253,9 +348,12 @@ async fn run_step(
             attempts,
             interval_ms,
             ..
-        } => health::http_health_check(url, *attempts, *interval_ms)
+        } => Ok(health::http_health_check(url, *attempts, *interval_ms)
             .await
-            .map(StepRun::Ran),
+            .map(|said| StepRun::Ran {
+                output: said.clone(),
+                summary: Some(StepSummary::Said(said)),
+            })?),
         DeployAction::Readiness {
             url,
             attempts,
@@ -265,9 +363,10 @@ async fn run_step(
             // The poller resolves; these messages report the URL as declared, which is
             // what the operator wrote and what the plan renders.
             match health::http_readiness_check(url, *attempts, *interval_ms).await {
-                health::ReadinessOutcome::Ready => {
-                    Ok(StepRun::Ran(format!("ready: live schema matches at {url}")))
-                }
+                health::ReadinessOutcome::Ready => Ok(StepRun::Ran {
+                    output: format!("ready: live schema matches at {url}"),
+                    summary: Some(StepSummary::Said("live schema matches".to_owned())),
+                }),
                 health::ReadinessOutcome::Absent => {
                     // Loud-warn rather than fail: an absent `/ready` is a
                     // misconfiguration (backend doesn't serve it, or nginx doesn't
@@ -275,13 +374,14 @@ async fn run_step(
                     // release would be wrong. The warning nudges the operator to wire
                     // the gate; the deploy proceeds on the liveness check alone.
                     warnings.push(format!(
-                    "readiness gate SKIPPED — GET {url} returned 404. The `/ready` schema-drift gate \
-                     isn't being served: confirm the backend mounts it and nginx proxies `/ready`. \
-                     This release shipped with no schema-drift protection."
-                ));
+                        "readiness gate SKIPPED — GET {url} returned 404. The `/ready` \
+                         schema-drift gate isn't being served: confirm the backend mounts it \
+                         and nginx proxies `/ready`. This release shipped with no schema-drift \
+                         protection."
+                    ));
                     Ok(StepRun::NotRun(format!("{url} absent (404)")))
                 }
-                health::ReadinessOutcome::NotReady(msg) => Err(msg),
+                health::ReadinessOutcome::NotReady(msg) => Err(msg.into()),
             }
         }
     }
@@ -290,7 +390,8 @@ async fn run_step(
 /// The extract-and-swap script's run, read by its [`SWAPPED_LINE`] rather than by its
 /// exit status alone: `Ok` once `current` names the new release — its stdout without
 /// that line and its marked lines, and, when the run was not clean, the warning that
-/// says so — and `Err` for a run that swapped nothing, whatever its status.
+/// says so — and `Err` for a run that swapped nothing, whatever its status, with what a
+/// read of `current` established about it ([`SwapFailure`]).
 ///
 /// A swapped release is live, so the deploy goes on to restart and check it (and
 /// rolls back when that fails); one the script never swapped is never restarted.
@@ -315,8 +416,11 @@ pub(super) async fn swap_ran(
     target: &Connection,
     release: Release<'_>,
     ran: Result<CommandOutput>,
-) -> std::result::Result<(String, Option<String>), String> {
-    let output = ran.map_err(|error| error.to_string())?;
+) -> std::result::Result<(String, Option<String>), (SwapFailure, String)> {
+    let output = match ran {
+        Ok(output) => output,
+        Err(error) => return Err((read_back(target, release).await, error.to_string())),
+    };
     let swapped = output.stdout.lines().any(|line| line == SWAPPED_LINE);
     let shown = output
         .stdout
@@ -327,26 +431,32 @@ pub(super) async fn swap_ran(
     let shown = shown.trim().to_owned();
     let fresh = release.previous != Some(release.version);
     if !swapped {
-        if output.success
-            && let Ok(Some(live)) = server_version(target, release.app).await
-            && live == release.version
-        {
-            return Ok((
+        if !output.success {
+            return Err((read_back(target, release).await, script_failure(&output)));
+        }
+        return match server_version(target, release.app).await {
+            Ok(Some(live)) if live == release.version => Ok((
                 shown,
                 Some(format!(
                     "the extract-and-swap script's swap line was missing or garbled, but \
                      `current` names releases/{live} — the new release is live, and is \
                      restarted and checked as usual"
                 )),
-            ));
-        }
-        return Err(if output.success {
-            "the extract-and-swap script ended without swapping `current`, so nothing was \
-             released"
-                .to_owned()
-        } else {
-            script_failure(&output)
-        });
+            )),
+            Ok(_) | Err(LiveReadError::NotALink(_) | LiveReadError::NoRelease(_)) => Err((
+                SwapFailure::NotSwapped,
+                "the extract-and-swap script ended without swapping `current`, so nothing \
+                 was released"
+                    .to_owned(),
+            )),
+            Err(LiveReadError::Unreadable(error)) => Err((
+                SwapFailure::Unknown,
+                format!(
+                    "the extract-and-swap script ended without its swap line, and `current` \
+                     could not be read back to tell whether it swapped: {error}"
+                ),
+            )),
+        };
     }
     if output.success {
         return Ok((shown, None));
@@ -357,22 +467,31 @@ pub(super) async fn swap_ran(
             (!fresh).then(|| format!("`current` already named releases/{live} before the run"))
         }
         Ok(live) => {
-            return Err(format!(
-                "the script printed the swap line but `current` names {} — it swapped \
-                 nothing, so nothing was released: {why}",
-                live.map_or_else(|| "nothing".to_owned(), |live| format!("releases/{live}"))
+            return Err((
+                SwapFailure::NotSwapped,
+                format!(
+                    "the script printed the swap line but `current` names {} — it swapped \
+                     nothing, so nothing was released: {why}",
+                    live.map_or_else(|| "nothing".to_owned(), |live| format!("releases/{live}"))
+                ),
             ));
         }
         Err(LiveReadError::NotALink(_)) => {
-            return Err(format!(
-                "the script printed the swap line but `current` is not a symlink — it \
-                 swapped nothing, so nothing was released: {why}"
+            return Err((
+                SwapFailure::NotSwapped,
+                format!(
+                    "the script printed the swap line but `current` is not a symlink — it \
+                     swapped nothing, so nothing was released: {why}"
+                ),
             ));
         }
         Err(LiveReadError::NoRelease(message)) => {
-            return Err(format!(
-                "the script printed the swap line but {message} — it swapped nothing, so \
-                 nothing was released: {why}"
+            return Err((
+                SwapFailure::NotSwapped,
+                format!(
+                    "the script printed the swap line but {message} — it swapped nothing, so \
+                     nothing was released: {why}"
+                ),
             ));
         }
         Err(LiveReadError::Unreadable(error)) => Some(error),
@@ -393,6 +512,20 @@ pub(super) async fn swap_ran(
         },
     );
     Ok((shown, Some(failure)))
+}
+
+/// What `current`, read back after a swap that failed, establishes: that it names some
+/// other release, or none, so this run's release is not live
+/// ([`NotSwapped`](SwapFailure::NotSwapped)) — or nothing, when it names this version
+/// (this run's swap, or another deploy's of the same version) or can't be read.
+async fn read_back(target: &Connection, release: Release<'_>) -> SwapFailure {
+    match server_version(target, release.app).await {
+        Ok(Some(live)) if live == release.version => SwapFailure::Unknown,
+        Ok(_) | Err(LiveReadError::NotALink(_) | LiveReadError::NoRelease(_)) => {
+            SwapFailure::NotSwapped
+        }
+        Err(LiveReadError::Unreadable(_)) => SwapFailure::Unknown,
+    }
 }
 
 /// Whether `line` of the extract-and-swap script's stdout is one of its marks: the

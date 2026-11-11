@@ -20,6 +20,7 @@ pub mod event;
 pub mod home;
 pub mod last_run;
 pub mod lock;
+pub mod progress;
 pub mod resolve;
 pub mod resolver;
 pub mod resource;

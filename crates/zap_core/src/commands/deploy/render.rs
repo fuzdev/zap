@@ -3,15 +3,20 @@
 //! under them.
 
 use std::fmt::Write as _;
+use std::time::Duration;
 
-use zap_types::deploy::{ARCHIVE_ENV, DeployAction, DeployPlan, DriftPreflight};
+use zap_types::deploy::{ARCHIVE_ENV, DeployAction, DeployPlan, DeployStepId, DriftPreflight};
 use zap_types::event::StepOutcome;
 use zap_types::last_run::PlanUnreviewed;
 
-use super::{DIRTY_NEEDS_FORCE, DeployOutcome, DeployReport};
+use super::{
+    DIRTY_NEEDS_FORCE, DeployOutcome, DeployReport, DeployRun, FailureState, Rollback,
+    RollbackOutcome, StepSummary, SwapFailure,
+};
 use crate::commands::RefusalText;
 use crate::commands::prompt::Confirmation;
 use crate::escape::{escape_line, render_block};
+use crate::progress::count;
 
 /// Render a [`DeployReport`] to the text shown by `zap deploy`.
 ///
@@ -121,9 +126,9 @@ pub fn render_deploy(report: &DeployReport) -> String {
                 }
             };
         }
-        DeployOutcome::Deployed => render_step_outcomes(&mut out, report),
-        DeployOutcome::Failed => {
-            render_step_outcomes(&mut out, report);
+        DeployOutcome::Deployed(run) => render_run(&mut out, report, run, None),
+        DeployOutcome::Failed { run, left } => {
+            render_run(&mut out, report, run, Some(left));
             let _ = writeln!(
                 out,
                 "  this deploy spent its review: before re-running, preview again with \
@@ -140,6 +145,7 @@ pub fn render_deploy(report: &DeployReport) -> String {
     crate::commands::render_undetermined(&mut out, &report.held);
     crate::commands::render_warnings(&mut out, &plan.warnings);
     crate::commands::render_warnings(&mut out, &report.warnings);
+    render_verdict(&mut out, report);
     if report.outcome.shows_hash() {
         let _ = writeln!(out, "plan_hash: {}", report.plan_hash);
     }
@@ -276,19 +282,303 @@ fn render_poll(
     }
 }
 
-/// Wetrun body: per-step outcome lines.
-fn render_step_outcomes(out: &mut String, report: &DeployReport) {
+/// One row of a wetrun's table: its status, what it is, how long it took when it ran,
+/// and what it says.
+struct Row {
+    /// `ok`, `FAIL`, or `skip`.
+    status: &'static str,
+    /// The step id, or `preflight`, escaped.
+    id: String,
+    /// How long it ran, or empty for one that didn't.
+    took: String,
+    /// Its summary, error, or reason, escaped as a block when written; may be empty.
+    text: String,
+}
+
+/// Wetrun body: a table of the drift preflight, each step, and the rollback when one
+/// ran — each row's status, its id, how long it took, and its summary, error, or
+/// reason, in aligned columns. A step's summary is text the engine wrote
+/// ([`StepSummary`]), never a command's output.
+fn render_run(
+    out: &mut String,
+    report: &DeployReport,
+    run: &DeployRun,
+    left: Option<&FailureState>,
+) {
+    let took = |took: Duration| format_elapsed(took);
+    let mut rows = vec![match &report.plan.preflight {
+        DriftPreflight::Checks { resources, .. } => Row {
+            status: "ok",
+            id: "preflight".to_owned(),
+            took: run.preflight.map(took).unwrap_or_default(),
+            text: format!(
+                "{}, no drift",
+                count(
+                    *resources,
+                    "apply-managed resource",
+                    "apply-managed resources"
+                )
+            ),
+        },
+        DriftPreflight::Skipped => Row {
+            status: "skip",
+            id: "preflight".to_owned(),
+            took: String::new(),
+            text: "--skip-preflight".to_owned(),
+        },
+        DriftPreflight::NothingDeclared => Row {
+            status: "skip",
+            id: "preflight".to_owned(),
+            took: String::new(),
+            text: "no apply-managed resources declared".to_owned(),
+        },
+    }];
     for outcome in &report.step_outcomes {
-        match outcome {
+        let (status, step, text) = match outcome {
             StepOutcome::Completed { step, .. } => {
-                let _ = writeln!(out, "  ok    {}", escape_line(step));
+                let summary = run
+                    .step(step)
+                    .and_then(|record| record.summary.as_ref())
+                    .map(render_summary)
+                    .unwrap_or_default();
+                ("ok", step, summary)
             }
-            StepOutcome::Failed { step, error } => {
-                render_block(out, &format!("  FAIL  {}  — ", escape_line(step)), error);
+            StepOutcome::Failed { step, error } => ("FAIL", step, error.clone()),
+            StepOutcome::Skipped { step, reason } => ("skip", step, reason.clone()),
+        };
+        rows.push(Row {
+            status,
+            id: escape_line(step).into_owned(),
+            took: run
+                .step(step)
+                .map(|record| took(record.took))
+                .unwrap_or_default(),
+            text,
+        });
+    }
+    if let Some(FailureState::AfterSwap(rollback)) = left {
+        let previous = report
+            .previous_version
+            .as_deref()
+            .unwrap_or("the previous release");
+        let (status, took_text, text) = match rollback {
+            Rollback::NotStarted => (
+                "skip",
+                String::new(),
+                "nothing known to return to (see the warnings below)".to_owned(),
+            ),
+            Rollback::Ran { outcome, took: ran } => {
+                let (status, text) = match outcome {
+                    RollbackOutcome::RolledBack {
+                        health_checked: true,
+                    } => (
+                        "ok",
+                        format!("{previous} restored and restarted, health OK"),
+                    ),
+                    RollbackOutcome::RolledBack {
+                        health_checked: false,
+                    } => ("ok", format!("{previous} restored and restarted")),
+                    RollbackOutcome::Unconfirmed => (
+                        "FAIL",
+                        format!(
+                            "{previous} restored, but not confirmed serving (see the warnings \
+                             below)"
+                        ),
+                    ),
+                    RollbackOutcome::NotDone => (
+                        "skip",
+                        "not rolled back (see the warnings below)".to_owned(),
+                    ),
+                    RollbackOutcome::Failed => (
+                        "FAIL",
+                        "could not re-point `current` (see the warnings below)".to_owned(),
+                    ),
+                };
+                (status, took(*ran), text)
             }
-            StepOutcome::Skipped { step, reason } => {
-                render_block(out, &format!("  skip  {}  — ", escape_line(step)), reason);
+        };
+        rows.push(Row {
+            status,
+            id: DeployStepId::Rollback.as_str().to_owned(),
+            took: took_text,
+            text,
+        });
+    }
+    render_rows(out, &rows);
+}
+
+/// `rows` as a table: the status, the id padded to the widest, the duration
+/// right-aligned in its own column, then the text, whose further lines align under its
+/// first.
+fn render_rows(out: &mut String, rows: &[Row]) {
+    let id_width = rows
+        .iter()
+        .map(|row| row.id.chars().count())
+        .max()
+        .unwrap_or(0);
+    let took_width = rows
+        .iter()
+        .map(|row| row.took.chars().count())
+        .max()
+        .unwrap_or(0);
+    for row in rows {
+        // a table with no time in it has no column for one
+        let lead = if took_width == 0 {
+            format!("  {:<6}{:<id_width$}", row.status, row.id)
+        } else {
+            format!(
+                "  {:<6}{:<id_width$}  {:>took_width$}",
+                row.status, row.id, row.took
+            )
+        };
+        if row.text.is_empty() {
+            let _ = writeln!(out, "{}", lead.trim_end());
+        } else {
+            render_block(out, &format!("{lead}  "), &row.text);
+        }
+    }
+}
+
+/// The most of a summary the outcome line shows, in characters.
+const SUMMARY_CHARS: usize = 120;
+
+/// A step's summary as its row shows it: an upload's size, or at most the first line of
+/// what a poll said, cut at [`SUMMARY_CHARS`].
+fn render_summary(summary: &StepSummary) -> String {
+    match summary {
+        StepSummary::Uploaded { bytes } => format!("{} sent", format_size(*bytes)),
+        StepSummary::Said(said) => {
+            let line = said
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or_default();
+            if line.chars().count() > SUMMARY_CHARS {
+                let cut: String = line.chars().take(SUMMARY_CHARS).collect();
+                format!("{cut}…")
+            } else {
+                line.to_owned()
             }
         }
+    }
+}
+
+/// The closing verdict of a wetrun that reached its steps: on success, the version now
+/// live on the plan's host, the one it replaced, and the time the run took; on failure,
+/// the step that failed and the state the target was left in ([`FailureState`]).
+fn render_verdict(out: &mut String, report: &DeployReport) {
+    let plan = &report.plan;
+    let host = escape_line(&plan.host);
+    let previous = report.previous_version.as_deref().map(escape_line);
+    match &report.outcome {
+        DeployOutcome::Deployed(run) => {
+            let _ = writeln!(
+                out,
+                "deployed {} to {host} (previous: {}) in {}",
+                escape_line(&plan.version),
+                previous.as_deref().unwrap_or("none"),
+                format_elapsed(run.total)
+            );
+        }
+        DeployOutcome::Failed { run, left } => {
+            let failed = report
+                .step_outcomes
+                .iter()
+                .find_map(|outcome| match outcome {
+                    StepOutcome::Failed { step, .. } => Some(escape_line(step)),
+                    StepOutcome::Completed { .. } | StepOutcome::Skipped { .. } => None,
+                });
+            let previous = previous.as_deref().unwrap_or("the previous release");
+            let state = match left {
+                FailureState::BeforeSwap => {
+                    "nothing was released, and `current` was not moved".to_owned()
+                }
+                FailureState::AtSwap(SwapFailure::NotSwapped) => {
+                    "`current` does not name this release, so nothing was released".to_owned()
+                }
+                FailureState::AtSwap(SwapFailure::Unknown) => {
+                    "the swap is not known to have completed, and nothing was rolled back (see \
+                     the step's error above)"
+                        .to_owned()
+                }
+                FailureState::AfterSwap(Rollback::NotStarted) => {
+                    "not rolled back: no release was known to return to, so the failed release \
+                     is live — manual intervention required (see the warnings above)"
+                        .to_owned()
+                }
+                FailureState::AfterSwap(Rollback::Ran { outcome, .. }) => match outcome {
+                    RollbackOutcome::RolledBack {
+                        health_checked: true,
+                    } => format!("rolled back: {previous} is live again"),
+                    RollbackOutcome::RolledBack {
+                        health_checked: false,
+                    } => {
+                        format!("rolled back: {previous} restored and restarted (no health check)")
+                    }
+                    RollbackOutcome::Unconfirmed => format!(
+                        "rolled back to {previous}, which is not confirmed serving — manual \
+                         intervention required"
+                    ),
+                    RollbackOutcome::NotDone => "not rolled back, so `current` is as the \
+                                                 warnings above say — check it by hand"
+                        .to_owned(),
+                    RollbackOutcome::Failed => "the rollback failed, so the host may be serving \
+                                                the failed release — manual intervention \
+                                                required (see the warnings above)"
+                        .to_owned(),
+                },
+            };
+            let _ = writeln!(
+                out,
+                "deploy FAILED{} on {host} after {} — {state}",
+                failed.map(|step| format!(" at {step}")).unwrap_or_default(),
+                format_elapsed(run.total)
+            );
+        }
+        DeployOutcome::DryRun
+        | DeployOutcome::DryRunUnbindable(_)
+        | DeployOutcome::DryRunDirty
+        | DeployOutcome::AlreadyDeployed
+        | DeployOutcome::Refused(_)
+        | DeployOutcome::PreflightDrift
+        | DeployOutcome::PreflightUndetermined => {}
+    }
+}
+
+/// A size as a row shows it: bytes under a thousand (`512 B`), then tenths of the
+/// largest decimal unit it reaches (`4.2 MB`).
+pub(super) fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["kB", "MB", "GB", "TB"];
+    if bytes < 1000 {
+        return format!("{bytes} B");
+    }
+    let mut scale: u128 = 1000;
+    let mut unit = UNITS[0];
+    for next in &UNITS[1..] {
+        if u128::from(bytes) < scale * 1000 {
+            break;
+        }
+        scale *= 1000;
+        unit = next;
+    }
+    let tenths = u128::from(bytes) * 10 / scale;
+    format!("{}.{} {unit}", tenths / 10, tenths % 10)
+}
+
+/// A duration as an outcome line shows it: tenths of a second under ten seconds
+/// (`0.4s`, `9.9s`), whole seconds under a minute (`42s`), then minutes and seconds
+/// (`3m 07s`) and hours and minutes (`1h 02m`).
+pub(super) fn format_elapsed(took: Duration) -> String {
+    let tenths = took.as_millis() / 100;
+    if tenths < 100 {
+        return format!("{}.{}s", tenths / 10, tenths % 10);
+    }
+    let seconds = took.as_secs();
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    } else {
+        format!("{}h {:02}m", seconds / 3600, seconds % 3600 / 60)
     }
 }

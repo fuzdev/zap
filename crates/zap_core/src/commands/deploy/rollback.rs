@@ -11,6 +11,7 @@ use zap_types::deploy::{
 };
 use zap_types::event::{Event, StepOutcome};
 
+use super::RollbackOutcome;
 use super::health::http_health_check;
 use super::walk::run_captured;
 use crate::connection::Connection;
@@ -50,9 +51,11 @@ fn plan_health(plan: &DeployPlan) -> Option<(&str, u32, u64)> {
 }
 
 /// Recover from a post-swap deploy failure by re-pointing `current` at the previous
-/// release and restarting, then re-checking health. Records the result in `warnings`
-/// and emits `rollback` step events. Best-effort — a failed rollback is itself a
-/// warning telling the operator manual intervention is required.
+/// release and restarting, then re-checking health. Emits `rollback` step events and
+/// returns how it left the target, or `None` when it never started (nothing to return
+/// to); a rollback that went wrong or was skipped also says
+/// why in `warnings`, telling the operator what needs a hand. Best-effort: a failed
+/// rollback is a warning, never an error.
 ///
 /// Only a `current` that still names `version`, the release this deploy swapped in, is
 /// re-pointed (`zap_types::deploy::rollback_swap_command`), and only at a previous
@@ -68,7 +71,7 @@ pub(super) async fn attempt_rollback(
     version: &str,
     handler: &EventHandler,
     warnings: &mut Vec<String>,
-) {
+) -> Option<RollbackOutcome> {
     // With nothing to swap back to, the rollback is skipped, and says so on the event
     // stream as well as in the warnings: a `--json` run prints no warning, and its
     // consumer must still learn that a broken release was left live.
@@ -86,7 +89,7 @@ pub(super) async fn attempt_rollback(
                 .to_owned(),
             warnings,
         );
-        return;
+        return None;
     };
     if previous == version {
         // A forced redeploy of the version already serving: `current` points at the
@@ -101,7 +104,7 @@ pub(super) async fn attempt_rollback(
             ),
             warnings,
         );
-        return;
+        return None;
     }
 
     handler.emit(&Event::StepStarted {
@@ -145,12 +148,12 @@ pub(super) async fn attempt_rollback(
                 "rollback FAILED (could not re-point `current` to {previous}): {error} — \
                  the host may be serving a broken release; manual intervention required"
             ));
-            return;
+            return Some(RollbackOutcome::Failed);
         }
     };
     if let Some(reason) = skipped {
         skip(reason, warnings);
-        return;
+        return Some(RollbackOutcome::NotDone);
     }
 
     if let Some(restart) = plan_restart_command(plan)
@@ -164,9 +167,10 @@ pub(super) async fn attempt_rollback(
             "rolled `current` back to {previous} but the restart FAILED: {error} — \
              manual intervention required"
         ));
-        return;
+        return Some(RollbackOutcome::Unconfirmed);
     }
 
+    let health_checked = plan_health(plan).is_some();
     let summary = if let Some((url, attempts, interval_ms)) = plan_health(plan) {
         match http_health_check(url, attempts, interval_ms).await {
             Ok(_) => {
@@ -184,17 +188,18 @@ pub(super) async fn attempt_rollback(
                     error: failure.clone(),
                 });
                 warnings.push(failure);
-                return;
+                return Some(RollbackOutcome::Unconfirmed);
             }
         }
     } else {
         format!("deploy failed — rolled back `current` to {previous} and restarted")
     };
-    warnings.push(summary.clone());
+    // The report's rollback row says this; the stream's event carries it.
     handler.emit(&Event::StepCompleted {
         step: DeployStepId::Rollback.to_string(),
         output: summary,
     });
+    Some(RollbackOutcome::RolledBack { health_checked })
 }
 
 #[cfg(test)]
@@ -205,6 +210,7 @@ mod tests {
     use zap_types::text::Text;
 
     use super::{attempt_rollback, extract_swap_succeeded, plan_health, plan_restart_command};
+    use crate::commands::deploy::RollbackOutcome;
     use crate::connection::{CommandOutput, Connection, MockConnection};
     use crate::event::EventHandler;
 
@@ -309,6 +315,8 @@ mod tests {
     /// The rollback re-points and restarts only when its swap found `current` still at
     /// this deploy's release; otherwise it warns why it did nothing and restarts nothing
     /// (the mock has no restart recorded, so a restart would be a warning of its own).
+    /// What it returns is what the deploy's report says of the target, and a rollback
+    /// that went as planned leaves no warning: its row in the report says so.
     #[tokio::test]
     async fn a_rollback_restarts_only_what_it_rolled_back() {
         let plan = plan();
@@ -320,28 +328,48 @@ mod tests {
             stdout: stdout.to_owned(),
             stderr: String::new(),
         };
-        for (stdout, restarts, warned) in [
+        let rolled_back = RollbackOutcome::RolledBack {
+            health_checked: false,
+        };
+        for (stdout, restarts, warned, left) in [
+            ("rolled_back\n", true, None, rolled_back),
             (
-                "rolled_back\n",
-                true,
-                "rolled back `current` to def5678 and restarted",
+                "replaced\n",
+                false,
+                Some("no longer names its release (abc1234)"),
+                RollbackOutcome::NotDone,
             ),
-            ("replaced\n", false, "no longer names its release (abc1234)"),
-            ("busy\n", false, "another deploy is running for this app"),
+            (
+                "busy\n",
+                false,
+                Some("another deploy is running for this app"),
+                RollbackOutcome::NotDone,
+            ),
             (
                 "absent\n",
                 false,
-                "`current` names nothing; manual intervention required",
+                Some("`current` names nothing; manual intervention required"),
+                RollbackOutcome::NotDone,
             ),
-            ("gone\n", false, "(def5678) is no longer on the host"),
-            ("what\n", false, "rollback FAILED"),
+            (
+                "gone\n",
+                false,
+                Some("(def5678) is no longer on the host"),
+                RollbackOutcome::NotDone,
+            ),
+            (
+                "what\n",
+                false,
+                Some("rollback FAILED"),
+                RollbackOutcome::Failed,
+            ),
         ] {
             let mut mock = MockConnection::new("host").with(swap.clone(), said(stdout));
             if restarts {
                 mock = mock.with(restart.clone(), said(""));
             }
             let mut warnings = Vec::new();
-            attempt_rollback(
+            let outcome = attempt_rollback(
                 &Connection::Mock(mock),
                 "/root/app",
                 &plan,
@@ -351,10 +379,14 @@ mod tests {
                 &mut warnings,
             )
             .await;
-            let [warning] = warnings.as_slice() else {
-                panic!("{stdout:?}: {warnings:?}");
-            };
-            assert!(warning.contains(warned), "{stdout:?}: {warning}");
+            assert_eq!(outcome, Some(left), "{stdout:?}");
+            match (warned, warnings.as_slice()) {
+                (None, []) => {}
+                (Some(warned), [warning]) => {
+                    assert!(warning.contains(warned), "{stdout:?}: {warning}");
+                }
+                _ => panic!("{stdout:?}: {warnings:?}"),
+            }
         }
     }
 
@@ -369,7 +401,7 @@ mod tests {
         for previous in [None, Some("abc1234")] {
             let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
             let mut warnings = Vec::new();
-            attempt_rollback(
+            let outcome = attempt_rollback(
                 &Connection::Mock(MockConnection::new("host")),
                 "/root/app",
                 &plan(),
@@ -379,6 +411,8 @@ mod tests {
                 &mut warnings,
             )
             .await;
+            // it never started, so it reports no outcome of a run
+            assert_eq!(outcome, None, "{previous:?}");
             let [warning] = warnings.as_slice() else {
                 panic!("{previous:?}: {warnings:?}");
             };
@@ -492,8 +526,8 @@ mod tests {
 
     /// A rollback whose restored release passes its health check completes: it swaps
     /// back, restarts, polls the plan's health check within the plan's own attempt
-    /// budget (a `503`, then a `200`), and reports the step completed with its one
-    /// warning's words. The plan's health URL is pointed at a plain-HTTP loopback server,
+    /// budget (a `503`, then a `200`), and reports the step completed, with no warning:
+    /// nothing needs a hand. The plan's health URL is pointed at a plain-HTTP loopback server,
     /// which a planned `https` URL can't reach.
     #[tokio::test]
     async fn a_rollback_whose_restored_release_is_healthy_is_a_completed_step() {
@@ -533,7 +567,7 @@ mod tests {
             .with(restart.clone(), said(""));
         let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let mut warnings = Vec::new();
-        attempt_rollback(
+        let outcome = attempt_rollback(
             &Connection::Mock(mock.clone()),
             "/root/app",
             &plan,
@@ -544,9 +578,12 @@ mod tests {
         )
         .await;
         assert_eq!(
-            warnings,
-            ["deploy failed — rolled back to def5678 and restarted (health OK)"]
+            outcome,
+            Some(RollbackOutcome::RolledBack {
+                health_checked: true
+            })
         );
+        assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(mock.issued_commands(), [swap, restart]);
         assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 2);
         let events = events.lock().unwrap();
@@ -559,7 +596,7 @@ mod tests {
                 ] if started == "rollback"
                     && name == "Roll back to def5678"
                     && completed == "rollback"
-                    && output == &warnings[0]
+                    && output == "deploy failed — rolled back to def5678 and restarted (health OK)"
             ),
             "{events:?}"
         );

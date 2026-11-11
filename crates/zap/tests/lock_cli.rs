@@ -64,3 +64,67 @@ fn lock_writes_beside_a_config_named_by_its_file_name() {
         );
     }
 }
+
+/// A report that can't be written (standard output on a full device) says so on
+/// standard error, and fails a run whose report was its answer where it would have
+/// exited 0; a run that wrote the lock, or a wetrun that reached its work, keeps its
+/// own code. Requires `/dev/full`; skips without it.
+#[test]
+fn a_report_that_could_not_be_written_fails_only_an_answer_end_to_end() {
+    if !fgro_available() {
+        eprintln!("skipping a_report_that_could_not_be_written…: ZAP_FGRO not set");
+        return;
+    }
+    if !std::path::Path::new("/dev/full").exists() {
+        eprintln!("skipping a_report_that_could_not_be_written…: no /dev/full");
+        return;
+    }
+    let proj = scratch::tempdir().unwrap();
+    let home = scratch::tempdir().unwrap();
+    scratch::write_config(
+        proj.path().join("zap.ts"),
+        "export default (zap) => {\n    zap.target({local: true});\n};\n",
+    )
+    .unwrap();
+    let zap = |args: &[&str], full: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_zap"));
+        command
+            .args(args)
+            .current_dir(proj.path())
+            .env("ZAP_HOME", home.path().join(".zap"))
+            .env("HOME", home.path());
+        if full {
+            let dev_full = std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap();
+            command.stdout(dev_full);
+        }
+        command.output().expect("failed to spawn the zap binary")
+    };
+    // the lock, written whole, and a preview the wetrun below binds to
+    for args in [&["lock"][..], &["apply"][..]] {
+        let output = zap(args, false);
+        assert!(output.status.success(), "{args:?}: {output:?}");
+    }
+    for (args, code) in [
+        (&["plan"][..], 1),
+        (&["detect"][..], 1),
+        (&["status"][..], 1),
+        (&["apply"][..], 1),
+        (&["lock", "--check"][..], 1),
+        (&["config", "validate"][..], 1),
+        (&["lock"][..], 0),
+        (&["update"][..], 0),
+        (&["apply", "--wetrun"][..], 0),
+    ] {
+        let output = zap(args, true);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(code), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains("error: the report could not be written: "),
+            "{args:?}: {stderr}"
+        );
+        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+    }
+}

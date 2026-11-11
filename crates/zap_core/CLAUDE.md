@@ -59,7 +59,10 @@ A map; each module's `//!` doc and its items' rustdoc are the detail.
 - `escape` — what makes printed text safe to read (`escape_line`, `render_block`,
   `escape_json_line`).
 - `event` — event emission (`EventHandler`, masked at the boundary by
-  `mask_handler`).
+  `mask_handler`): the `--json` stream, or a text-mode wetrun's live progress.
+- `progress` — the progress lines a text-mode wetrun shows as each phase starts
+  (`render_progress`), the `Notice` for a phase that is no event, and the
+  `ProgressSink` the bin injects (standard error).
 - `error` — the engine `Error`, its exit codes, `hint()`, masking, and `render()`;
   `error_code()` and `io_error_code` classify a failed change (a native io error by
   its kind, a script's exit status and stderr, or bare text, by
@@ -69,8 +72,8 @@ A map; each module's `//!` doc and its items' rustdoc are the detail.
   seam and its redirect policy.
 
 Not built: `dag` (one layered scheduler shared by resources and pipeline steps);
-execution is sequential. The `event` module streams to stdout JSON-lines and keeps
-no run log under `~/.zap`.
+execution is sequential. The `event` module streams to stdout JSON-lines, or to the
+bin's progress sink, and keeps no run log under `~/.zap`.
 
 ## Command invariants
 

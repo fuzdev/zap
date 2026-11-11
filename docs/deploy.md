@@ -81,6 +81,71 @@ inside the application's git checkout. On the target: what a file write needs
 ([targets.md](./targets.md#what-the-target-needs)), plus `tar`, `id`, and
 `flock`.
 
+### What a wetrun prints
+
+While a wetrun runs, each phase prints one line to standard error as it starts:
+the drift preflight, each step, and a rollback if one starts. Nothing about how
+a phase ended prints there. When the run ends, the report goes to standard
+output: a table with a row for the preflight, each step, and a rollback when
+one ran, each with its status, how long it took, and what it says (the
+upload's size, what the health and readiness checks found, a failed step's
+error, a skipped one's reason; a command's own output, such as the build log,
+is left out), then the warnings and a closing line that says what is live
+where.
+
+```
+→ preflight: checking 1 apply-managed resource for drift
+→ build: Build application
+→ tarball: Create tarball
+→ upload: Upload tarball
+→ extract_swap: Extract and swap release
+→ restart: Restart app
+→ health: Health check
+deploy — target host.example (wetrun)
+  version: abc1234 (previous: def5678)
+  ok    preflight     4.1s  1 apply-managed resource, no drift
+  ok    build         1.1s
+  ok    tarball       2.2s
+  ok    upload        3.3s  4.2 MB sent
+  ok    extract_swap  4.4s
+  ok    restart       5.5s
+  ok    health        6.6s  healthy after 2 attempts
+deployed abc1234 to host.example (previous: def5678) in 1m 23s
+plan_hash: deadbeef
+```
+
+The `→` lines are standard error and the rest standard output, so standard
+output redirected to a file holds the whole report and no progress line. Under
+`--json` neither prints: the events stream instead
+([cli.md](./cli.md#json-events)). A preflight that checked nothing is a `skip`
+row that says why (`--skip-preflight`, or no apply-managed resources declared).
+
+A failed run's closing line names the step that failed and the state the
+target is in. A failure before the swap released nothing:
+
+```
+deploy FAILED at upload on host.example after 1m 23s — nothing was released, and `current` was not moved
+```
+
+A failure of the extract-and-swap step itself is read back from `current`, and
+nothing is rolled back. When `current` names another release, or none, this
+one is not live:
+
+```
+deploy FAILED at extract_swap on host.example after 1m 23s — `current` does not name this release, so nothing was released
+```
+
+When it names this version (the swap can have happened before the step failed,
+or another deploy of the same version swapped), or can't be read, the line
+claims neither way and points at the step's error:
+
+```
+deploy FAILED at extract_swap on host.example after 1m 23s — the swap is not known to have completed, and nothing was rolled back (see the step's error above)
+```
+
+A failure after the swap is followed by a rollback
+([Auto-rollback](#auto-rollback)).
+
 ## First deploy
 
 A first deploy onto a fresh host is a chicken-and-egg: the binary lands via
@@ -454,8 +519,44 @@ build (local) → tarball → upload → extract + swap → restart → health �
 If a step after the swap fails (the restart errors, health never goes green,
 `/ready` answers 503), Zap re-points `current` at the previous release,
 restarts, and re-checks health (the health URL, not `/ready`), recording the
-rollback as warnings and step events. The deploy still exits 1: rollback
-restores service, it doesn't paper over the failure.
+rollback as a row of the report and as step events. The deploy still exits 1:
+rollback restores service, it doesn't paper over the failure.
+
+The rollback has its own row in the report, after the failed step, and the
+closing line says where it left the target:
+
+```
+→ preflight: checking 1 apply-managed resource for drift
+→ build: Build application
+→ tarball: Create tarball
+→ upload: Upload tarball
+→ extract_swap: Extract and swap release
+→ restart: Restart app
+→ health: Health check
+→ rollback: Roll back to def5678
+deploy — target host.example (wetrun)
+  version: abc1234 (previous: def5678)
+  ok    preflight     4.1s  1 apply-managed resource, no drift
+  ok    build         1.1s
+  ok    tarball       2.2s
+  ok    upload        3.3s  4.2 MB sent
+  ok    extract_swap  4.4s
+  ok    restart       5.5s
+  FAIL  health        6.6s  service did not become healthy at https://app.example.com/health within 15 attempts (last: HTTP 502)
+  ok    rollback      8.0s  def5678 restored and restarted, health OK
+  this deploy spent its review: before re-running, preview again with `zap deploy` (or pass --expect-plan with the hash that preview prints)
+deploy FAILED at health on host.example after 1m 23s — rolled back: def5678 is live again
+plan_hash: deadbeef
+```
+
+Without a health check in the plan, the line says the previous release was
+restored and restarted, not that it is live. A rollback that didn't go as
+planned says so on its row and in the closing line, and a warning below the
+table says why: no release was known to return to, so the failed release is live
+(the row has no time: it never started); the previous release was restored,
+but its restart or its health check failed, so it is not confirmed serving; the
+rollback was skipped, so `current` is as the warnings say; or the re-point
+itself failed, so the host may be serving the failed release.
 
 The re-point is a compare-and-swap under the app's deploy lock, taken without
 waiting. It moves `current` back only while `current` still names this deploy's

@@ -68,7 +68,9 @@ Each is stated in full where it points; know them before touching the engine.
 - **A wetrun executes only the reviewed plan.** Rule: `zap_types::last_run::review_plan`;
   gate: `zap_core::commands::apply` (`zap deploy` has its own preview). On a terminal
   the bin injects its `TerminalPrompt` (the `zap_core::commands::prompt::Prompt`
-  trait; the confirmation rule is that module's); the engine prints nothing.
+  trait; the confirmation rule is that module's), and a text-mode wetrun's live
+  progress goes to the `StderrProgress` it injects (`zap_core::progress::ProgressSink`,
+  carried by `EventHandler::Progress`); the engine prints nothing.
   Statement: `docs/concepts.md`; prompt UX: `docs/cli.md`.
 - **Detection reads live.** No detection cache: every pass reads through typed
   queries batched per privilege lane, and a failed read holds the resource

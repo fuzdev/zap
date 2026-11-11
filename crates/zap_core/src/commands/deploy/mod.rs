@@ -12,7 +12,12 @@
 //!
 //! Dry-run by default (render the plan); `--wetrun` executes. A wetrun first runs a
 //! drift **preflight** (reusing `detect_and_diff`) so a new artifact isn't shipped
-//! against stale apply-managed config. Deploy requires a **remote** target.
+//! against stale apply-managed config. Deploy requires a **remote** target. A wetrun
+//! shows each phase as it starts — the preflight, each step, a rollback — on the
+//! operator's progress lines (`crate::progress`), or streams its steps' events under
+//! `--json`. An outcome that reached the steps carries what the run measured
+//! ([`DeployRun`]), and a failed one where it left the target ([`FailureState`]): before
+//! the swap, at it, or after it with the rollback's result.
 //!
 //! **A wetrun executes only a reviewed plan.** A dry run renders the whole
 //! [`DeployPlan`] — the host and endpoints it resolves to, the tree and preflight facts,
@@ -71,10 +76,11 @@ mod walk;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use zap_types::config_hash::deploy_plan_hash;
 use zap_types::deploy::{
-    DeployContext, DeployPlan, DriftPreflight, deploy_references, plan_deploy,
+    DeployContext, DeployPlan, DeployStepId, DriftPreflight, deploy_references, plan_deploy,
 };
 use zap_types::deploy_preview::{DeployPreviewPass, DeployUnreviewed, review_deploy_plan};
 use zap_types::detected::Detection;
@@ -100,12 +106,13 @@ use crate::home::deploy_preview_path_for;
 use crate::home::zap_home_default;
 use crate::last_run::report_var;
 use crate::lock::{LockStanding, inspect_lock};
+use crate::progress::{Notice, ProgressSink, count};
 use crate::resolve::env_var;
 
 use checkout::{git_uncommitted, git_version};
 use live::{LiveReadError, live_release_present, server_version};
 pub use render::render_deploy;
-use walk::{AppLive, ReleaseArchive, execute_deploy_plan};
+use walk::{AppLive, ReleaseArchive, Stopped, execute_deploy_plan};
 
 /// Knobs for a deploy run (mirrors [`ApplyOptions`](super::apply::ApplyOptions)).
 ///
@@ -141,6 +148,10 @@ pub struct DeployOptions {
     /// Where a wetrun with no review asks its operator to confirm the plan instead of
     /// refusing it (module docs). `None` never asks — every run but an interactive one.
     pub prompt: Option<Arc<dyn Prompt>>,
+    /// Where a text-mode wetrun shows each phase as it starts (`crate::progress`): the
+    /// binary's standard error. `None` shows nothing live; `--json` streams events
+    /// instead.
+    pub progress: Option<Arc<dyn ProgressSink>>,
     /// Where a test collects the wetrun's events, in place of the stdout or null sink.
     #[cfg(test)]
     pub capture: Option<Arc<std::sync::Mutex<Vec<Event>>>>,
@@ -160,8 +171,8 @@ pub enum DeployOutcome {
     /// wetrun of it is refused ([`DIRTY_NEEDS_FORCE`]) — it would ship the tree under
     /// the commit's version.
     DryRunDirty,
-    /// The release was deployed.
-    Deployed,
+    /// The release was deployed: every step completed.
+    Deployed(DeployRun),
     /// The server already runs this version (skipped; use `--force` to redeploy).
     AlreadyDeployed,
     /// A wetrun refused to execute because its plan isn't the reviewed one — the hash
@@ -174,6 +185,121 @@ pub enum DeployOutcome {
     /// established; deploy bailed rather than shipping against an unread target.
     PreflightUndetermined,
     /// A step failed during a wetrun.
+    Failed {
+        /// What the run measured and learned up to its end.
+        run: DeployRun,
+        /// Where the failure left the target.
+        left: FailureState,
+    },
+}
+
+/// What a wetrun that reached its steps measured and learned as it ran.
+///
+/// Carried on the outcome rather than read from a clock at render time, so a render is
+/// a function of its report.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DeployRun {
+    /// How long the drift preflight's detection pass took, when the plan's preflight
+    /// checks.
+    pub preflight: Option<Duration>,
+    /// Each step that was attempted, in the order run.
+    pub steps: Vec<StepRecord>,
+    /// From the start of the drift preflight to the end of the run, a rollback
+    /// included: what the deploy took once it was bound to its review.
+    pub total: Duration,
+}
+
+impl DeployRun {
+    /// The record of the step whose outcome names `step`, if it was attempted.
+    #[must_use]
+    pub fn step(&self, step: &str) -> Option<&StepRecord> {
+        self.steps.iter().find(|record| record.id.as_str() == step)
+    }
+}
+
+/// One attempted step of a wetrun: how long it took, and what it says in the report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepRecord {
+    /// Which step.
+    pub id: DeployStepId,
+    /// How long it ran.
+    pub took: Duration,
+    /// Its one-line summary, for a step whose result the engine itself describes.
+    pub summary: Option<StepSummary>,
+}
+
+/// A step's summary on its outcome line: text the engine wrote, never a command's
+/// output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepSummary {
+    /// The upload sent the release archive, this many bytes.
+    Uploaded {
+        /// The archive's size.
+        bytes: u64,
+    },
+    /// What a poll found (the health check's attempts, the readiness gate's answer).
+    Said(String),
+}
+
+/// Where a failed wetrun left the target, by where its failure fell against the swap of
+/// `current`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FailureState {
+    /// A step before the extract-and-swap failed: nothing was released, and `current`
+    /// was not moved.
+    BeforeSwap,
+    /// The extract-and-swap step failed, and nothing was rolled back: what a read of
+    /// `current` established about the swap.
+    AtSwap(SwapFailure),
+    /// A step after the swap failed, and the auto-rollback ran: how it went.
+    AfterSwap(Rollback),
+}
+
+/// What a failed extract-and-swap step establishes about `current`, read back after the
+/// failure (`walk::swap_ran`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwapFailure {
+    /// `current` names another release, or none: this run's release is not live.
+    NotSwapped,
+    /// Not known: `current` names this version — this run's swap, or another deploy's
+    /// of the same version — or could not be read. A swap can come before such a failure
+    /// (the connection lost after it, or the swap line lost with a failed exit).
+    Unknown,
+}
+
+/// The auto-rollback of a failure after the swap (`rollback`'s module docs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rollback {
+    /// It never started: there was nothing to return to — no previous release is known,
+    /// or the previous release is this same version (a `--force` redeploy) — so
+    /// `current` is left at the failed release.
+    NotStarted,
+    /// It ran.
+    Ran {
+        /// How it left the target.
+        outcome: RollbackOutcome,
+        /// How long it ran.
+        took: Duration,
+    },
+}
+
+/// How the auto-rollback left the target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RollbackOutcome {
+    /// `current` names the previous release again, which was restarted.
+    RolledBack {
+        /// Whether the plan checks health, and so the restored release was found
+        /// healthy.
+        health_checked: bool,
+    },
+    /// `current` names the previous release again, but its restart or its health check
+    /// failed: it is not confirmed serving.
+    Unconfirmed,
+    /// Its compare-and-swap moved nothing, and `current` is as the warnings say: another
+    /// deploy holds the app's lock, `current` no longer names the failed release or
+    /// names nothing, or the previous release is gone from the host.
+    NotDone,
+    /// The re-point itself failed: what `current` names is not known.
     Failed,
 }
 
@@ -236,7 +362,7 @@ impl DeployOutcome {
     #[must_use]
     pub const fn shows_hash(&self) -> bool {
         match self {
-            Self::DryRun | Self::Refused(_) | Self::Deployed | Self::Failed => true,
+            Self::DryRun | Self::Refused(_) | Self::Deployed(_) | Self::Failed { .. } => true,
             Self::DryRunUnbindable(_)
             | Self::DryRunDirty
             | Self::AlreadyDeployed
@@ -256,12 +382,39 @@ impl DeployOutcome {
             Self::Refused(_) => Some(DeployPreviewPass::RefusedWetrun),
             Self::DryRunUnbindable(_)
             | Self::DryRunDirty
-            | Self::Deployed
-            | Self::Failed
+            | Self::Deployed(_)
+            | Self::Failed { .. }
             | Self::AlreadyDeployed
             | Self::PreflightDrift
             | Self::PreflightUndetermined => None,
         }
+    }
+
+    /// What the run measured, for an outcome that reached its steps.
+    #[must_use]
+    pub const fn run(&self) -> Option<&DeployRun> {
+        match self {
+            Self::Deployed(run) | Self::Failed { run, .. } => Some(run),
+            Self::DryRun
+            | Self::DryRunUnbindable(_)
+            | Self::DryRunDirty
+            | Self::AlreadyDeployed
+            | Self::Refused(_)
+            | Self::PreflightDrift
+            | Self::PreflightUndetermined => None,
+        }
+    }
+
+    /// Whether the release was deployed.
+    #[must_use]
+    pub const fn is_deployed(&self) -> bool {
+        matches!(self, Self::Deployed(_))
+    }
+
+    /// Whether a step failed.
+    #[must_use]
+    pub const fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed { .. })
     }
 }
 
@@ -270,11 +423,7 @@ impl DeployReport {
     /// didn't has streamed nothing, and its caller needs the text render to learn why.
     #[must_use]
     pub const fn streamed(&self) -> bool {
-        self.wetrun
-            && matches!(
-                self.outcome,
-                DeployOutcome::Deployed | DeployOutcome::Failed
-            )
+        self.wetrun && self.outcome.run().is_some()
     }
 
     /// Process exit code: `Failed` is `1`, a refusal and either preflight bail are `2`,
@@ -282,14 +431,14 @@ impl DeployReport {
     #[must_use]
     pub const fn exit_code(&self) -> u8 {
         match self.outcome {
-            DeployOutcome::Failed => 1,
+            DeployOutcome::Failed { .. } => 1,
             DeployOutcome::Refused(_)
             | DeployOutcome::PreflightDrift
             | DeployOutcome::PreflightUndetermined => 2,
             DeployOutcome::DryRun
             | DeployOutcome::DryRunUnbindable(_)
             | DeployOutcome::DryRunDirty
-            | DeployOutcome::Deployed
+            | DeployOutcome::Deployed(_)
             | DeployOutcome::AlreadyDeployed => 0,
         }
     }
@@ -534,6 +683,15 @@ async fn deploy_unmasked(
         report.previous_version = report
             .previous_version
             .map(|previous| masker.mask(&previous));
+        if let DeployOutcome::Deployed(run) | DeployOutcome::Failed { run, .. } =
+            &mut report.outcome
+        {
+            for record in &mut run.steps {
+                if let Some(StepSummary::Said(said)) = &mut record.summary {
+                    *said = masker.mask(said);
+                }
+            }
+        }
         report.plan = report.plan.map_text(|text| masker.mask(text));
         report
     };
@@ -664,6 +822,19 @@ async fn deploy_unmasked(
         None
     };
 
+    // The wetrun's sink (masked at the boundary), made before the preflight so that
+    // phase shows as it starts: the JSON-lines stream, or the operator's progress lines.
+    // The stream itself begins with the steps.
+    let inner = EventHandler::for_run(options.emit_json, options.progress.as_ref());
+    #[cfg(test)]
+    let inner = options
+        .capture
+        .as_ref()
+        .map_or(inner, |events| EventHandler::Capture(Arc::clone(events)));
+    let handler = mask_handler(masker.clone(), inner);
+    let started = Instant::now();
+    let mut preflight_took = None;
+
     // Drift preflight (wetrun only): don't ship an artifact against stale apply config.
     // `checked` is the lock read for a plan whose preflight checks, so the gate runs
     // exactly when the plan says it does. A bail leaves the recorded preview in place:
@@ -671,11 +842,15 @@ async fn deploy_unmasked(
     if options.wetrun
         && let Some((lock, _)) = checked
     {
+        if let DriftPreflight::Checks { resources, .. } = report.plan.preflight {
+            handler.notice(Notice::DriftPreflight { resources });
+        }
         let Diffed {
             result: drift,
             detected,
             ..
         } = drift_preflight(target_conn, config, ctx, lock.as_ref()).await?;
+        preflight_took = Some(started.elapsed());
         let drifted = preflight_drift_count(config, &drift, &detected);
         report.warnings.extend(drift.warnings);
         // A held resource is one the preflight *could not check*. It contributes no
@@ -685,11 +860,7 @@ async fn deploy_unmasked(
         // one it ran and didn't like.
         report.held = drift.held;
         if drifted > 0 {
-            report.warnings.push(format!(
-                "{drifted} apply-managed resource(s) have drifted — review the changes with \
-                 `zap apply`, converge with `zap apply --wetrun`, then re-run this deploy: \
-                 its review still binds unless `zap.lock` changed"
-            ));
+            report.warnings.push(drift_warning(drifted));
             report.outcome = DeployOutcome::PreflightDrift;
             return finish(report);
         }
@@ -724,25 +895,14 @@ async fn deploy_unmasked(
         binding,
     )?;
 
-    // Wetrun: stream events (masked at the boundary), walk the plan, stop on first fail.
-    let inner = if options.emit_json {
-        EventHandler::Stdout
-    } else {
-        EventHandler::Null
-    };
-    #[cfg(test)]
-    let inner = options
-        .capture
-        .as_ref()
-        .map_or(inner, |events| EventHandler::Capture(Arc::clone(events)));
-    let handler = mask_handler(masker.clone(), inner);
+    // Wetrun: stream events, walk the plan, stop on first fail.
     handler.emit(&Event::RunStarted {
         target: report.target.clone(),
         wetrun: true,
         plan_hash: report.plan_hash.clone(),
         total: u32::try_from(report.plan.steps.len()).unwrap_or(u32::MAX),
     });
-    let outcomes = execute_deploy_plan(
+    let walked = execute_deploy_plan(
         local,
         target_conn,
         AppLive {
@@ -755,36 +915,54 @@ async fn deploy_unmasked(
         &mut report.warnings,
     )
     .await;
-    let outcomes: Vec<StepOutcome> = outcomes
+    let outcomes: Vec<StepOutcome> = walked
+        .outcomes
         .into_iter()
         .map(|outcome| outcome.map_text(|text| masker.mask(text)))
         .collect();
-    report.outcome = if outcomes.iter().any(StepOutcome::is_failure) {
-        DeployOutcome::Failed
-    } else {
-        DeployOutcome::Deployed
+    let mut run = DeployRun {
+        preflight: preflight_took,
+        steps: walked.records,
+        total: Duration::ZERO,
+    };
+
+    // Where a failure left the target. One before the extract-and-swap never moved
+    // `current`; one at it may follow a swap (`walk::swap_ran`), so nothing is undone and
+    // the report says the swap is not known not to have happened. One after it leaves
+    // `current` at the just-shipped, broken release: the auto-rollback re-points it at
+    // the previous release and restarts, so the host returns to known-good rather than
+    // sitting broken until a manual rollback.
+    let left = match walked.failed {
+        None => None,
+        Some(Stopped::AtSwap(swap)) => Some(FailureState::AtSwap(swap)),
+        Some(Stopped::At(_)) if rollback::extract_swap_succeeded(&outcomes) => {
+            let rolling = Instant::now();
+            let ran = rollback::attempt_rollback(
+                target_conn,
+                &deploy.path,
+                &report.plan,
+                report.previous_version.as_deref(),
+                &report.version,
+                &handler,
+                &mut report.warnings,
+            )
+            .await;
+            Some(FailureState::AfterSwap(ran.map_or(
+                Rollback::NotStarted,
+                |outcome| Rollback::Ran {
+                    outcome,
+                    took: rolling.elapsed(),
+                },
+            )))
+        }
+        Some(Stopped::At(_)) => Some(FailureState::BeforeSwap),
+    };
+    run.total = started.elapsed();
+    report.outcome = match left {
+        None => DeployOutcome::Deployed(run),
+        Some(left) => DeployOutcome::Failed { run, left },
     };
     report.step_outcomes = outcomes;
-
-    // Auto-rollback: a failure *after* the atomic swap (restart / health) leaves
-    // `current` pointing at the just-shipped, broken release. Re-point it at the
-    // previous release and restart so the host returns to known-good rather than
-    // sitting broken until a manual rollback. A pre-swap failure (build / tarball /
-    // upload / extract_swap) never moved `current`, so there's nothing to undo.
-    if report.outcome == DeployOutcome::Failed
-        && rollback::extract_swap_succeeded(&report.step_outcomes)
-    {
-        rollback::attempt_rollback(
-            target_conn,
-            &deploy.path,
-            &report.plan,
-            report.previous_version.as_deref(),
-            &report.version,
-            &handler,
-            &mut report.warnings,
-        )
-        .await;
-    }
 
     handler.emit(&Event::RunFinished {
         summary: RunSummary::from_step_outcomes(&report.step_outcomes),
@@ -964,6 +1142,20 @@ async fn drift_preflight(
         RunCommand::DeployPreflight,
     )
     .await
+}
+
+/// The warning of a drift preflight that counted `drifted` resources as drifted: how
+/// many, and the flow that clears them.
+fn drift_warning(drifted: usize) -> String {
+    format!(
+        "{} — review the changes with `zap apply`, converge with `zap apply --wetrun`, then \
+         re-run this deploy: its review still binds unless `zap.lock` changed",
+        count(
+            drifted,
+            "apply-managed resource has drifted",
+            "apply-managed resources have drifted"
+        )
+    )
 }
 
 /// How many apply-managed resources the drift preflight counts as drifted in `result`:
