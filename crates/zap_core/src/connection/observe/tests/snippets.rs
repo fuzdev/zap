@@ -599,6 +599,94 @@ fn the_raw_read_script_reads_only_a_regular_file_under_both_shells() {
     eprintln!("raw read script checked under: {checked:?}");
 }
 
+/// The deploy's read of the live release (`server_version_command`) under both shells:
+/// a link names its release; nothing at `current` in an app path that can be entered,
+/// or no app path at all, is never deployed; something else at `current` is no link;
+/// and something at the app path that can't be entered — a file, a dangling link, and
+/// as anyone but root a directory it can't search — is an exit of its own, never
+/// "never deployed". An app path below a directory that can't be searched still reads
+/// as never deployed, the residual the command documents. A directory it may search but
+/// not list is entered.
+#[test]
+fn the_live_release_read_tells_an_app_it_cant_enter_under_both_shells() {
+    use crate::commands::deploy::live::{
+        NOT_A_LINK_EXIT, NOT_DEPLOYED_EXIT, UNENTERABLE_EXIT, server_version_command,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let at = |name: &str| dir.path().join(name);
+    let release = |app: &str| at(app).join("releases/abc1234");
+    for app in [
+        "live", "fresh", "notalink", "locked", "listless", "ancestor",
+    ] {
+        std::fs::create_dir(at(app)).unwrap();
+    }
+    for app in ["live", "locked", "listless"] {
+        symlink(release(app), at(app).join("current")).unwrap();
+    }
+    std::fs::create_dir(at("notalink").join("current")).unwrap();
+    std::fs::create_dir(at("ancestor").join("app")).unwrap();
+    std::fs::write(at("afile"), "").unwrap();
+    symlink(at("nowhere"), at("dangling")).unwrap();
+    symlink(at("fresh"), at("linked")).unwrap();
+    let mut cases = vec![
+        ("live", 0, format!("{}\n", release("live").display())),
+        ("fresh", NOT_DEPLOYED_EXIT, String::new()),
+        ("missing", NOT_DEPLOYED_EXIT, String::new()),
+        ("linked", NOT_DEPLOYED_EXIT, String::new()),
+        ("notalink", NOT_A_LINK_EXIT, String::new()),
+        ("afile", UNENTERABLE_EXIT, String::new()),
+        ("dangling", UNENTERABLE_EXIT, String::new()),
+    ];
+    let mode = |name: &str, mode: u32| {
+        std::fs::set_permissions(at(name), std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    let confined = !nix::unistd::geteuid().is_root();
+    if confined {
+        mode("locked", 0o600);
+        mode("listless", 0o100);
+        mode("ancestor", 0o000);
+        cases.extend([
+            ("locked", UNENTERABLE_EXIT, String::new()),
+            (
+                "listless",
+                0,
+                format!("{}\n", release("listless").display()),
+            ),
+            ("ancestor/app", NOT_DEPLOYED_EXIT, String::new()),
+        ]);
+    }
+    let mut checked = Vec::new();
+    for (shell_name, shell, path) in test_shells(dir.path(), &[], None) {
+        for (app, code, stdout) in &cases {
+            let mut command = std::process::Command::new(&shell);
+            if let Some(path) = &path {
+                command.env("PATH", path);
+            }
+            let read = server_version_command(&at(app).to_string_lossy());
+            let output = command.args(["-c", &read]).output().unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(*code),
+                "{shell_name} {app}: {output:?}"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                *stdout,
+                "{shell_name} {app}"
+            );
+            assert!(output.stderr.is_empty(), "{shell_name} {app}: {output:?}");
+        }
+        checked.push(shell_name);
+    }
+    if confined {
+        for name in ["locked", "listless", "ancestor"] {
+            mode(name, 0o755);
+        }
+    }
+    eprintln!("live release read checked under: {checked:?}");
+}
+
 /// The raw read script and a batch's content reads check what they opened: when the
 /// name no longer names the file held open — here a `stat` stand-in that answers
 /// another inode for the name, as a name swapped for a link between the tests and the

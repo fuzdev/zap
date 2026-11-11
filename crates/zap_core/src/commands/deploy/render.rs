@@ -469,9 +469,12 @@ fn poll_budget(poll: &Poll<'_>) -> String {
 /// seconds with as many decimals as the value needs (`2s`, `1.5s`, `0.25s`, `1m 43s`,
 /// `1m 32.5s`, `1h 5s`), so the value is stated exactly.
 ///
-/// The wetrun's own durations ([`format_elapsed`]) are measured, so they round to a
-/// tenth and pad their minutes; a plan's are declared, and a rounded one would misstate
-/// what the poll does.
+/// The wetrun's own durations ([`format_elapsed`]) are measured, so they are cut to a
+/// tenth of a second, a second, or a minute (truncated, never rounded up) and take a
+/// fixed shape, two parts with the second one padded (`1m 07s`, `1m 00s`), so they read
+/// alike down the result table's time column. A plan's are declared: cut, one would
+/// misstate what the poll does, so they are exact, and a part that is zero is left out
+/// (`1m`, `1h 5s`) rather than padded.
 pub(super) fn format_millis(ms: u64) -> String {
     let (hours, rest) = (ms / 3_600_000, ms % 3_600_000);
     let (minutes, rest) = (rest / 60_000, rest % 60_000);
@@ -777,9 +780,9 @@ pub(super) fn format_size(bytes: u64) -> String {
     format!("{}.{} {unit}", tenths / 10, tenths % 10)
 }
 
-/// A duration as an outcome line shows it: tenths of a second under ten seconds
-/// (`0.4s`, `9.9s`), whole seconds under a minute (`42s`), then minutes and seconds
-/// (`3m 07s`) and hours and minutes (`1h 02m`).
+/// A duration as an outcome line shows it, truncated: tenths of a second under ten
+/// seconds (`0.4s`, and `9.9s` for 9999 ms), whole seconds under a minute (`42s`), then
+/// minutes and seconds (`3m 07s`) and hours and minutes (`1h 02m`).
 pub(super) fn format_elapsed(took: Duration) -> String {
     let tenths = took.as_millis() / 100;
     if tenths < 100 {

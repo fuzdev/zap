@@ -115,7 +115,6 @@ fn report(outcome: DeployOutcome, step_outcomes: Vec<StepOutcome>) -> DeployRepo
         ),
         recorded: outcome.preview_pass(),
         outcome,
-        version: "abc1234".to_owned(),
         plan: plan(),
         plan_hash: "deadbeef".to_owned(),
         step_outcomes,
@@ -684,7 +683,6 @@ fn preview_plan() -> DeployPlan {
 fn a_dry_run_render_shows_everything_the_hash_covers() {
     let report = DeployReport {
         target: marker("DEPLOY_HOST"),
-        version: "abc1234-dirty-0123abcd".to_owned(),
         plan: preview_plan(),
         ..report(DeployOutcome::DryRun, vec![])
     };
@@ -1383,9 +1381,9 @@ async fn the_swap_is_read_by_its_line_not_the_scripts_exit() {
 
 /// A `prepare` command can reach the script's stdout and print the swap line, then
 /// fail the script before its swap. A failed script's line is believed only once
-/// `current` names the plan's release: still naming the old one, naming nothing, or
-/// being no symbolic link at all, the run swapped nothing, and nothing is restarted
-/// against the old release.
+/// `current` names the plan's release: still naming the old one, or being no symbolic
+/// link at all, the run swapped nothing; reading as missing where the old one was live,
+/// whether it swapped is unknown. Either way nothing is restarted.
 #[tokio::test]
 async fn a_failed_scripts_swap_line_is_checked_against_current() {
     let spoofed = format!("echo '{SWAPPED_LINE}'; echo 'ERROR: deno: cache failed' >&2; exit 1");
@@ -1393,7 +1391,10 @@ async fn a_failed_scripts_swap_line_is_checked_against_current() {
     // all, or a directory.
     for (current, says) in [
         ("old", "`current` names releases/def5678"),
-        ("none", "`current` names nothing"),
+        (
+            "none",
+            "then failed, and `current` read back as missing where releases/def5678 was live",
+        ),
         ("dir", "`current` is not a symlink"),
     ] {
         let dir = tempfile::tempdir().unwrap();
@@ -1872,7 +1873,7 @@ async fn a_failed_archive_step_leaves_no_archive_behind() {
 #[tokio::test]
 async fn server_version_reads_current_symlink() {
     let mock = MockConnection::new("host").with(
-        "if [ -L '/root/app/current' ]; then readlink -- '/root/app/current'; elif [ -e '/root/app/current' ]; then exit 4; else exit 3; fi",
+        "if [ -L '/root/app/current' ]; then readlink -- '/root/app/current'; elif [ -e '/root/app/current' ]; then exit 4; elif ( cd -- '/root/app' ) 2>/dev/null; then exit 3; elif [ -e '/root/app' ] || [ -L '/root/app' ]; then exit 5; else exit 3; fi",
         CommandOutput {
             success: true,
             code: 0,
@@ -1898,7 +1899,7 @@ async fn server_version_reads_only_a_release_name() {
         ("/root/app/releases/v1\n", None),
     ] {
         let mock = MockConnection::new("host").with(
-            "if [ -L '/root/app/current' ]; then readlink -- '/root/app/current'; elif [ -e '/root/app/current' ]; then exit 4; else exit 3; fi",
+            "if [ -L '/root/app/current' ]; then readlink -- '/root/app/current'; elif [ -e '/root/app/current' ]; then exit 4; elif ( cd -- '/root/app' ) 2>/dev/null; then exit 3; elif [ -e '/root/app' ] || [ -L '/root/app' ]; then exit 5; else exit 3; fi",
             ok(link),
         );
         let version = server_version(&Connection::Mock(mock), "/root/app").await;
@@ -1921,7 +1922,7 @@ async fn server_version_reads_only_a_release_name() {
 #[tokio::test]
 async fn server_version_is_none_when_not_deployed() {
     let mock = MockConnection::new("host").with(
-        "if [ -L '/root/app/current' ]; then readlink -- '/root/app/current'; elif [ -e '/root/app/current' ]; then exit 4; else exit 3; fi",
+        "if [ -L '/root/app/current' ]; then readlink -- '/root/app/current'; elif [ -e '/root/app/current' ]; then exit 4; elif ( cd -- '/root/app' ) 2>/dev/null; then exit 3; elif [ -e '/root/app' ] || [ -L '/root/app' ]; then exit 5; else exit 3; fi",
         CommandOutput {
             success: false,
             code: 3,
@@ -1933,6 +1934,31 @@ async fn server_version_is_none_when_not_deployed() {
     // failure.
     let version = server_version(&Connection::Mock(mock), "/root/app").await;
     assert_eq!(version, Ok(None));
+}
+
+/// An app path the connecting user can't enter is a failed read with a reason of its
+/// own, never a host that was never deployed to: the command discards the failed
+/// `cd`'s own words, so this message is all that says what is wrong.
+#[tokio::test]
+async fn server_version_reads_an_app_it_cant_enter_as_a_failed_read() {
+    let mock = MockConnection::new("host").with(
+        super::live::server_version_command("/root/app"),
+        CommandOutput {
+            success: false,
+            code: super::live::UNENTERABLE_EXIT,
+            stdout: String::new(),
+            stderr: String::new(),
+        },
+    );
+    let read = server_version(&Connection::Mock(mock), "/root/app").await;
+    assert_eq!(
+        read,
+        Err(super::LiveReadError::Unreadable(
+            "couldn't read /root/app/current: /root/app is there, but the connecting user \
+             can't enter it"
+                .to_owned()
+        ))
+    );
 }
 
 /// A read that *fails* is distinct from a host with no symlink. Folding the two
@@ -2091,7 +2117,7 @@ impl Rig {
         let target = MockConnection::new(HOST)
             .with_user("deploy")
             .with(
-                "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; else exit 3; fi",
+                "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; elif ( cd -- '/srv/app' ) 2>/dev/null; then exit 3; elif [ -e '/srv/app' ] || [ -L '/srv/app' ]; then exit 5; else exit 3; fi",
                 ok(&format!("/srv/app/releases/{live}\n")),
             )
             .with("test -d '/srv/app/current'", ok(""))
@@ -2257,7 +2283,7 @@ impl Rig {
             SUBJECT_READ,
             "whoami",
             "hostname",
-            "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; else exit 3; fi",
+            "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; elif ( cd -- '/srv/app' ) 2>/dev/null; then exit 3; elif [ -e '/srv/app' ] || [ -L '/srv/app' ]; then exit 5; else exit 3; fi",
             "test -d '/srv/app/current'",
         ];
         self.local
@@ -2855,7 +2881,7 @@ async fn a_preflight_bail_records_nothing_and_leaves_the_preview() {
     };
     let unread = || {
         MockConnection::new(HOST).with_user("deploy").with(
-            "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; else exit 3; fi",
+            "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; elif ( cd -- '/srv/app' ) 2>/dev/null; then exit 3; elif [ -e '/srv/app' ] || [ -L '/srv/app' ]; then exit 5; else exit 3; fi",
             ok("/srv/app/releases/def5678\n"),
         )
     };
@@ -2928,7 +2954,7 @@ async fn a_drifted_resource_held_behind_an_unread_one_is_drift() {
     rig.target = MockConnection::new(HOST)
         .with_user("deploy")
         .with(
-            "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; else exit 3; fi",
+            "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; elif ( cd -- '/srv/app' ) 2>/dev/null; then exit 3; elif [ -e '/srv/app' ] || [ -L '/srv/app' ]; then exit 5; else exit 3; fi",
             ok("/srv/app/releases/def5678\n"),
         )
         .with_observation(
@@ -4572,7 +4598,7 @@ async fn a_wetrun_stopped_at_the_preflight_reads_as_a_wetrun() {
     let mut rig = Rig::new("def5678");
     // No recorded answer for the directory: the preflight can't read it.
     rig.target = MockConnection::new(HOST).with_user("deploy").with(
-        "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; else exit 3; fi",
+        "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; elif ( cd -- '/srv/app' ) 2>/dev/null; then exit 3; elif [ -e '/srv/app' ] || [ -L '/srv/app' ]; then exit 5; else exit 3; fi",
         ok("/srv/app/releases/def5678\n"),
     );
     rig.deploy(&DeployOptions::default()).await.unwrap();
@@ -5000,7 +5026,7 @@ async fn skipping_the_preflight_is_a_different_plan() {
 async fn forced_dirty_version(diff: &str, untracked: &str, blobs: &str) -> String {
     let report = forced_dirty(diff, untracked, blobs).await.unwrap();
     assert!(report.plan.dirty);
-    report.version
+    report.plan.version
 }
 
 /// A forced deploy of a dirty tree over the git reads [`forced_dirty_version`] names.
@@ -5616,9 +5642,9 @@ async fn a_tree_dirtied_after_the_review_is_a_different_plan() {
     let dirty = rig.deploy(&forced).await.unwrap();
     assert!(dirty.plan.dirty);
     assert!(
-        dirty.version.starts_with("abc1234-dirty-"),
+        dirty.plan.version.starts_with("abc1234-dirty-"),
         "{}",
-        dirty.version
+        dirty.plan.version
     );
     assert!(
         render_deploy(&dirty).contains("  tree: uncommitted changes or untracked files — "),
@@ -6458,7 +6484,7 @@ async fn a_confirmed_deploy_still_stops_at_the_drift_preflight() {
 
     let mut rig = Rig::new("def5678");
     rig.target = MockConnection::new(HOST).with_user("deploy").with(
-        "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; else exit 3; fi",
+        "if [ -L '/srv/app/current' ]; then readlink -- '/srv/app/current'; elif [ -e '/srv/app/current' ]; then exit 4; elif ( cd -- '/srv/app' ) 2>/dev/null; then exit 3; elif [ -e '/srv/app' ] || [ -L '/srv/app' ]; then exit 5; else exit 3; fi",
         ok("/srv/app/releases/def5678\n"),
     );
     let prompt = ScriptedPrompt::confirming();
@@ -6538,7 +6564,8 @@ async fn a_failed_health_check_after_the_swap_rolls_back_restarts_and_rechecks()
         .await
         .unwrap();
     let mut rig = unhealthy_rig(port, "def5678").recording(&dry.plan);
-    let swap_back = zap_types::deploy::rollback_swap_command("/srv/app", &dry.version, "def5678");
+    let swap_back =
+        zap_types::deploy::rollback_swap_command("/srv/app", &dry.plan.version, "def5678");
     let restart = restart_of(&dry.plan);
     rig.target = rig.target.with(swap_back.clone(), ok("rolled_back\n"));
     let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -6605,6 +6632,7 @@ async fn a_rollback_that_cannot_start_is_skipped_between_the_failed_health_check
         .deploy(&DeployOptions::default())
         .await
         .unwrap()
+        .plan
         .version;
     let dry = unhealthy_rig(port, &version)
         .deploy(&forced(DeployOptions::default()))
@@ -6674,7 +6702,8 @@ async fn a_failed_restart_after_the_swap_rolls_back() {
         .unwrap();
     let restart = restart_of(&dry.plan);
     let mut rig = unhealthy_rig(port, "def5678").recording(&dry.plan);
-    let swap_back = zap_types::deploy::rollback_swap_command("/srv/app", &dry.version, "def5678");
+    let swap_back =
+        zap_types::deploy::rollback_swap_command("/srv/app", &dry.plan.version, "def5678");
     rig.target = rig
         .target
         .with(swap_back.clone(), ok("rolled_back\n"))
@@ -6763,7 +6792,8 @@ async fn a_rollback_whose_swap_back_finds_nothing_to_do_starts_then_is_skipped()
         .await
         .unwrap();
     let restart = restart_of(&dry.plan);
-    let swap_back = zap_types::deploy::rollback_swap_command("/srv/app", &dry.version, "def5678");
+    let swap_back =
+        zap_types::deploy::rollback_swap_command("/srv/app", &dry.plan.version, "def5678");
     for (said, warned) in [
         ("busy\n", "another deploy is running for this app"),
         ("replaced\n", "a newer deploy replaced it"),
@@ -7043,7 +7073,8 @@ async fn a_rollback_shows_live_and_the_verdict_says_what_it_left() {
         .await
         .unwrap();
     let mut rig = unhealthy_rig(port, "def5678").recording(&dry.plan);
-    let swap_back = zap_types::deploy::rollback_swap_command("/srv/app", &dry.version, "def5678");
+    let swap_back =
+        zap_types::deploy::rollback_swap_command("/srv/app", &dry.plan.version, "def5678");
     rig.target = rig.target.with(swap_back, ok("rolled_back\n"));
     let sink = RecordedProgress::new();
     let progress: std::sync::Arc<dyn ProgressSink> =
@@ -7708,14 +7739,23 @@ fn the_drift_warning_agrees_with_its_count() {
 }
 
 /// What a failed swap establishes is what `current`, read back, says: naming another
-/// release, or none, this run's is not live; naming this version, or unreadable, the
-/// swap is not known either way — whatever the script's exit said.
+/// release, or none on a first release, this run's is not live; naming this version,
+/// unreadable, or naming nothing where a release was live before the run (zap never
+/// removes `current`, and an app path that can't be searched reads so), the swap is not
+/// known either way — whatever the script's exit said, and never taken as swapped.
 #[tokio::test]
 async fn a_failed_swap_is_classified_by_reading_current_back() {
     use super::SwapFailure;
 
     let failed = || Ok(script_output("", "tar: short read\n", false));
     let ended = || Ok(script_output("Deployed version abc1234\n", "", true));
+    let swapped = || {
+        Ok(script_output(
+            &format!("{SWAPPED_LINE}\n"),
+            "prune: busy\n",
+            false,
+        ))
+    };
     let lost = || {
         Err(crate::error::Error::Config(
             "the connection closed".to_owned(),
@@ -7734,12 +7774,15 @@ async fn a_failed_swap_is_classified_by_reading_current_back() {
     let old = app_on(Some("def5678"));
     let new = app_on(Some("abc1234"));
     let none = app_on(None);
+    let known = Some("def5678");
+    let vanished = "read back as missing where releases/def5678 was live before the run";
     // No recording for the read: it fails as a transport would.
     let unreachable = Connection::Mock(MockConnection::new("host"));
-    for (conn, app, ran, swap, said) in [
+    for (conn, app, previous, ran, swap, said) in [
         (
             &Connection::Local,
             &old,
+            known,
             failed(),
             SwapFailure::NotSwapped,
             "tar: short read",
@@ -7747,13 +7790,23 @@ async fn a_failed_swap_is_classified_by_reading_current_back() {
         (
             &Connection::Local,
             &none,
+            None,
             failed(),
             SwapFailure::NotSwapped,
+            "tar: short read",
+        ),
+        (
+            &Connection::Local,
+            &none,
+            known,
+            failed(),
+            SwapFailure::Unknown,
             "tar: short read",
         ),
         (
             &Connection::Local,
             &new,
+            known,
             failed(),
             SwapFailure::Unknown,
             "tar: short read",
@@ -7761,6 +7814,7 @@ async fn a_failed_swap_is_classified_by_reading_current_back() {
         (
             &unreachable,
             &old,
+            known,
             failed(),
             SwapFailure::Unknown,
             "tar: short read",
@@ -7768,13 +7822,23 @@ async fn a_failed_swap_is_classified_by_reading_current_back() {
         (
             &Connection::Local,
             &old,
+            known,
             lost(),
             SwapFailure::NotSwapped,
             "the connection closed",
         ),
         (
+            &Connection::Local,
+            &none,
+            known,
+            lost(),
+            SwapFailure::Unknown,
+            "the connection closed",
+        ),
+        (
             &unreachable,
             &old,
+            known,
             lost(),
             SwapFailure::Unknown,
             "the connection closed",
@@ -7782,26 +7846,68 @@ async fn a_failed_swap_is_classified_by_reading_current_back() {
         (
             &Connection::Local,
             &old,
+            known,
             ended(),
             SwapFailure::NotSwapped,
             "ended without swapping `current`, so nothing was released",
         ),
         (
+            &Connection::Local,
+            &none,
+            None,
+            ended(),
+            SwapFailure::NotSwapped,
+            "ended without swapping `current`, so nothing was released",
+        ),
+        (
+            &Connection::Local,
+            &none,
+            known,
+            ended(),
+            SwapFailure::Unknown,
+            vanished,
+        ),
+        (
             &unreachable,
             &old,
+            known,
             ended(),
             SwapFailure::Unknown,
             "ended without its swap line, and `current` could not be read back",
+        ),
+        (
+            &Connection::Local,
+            &old,
+            known,
+            swapped(),
+            SwapFailure::NotSwapped,
+            "but `current` names releases/def5678",
+        ),
+        (
+            &Connection::Local,
+            &none,
+            None,
+            swapped(),
+            SwapFailure::NotSwapped,
+            "but `current` names nothing",
+        ),
+        (
+            &Connection::Local,
+            &none,
+            known,
+            swapped(),
+            SwapFailure::Unknown,
+            vanished,
         ),
     ] {
         let release = super::walk::Release {
             app,
             version: "abc1234",
-            previous: Some("def5678"),
+            previous,
         };
         let (got, error) = super::walk::swap_ran(conn, release, ran).await.unwrap_err();
-        assert_eq!(got, swap, "{app}: {error}");
-        assert!(error.contains(said), "{app}: {error}");
+        assert_eq!(got, swap, "{app} {previous:?}: {error}");
+        assert!(error.contains(said), "{app} {previous:?}: {error}");
     }
 }
 
@@ -7818,6 +7924,7 @@ async fn a_failed_swap_over_the_same_version_is_not_known_to_have_swapped() {
         .deploy(&DeployOptions::default())
         .await
         .unwrap()
+        .plan
         .version;
     let dry = Rig::new(&version)
         .deploy(&forced(DeployOptions::default()))
@@ -7916,4 +8023,60 @@ fn only_a_deploy_that_reached_its_steps_changed_the_target() {
         assert_eq!(Delivered::changed(&report), changed, "{outcome:?}");
         assert_eq!(Delivered::exit_code(&report), report.exit_code());
     }
+}
+
+/// Who deploys is `whoami`'s and `hostname`'s answers, each taken only from a run that
+/// succeeded and printed something, and neither side is ever empty: a user `whoami`
+/// didn't name is this process's own, a host `hostname` didn't name is `uname -n`'s, or
+/// `unknown`.
+#[tokio::test]
+async fn who_deploys_never_has_an_empty_side() {
+    let by =
+        |local: MockConnection| async move { super::deployed_by(&Connection::Mock(local)).await };
+    let refused = |stdout: &str| CommandOutput {
+        success: false,
+        code: 1,
+        stdout: stdout.to_owned(),
+        stderr: "cannot find name for user ID".to_owned(),
+    };
+    let uid = nix::unistd::geteuid();
+    let user = nix::unistd::User::from_uid(uid)
+        .ok()
+        .flatten()
+        .map_or_else(|| format!("uid {uid}"), |user| user.name);
+    assert!(!user.is_empty());
+    let both = MockConnection::new("local")
+        .with("whoami", ok("op\n"))
+        .with("hostname", ok("box\n"));
+    assert_eq!(by(both.clone()).await, "op@box");
+    for whoami in [refused("op\n"), refused(""), ok("\n")] {
+        assert_eq!(
+            by(both.clone().with("whoami", whoami.clone())).await,
+            format!("{user}@box"),
+            "{whoami:?}"
+        );
+    }
+    // No recording for `whoami`: it fails as a missing program would.
+    assert_eq!(
+        by(MockConnection::new("local").with("hostname", ok("box\n"))).await,
+        format!("{user}@box")
+    );
+    let no_hostname = MockConnection::new("local").with("whoami", ok("op\n"));
+    assert_eq!(
+        by(no_hostname.clone().with("uname -n", ok("node\n"))).await,
+        "op@node"
+    );
+    assert_eq!(
+        by(both
+            .clone()
+            .with("hostname", refused("box\n"))
+            .with("uname -n", ok("node\n")))
+        .await,
+        "op@node"
+    );
+    assert_eq!(by(no_hostname.clone()).await, "op@unknown");
+    assert_eq!(
+        by(no_hostname.with("uname -n", refused("node\n"))).await,
+        "op@unknown"
+    );
 }

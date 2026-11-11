@@ -1006,7 +1006,6 @@ fn deploy_report(outcome: DeployOutcome) -> DeployReport {
             _ => None,
         },
         outcome,
-        version: h("report.version"),
         plan: deploy_plan(),
         plan_hash: "deadbeef".to_owned(),
         step_outcomes: if stepped {
@@ -1055,10 +1054,6 @@ fn failed_after_swap() -> DeployOutcome {
         }),
     }
 }
-
-/// What no deploy render prints: the report's own copy of the version (the render reads
-/// the plan's).
-const DEPLOY_NEVER_PRINTS: &[&str] = &["report.version"];
 
 /// The plan's body — the host, the declared target, the preflight digest, and the steps
 /// — which a deploy preview prints and a render without one leaves out.
@@ -1413,7 +1408,7 @@ const CASES: &[Case] = &[
         render: "commands::deploy::render::render_deploy",
         name: "a dry run",
         run: || render_deploy(&deploy_report(DeployOutcome::DryRun)),
-        unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
+        unprinted: &[ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
@@ -1423,13 +1418,13 @@ const CASES: &[Case] = &[
                 "unbindable",
             ))))
         },
-        unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
+        unprinted: &[ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
         name: "a dry run of a dirty tree without --force",
         run: || render_deploy(&deploy_report(DeployOutcome::DryRunDirty)),
-        unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
+        unprinted: &[ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
@@ -1441,7 +1436,7 @@ const CASES: &[Case] = &[
                 },
             )))
         },
-        unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
+        unprinted: &[ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
@@ -1455,7 +1450,7 @@ const CASES: &[Case] = &[
                 },
             )))
         },
-        unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
+        unprinted: &[ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
@@ -1469,7 +1464,7 @@ const CASES: &[Case] = &[
             report.confirmation = Some(Confirmation::Asking);
             render_deploy(&report)
         },
-        unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
+        unprinted: &[ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
@@ -1483,19 +1478,19 @@ const CASES: &[Case] = &[
             report.confirmation = Some(Confirmation::Declined);
             render_deploy(&report)
         },
-        unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
+        unprinted: &[ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
         name: "a wetrun that failed a step",
         run: || render_deploy(&deploy_report(failed_after_swap())),
-        unprinted: &[DEPLOY_NEVER_PRINTS, DEPLOY_PLAN_BODY, STEP_OUTPUT, ORPHANS],
+        unprinted: &[DEPLOY_PLAN_BODY, STEP_OUTPUT, ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
         name: "a wetrun that stopped at its preflight",
         run: || render_deploy(&deploy_report(DeployOutcome::PreflightUndetermined)),
-        unprinted: &[DEPLOY_NEVER_PRINTS, DEPLOY_PLAN_BODY, DEPLOY_HOST, ORPHANS],
+        unprinted: &[DEPLOY_PLAN_BODY, DEPLOY_HOST, ORPHANS],
     },
     Case {
         render: "commands::deploy::render::render_deploy",
@@ -1515,7 +1510,6 @@ const CASES: &[Case] = &[
             render_deploy(&report)
         },
         unprinted: &[
-            DEPLOY_NEVER_PRINTS,
             DEPLOY_PLAN_BODY,
             ORPHANS,
             // a step's output, and the outcomes this report's replaced

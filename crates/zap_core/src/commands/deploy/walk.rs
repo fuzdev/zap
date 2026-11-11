@@ -461,6 +461,13 @@ pub(super) async fn swap_ran(
                      restarted and checked as usual"
                 )),
             )),
+            Ok(None) if let Some(previous) = release.previous => Err((
+                SwapFailure::Unknown,
+                vanished_message(
+                    "the extract-and-swap script ended without its swap line",
+                    previous,
+                ),
+            )),
             Ok(_) | Err(LiveReadError::NotALink(_) | LiveReadError::NoRelease(_)) => Err((
                 SwapFailure::NotSwapped,
                 "the extract-and-swap script ended without swapping `current`, so nothing \
@@ -483,6 +490,15 @@ pub(super) async fn swap_ran(
     let unconfirmed = match server_version(target, release.app).await {
         Ok(Some(live)) if live == release.version => {
             (!fresh).then(|| format!("`current` already named releases/{live} before the run"))
+        }
+        Ok(None) if let Some(previous) = release.previous => {
+            return Err((
+                SwapFailure::Unknown,
+                format!(
+                    "{}: {why}",
+                    vanished_message("the script printed the swap line but then failed", previous)
+                ),
+            ));
         }
         Ok(live) => {
             return Err((
@@ -533,17 +549,34 @@ pub(super) async fn swap_ran(
 }
 
 /// What `current`, read back after a swap that failed, establishes: that it names some
-/// other release, or none, so this run's release is not live
+/// other release, or none on a first release, so this run's release is not live
 /// ([`NotSwapped`](SwapFailure::NotSwapped)) — or nothing, when it names this version
 /// (this run's swap, or another deploy's of the same version) or can't be read.
+///
+/// Nothing at `current` where a release was live before the run is a read that can't
+/// be believed, so it establishes nothing either: zap never removes `current` (the swap
+/// and the rollback replace it with `mv -Tf`, the prune reads it), and an app path the
+/// connecting user can no longer search reads as nothing there (`server_version`).
 async fn read_back(target: &Connection, release: Release<'_>) -> SwapFailure {
     match server_version(target, release.app).await {
         Ok(Some(live)) if live == release.version => SwapFailure::Unknown,
+        Ok(None) if release.previous.is_some() => SwapFailure::Unknown,
         Ok(_) | Err(LiveReadError::NotALink(_) | LiveReadError::NoRelease(_)) => {
             SwapFailure::NotSwapped
         }
         Err(LiveReadError::Unreadable(_)) => SwapFailure::Unknown,
     }
+}
+
+/// Why a swap that went wrong (`what`) can't be read back: nothing is at `current`, where
+/// `previous` was live when the plan was made ([`read_back`]).
+fn vanished_message(what: &str, previous: &str) -> String {
+    format!(
+        "{what}, and `current` read back as missing where releases/{previous} was live \
+         before the run — zap never removes it, so the read can't be believed (an app path \
+         the connecting user can no longer search reads so), and whether this release is \
+         live is unknown"
+    )
 }
 
 /// Whether `line` of the extract-and-swap script's stdout is one of its marks: the

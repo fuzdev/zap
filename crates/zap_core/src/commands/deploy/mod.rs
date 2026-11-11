@@ -71,7 +71,7 @@
 
 mod checkout;
 mod health;
-mod live;
+pub(crate) mod live;
 mod render;
 mod rollback;
 mod walk;
@@ -319,9 +319,6 @@ pub struct DeployReport {
     pub wetrun: bool,
     /// How it ended.
     pub outcome: DeployOutcome,
-    /// The release version (short git hash, possibly `-dirty-<id>`), as computed. The render
-    /// reads the plan's.
-    pub version: String,
     /// The deploy plan (previewed on a dry-run, executed on a wetrun), as rendered: any
     /// registered secret value in its text is masked ([`DeployPlan::map_text`]). Every
     /// plan-derived line of the render is read from here.
@@ -750,7 +747,6 @@ async fn deploy_unmasked(
         target: target_location(&config.target),
         wetrun: options.wetrun,
         outcome: DeployOutcome::DryRun,
-        version,
         plan,
         plan_hash,
         step_outcomes: Vec::new(),
@@ -767,7 +763,7 @@ async fn deploy_unmasked(
     // a redeploy, whose script recovers what was moved aside.
     // A dirty tree's dry run is not short-circuited: the tree is not what the live
     // release holds, and the preview says what a wetrun needs.
-    if report.plan.previous.as_deref() == Some(report.version.as_str())
+    if report.plan.previous.as_deref() == Some(report.plan.version.as_str())
         && !options.force
         && !dirty_unforced
     {
@@ -778,7 +774,7 @@ async fn deploy_unmasked(
         report.warnings.push(format!(
             "`current` names releases/{}, which is not on the host (a deploy that did not \
              finish, or a release removed by hand) — this run redeploys it",
-            report.version
+            report.plan.version
         ));
     }
 
@@ -1114,19 +1110,35 @@ pub const DIRTY_NEEDS_FORCE: &str = "the working tree has uncommitted changes or
 const CARRIES_THE_USER: &str = "; the plan carries the connecting user by value, so its hash \
     would be a function of that secret";
 
-/// `user@host` of the operator machine (best-effort; empty parts tolerated).
+/// `user@host` of the operator machine: `whoami` and `hostname`, each taken only from a
+/// run that succeeded with an answer. Neither side is ever empty. A user `whoami`
+/// didn't name is this process's effective user, by its name in the user database, or
+/// as `uid <n>` (never `$USER`, which the caller sets); a host `hostname` didn't name
+/// (a system without the program) is `uname -n`'s, or `unknown`. It is a hashed plan
+/// field, so a run whose `whoami` fails where its preview's didn't plans another hash.
 async fn deployed_by(local: &Connection) -> String {
-    let user = local
-        .run("whoami", &RunOptions::default())
-        .await
-        .map(|o| o.stdout.trim().to_owned())
-        .unwrap_or_default();
-    let host = local
-        .run("hostname", &RunOptions::default())
-        .await
-        .map(|o| o.stdout.trim().to_owned())
-        .unwrap_or_default();
+    let user = answer_of(local, "whoami").await.unwrap_or_else(|| {
+        let uid = nix::unistd::geteuid();
+        match nix::unistd::User::from_uid(uid) {
+            Ok(Some(user)) if !user.name.is_empty() => user.name,
+            _ => format!("uid {uid}"),
+        }
+    });
+    let host = match answer_of(local, "hostname").await {
+        Some(host) => host,
+        None => answer_of(local, "uname -n")
+            .await
+            .unwrap_or_else(|| "unknown".to_owned()),
+    };
     format!("{user}@{host}")
+}
+
+/// What `command` printed on the operator machine, trimmed, when it ran, succeeded, and
+/// printed something.
+async fn answer_of(local: &Connection, command: &str) -> Option<String> {
+    let output = local.run(command, &RunOptions::default()).await.ok()?;
+    let answer = output.stdout.trim();
+    (output.success && !answer.is_empty()).then(|| answer.to_owned())
 }
 
 /// The drift preflight's detection and diff — recorded as the

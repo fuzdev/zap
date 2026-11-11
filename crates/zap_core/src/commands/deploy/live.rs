@@ -7,17 +7,28 @@ use crate::connection::{Connection, RunOptions};
 use crate::error::Result;
 
 /// `server_version`'s exit for "nothing at `current`".
-const NOT_DEPLOYED_EXIT: i32 = 3;
+pub const NOT_DEPLOYED_EXIT: i32 = 3;
 /// `server_version`'s exit for a `current` that exists but isn't a symlink.
-const NOT_A_LINK_EXIT: i32 = 4;
+pub const NOT_A_LINK_EXIT: i32 = 4;
+/// `server_version`'s exit for an app path that is there but can't be entered, so what
+/// is at `current` couldn't be read.
+pub const UNENTERABLE_EXIT: i32 = 5;
 
 /// The read `server_version` runs: `readlink` of `current` when it is a link, else exit
-/// [`NOT_A_LINK_EXIT`] when something else is there, or [`NOT_DEPLOYED_EXIT`] when
-/// nothing is.
-pub(super) fn server_version_command(app_path: &str) -> String {
+/// [`NOT_A_LINK_EXIT`] when something else is there. Otherwise nothing at `current`
+/// answered, which is [`NOT_DEPLOYED_EXIT`] when the app path can be entered (the
+/// lookup really found nothing) or isn't there at all, and [`UNENTERABLE_EXIT`] when
+/// something is at the app path that the connecting user can't enter: a directory it
+/// can't search, a file, a dangling link.
+///
+/// What it can't tell apart: an app path below a directory the connecting user can't
+/// search reads as missing, so as [`NOT_DEPLOYED_EXIT`], since then nothing at the app
+/// path answers either.
+pub fn server_version_command(app_path: &str) -> String {
+    let app = single_quote(app_path);
     let current = single_quote(&format!("{app_path}/current"));
     format!(
-        "if [ -L {current} ]; then readlink -- {current}; elif [ -e {current} ]; then exit {NOT_A_LINK_EXIT}; else exit {NOT_DEPLOYED_EXIT}; fi"
+        "if [ -L {current} ]; then readlink -- {current}; elif [ -e {current} ]; then exit {NOT_A_LINK_EXIT}; elif ( cd -- {app} ) 2>/dev/null; then exit {NOT_DEPLOYED_EXIT}; elif [ -e {app} ] || [ -L {app} ]; then exit {UNENTERABLE_EXIT}; else exit {NOT_DEPLOYED_EXIT}; fi"
     )
 }
 
@@ -50,7 +61,9 @@ impl std::fmt::Display for LiveReadError {
 /// release by a word that isn't its, which the rollback and the prune would then not
 /// know.
 ///
-/// `Ok(None)` means the symlink isn't there — a host that has never been deployed to.
+/// `Ok(None)` means nothing answered at `current` in an app path the connecting user
+/// can enter, or no app path at all — a host that has never been deployed to, unless an
+/// ancestor of the app path can't be searched (`server_version_command`).
 /// [`LiveReadError::Unreadable`] means the read itself failed, and
 /// [`LiveReadError::NotALink`] that something else is at `current`; neither is the same
 /// thing and must not be silently folded into it: this value is the auto-rollback's only
@@ -72,9 +85,10 @@ pub(super) async fn server_version(
         .await
         .map_err(|error| LiveReadError::Unreadable(error.to_string()))?;
     // Exit 3 is the command *working* and finding nothing at `current` — not deployed
-    // yet. Anything else that isn't success (a `current` that isn't a link, a `readlink`
-    // that failed, ssh's 255) is a failed read; an `app_path` the user can't search reads
-    // as nothing there.
+    // yet. Anything else that isn't success (a `current` that isn't a link, an app path
+    // that can't be entered, a `readlink` that failed, ssh's 255) is a failed read; an
+    // app path below a directory the user can't search still reads as nothing there
+    // (`server_version_command`).
     if out.code == NOT_DEPLOYED_EXIT {
         return Ok(None);
     }
@@ -82,6 +96,13 @@ pub(super) async fn server_version(
         let stderr = out.stderr.trim();
         return Err(if out.code == NOT_A_LINK_EXIT {
             LiveReadError::NotALink(format!("{app_path}/current exists but is not a symlink"))
+        } else if out.code == UNENTERABLE_EXIT {
+            // The command discards the failed `cd`'s own message, so this one is all
+            // there is to say.
+            LiveReadError::Unreadable(format!(
+                "couldn't read {app_path}/current: {app_path} is there, but the connecting \
+                 user can't enter it"
+            ))
         } else {
             LiveReadError::Unreadable(format!(
                 "couldn't read {app_path}/current (exit {}): {stderr}",

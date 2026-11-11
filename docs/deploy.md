@@ -128,8 +128,8 @@ deploy FAILED at upload on host.example after 1m 23s — nothing was released, a
 ```
 
 A failure of the extract-and-swap step itself is read back from `current`, and
-nothing is rolled back. When `current` names another release, or none, this
-one is not live:
+nothing is rolled back. When `current` names another release, or none on a
+first release, this one is not live:
 
 ```
 deploy FAILED at extract_swap on host.example after 1m 23s — `current` does not name this release, so nothing was released
@@ -137,7 +137,10 @@ deploy FAILED at extract_swap on host.example after 1m 23s — `current` does no
 
 When it names this version (the swap can have happened before the step failed,
 or another deploy of the same version swapped), or can't be read, the line
-claims neither way and points at the step's error:
+claims neither way and points at the step's error. So does a `current` that
+reads as missing where a release was live before the run: Zap never removes
+`current`, so that read is one it can't believe (an app path the connecting
+user can no longer search reads that way):
 
 ```
 deploy FAILED at extract_swap on host.example after 1m 23s — the swap is not known to have completed, and nothing was rolled back (see the step's error above)
@@ -638,6 +641,13 @@ on the next deploy. A `current` whose last segment, trailing slashes dropped,
 is no release's name names no previous release, so the deploy refuses before
 it builds anything: point `current` at the live release by hand, or remove it
 to deploy as onto a fresh host.
+
+A `current` that can't be read (the read fails, or the app path is there but
+the connecting user can't enter it) leaves the deploy with no previous release:
+the preview warns, with the reason, that there is nothing to roll back to. An
+app path below a directory the connecting user can't search reads as missing,
+so the preview says `(first release)` with no warning; its wetrun then fails at
+the upload, before anything is released.
 
 ### Concurrent deploys
 
