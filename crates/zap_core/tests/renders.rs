@@ -1369,13 +1369,13 @@ const CASES: &[Case] = &[
         unprinted: &[OUTCOME_VIEW_LEAVES_OUT, &["observed."], LOCK_STANDING],
     },
     Case {
-        render: "commands::deploy::render_deploy",
+        render: "commands::deploy::render::render_deploy",
         name: "a dry run",
         run: || render_deploy(&deploy_report(DeployOutcome::DryRun)),
         unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
     },
     Case {
-        render: "commands::deploy::render_deploy",
+        render: "commands::deploy::render::render_deploy",
         name: "a dry run of a plan that names no one machine",
         run: || {
             render_deploy(&deploy_report(DeployOutcome::DryRunUnbindable(h(
@@ -1385,13 +1385,13 @@ const CASES: &[Case] = &[
         unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
     },
     Case {
-        render: "commands::deploy::render_deploy",
+        render: "commands::deploy::render::render_deploy",
         name: "a dry run of a dirty tree without --force",
         run: || render_deploy(&deploy_report(DeployOutcome::DryRunDirty)),
         unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
     },
     Case {
-        render: "commands::deploy::render_deploy",
+        render: "commands::deploy::render::render_deploy",
         name: "a wetrun refused for the hash it was given",
         run: || {
             render_deploy(&deploy_report(DeployOutcome::Refused(
@@ -1403,7 +1403,7 @@ const CASES: &[Case] = &[
         unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
     },
     Case {
-        render: "commands::deploy::render_deploy",
+        render: "commands::deploy::render::render_deploy",
         name: "a wetrun refused for a preview that moved",
         run: || {
             render_deploy(&deploy_report(DeployOutcome::Refused(
@@ -1417,7 +1417,7 @@ const CASES: &[Case] = &[
         unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
     },
     Case {
-        render: "commands::deploy::render_deploy",
+        render: "commands::deploy::render::render_deploy",
         name: "a wetrun asking to confirm a plan whose preview moved",
         run: || {
             let mut report = deploy_report(DeployOutcome::Refused(PlanUnreviewed::Changed {
@@ -1431,7 +1431,7 @@ const CASES: &[Case] = &[
         unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
     },
     Case {
-        render: "commands::deploy::render_deploy",
+        render: "commands::deploy::render::render_deploy",
         name: "a wetrun declined at the prompt",
         run: || {
             let mut report = deploy_report(DeployOutcome::Refused(PlanUnreviewed::Changed {
@@ -1445,13 +1445,13 @@ const CASES: &[Case] = &[
         unprinted: &[DEPLOY_NEVER_PRINTS, ORPHANS],
     },
     Case {
-        render: "commands::deploy::render_deploy",
+        render: "commands::deploy::render::render_deploy",
         name: "a wetrun that failed a step",
         run: || render_deploy(&deploy_report(DeployOutcome::Failed)),
         unprinted: &[DEPLOY_NEVER_PRINTS, DEPLOY_PLAN_BODY, STEP_OUTPUT, ORPHANS],
     },
     Case {
-        render: "commands::deploy::render_deploy",
+        render: "commands::deploy::render::render_deploy",
         name: "a wetrun that stopped at its preflight",
         run: || render_deploy(&deploy_report(DeployOutcome::PreflightUndetermined)),
         unprinted: &[DEPLOY_NEVER_PRINTS, DEPLOY_PLAN_BODY, ORPHANS],
@@ -1545,10 +1545,10 @@ const HELPERS: &[&str] = &[
     "commands::apply::render_outcomes",
     "commands::plan::render_change_diff",
     "commands::status::render_run_unverifiable",
-    "commands::deploy::render_plan_preview",
-    "commands::deploy::render_action",
-    "commands::deploy::render_poll",
-    "commands::deploy::render_step_outcomes",
+    "commands::deploy::render::render_plan_preview",
+    "commands::deploy::render::render_action",
+    "commands::deploy::render::render_poll",
+    "commands::deploy::render::render_step_outcomes",
 ];
 
 /// Where a file's own inline test module starts: the first `#[cfg(test)]` — or

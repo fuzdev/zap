@@ -12,7 +12,7 @@ use zap_types::deploy::{
 use zap_types::event::{Event, StepOutcome};
 
 use super::health::http_health_check;
-use super::run_captured;
+use super::walk::run_captured;
 use crate::connection::Connection;
 use crate::event::EventHandler;
 

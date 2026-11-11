@@ -23,8 +23,10 @@ A map; each module's `//!` doc and its items' rustdoc are the detail.
   `run_update`, `run_config_validate`). Each convergence, deploy, lock-check and
   update core returns a report with its own `exit_code`; `run_lock` and
   `run_config_validate` succeed or return an `Error`. The `render_*` builders
-  are pure. `deploy/` is the release push,
-  `prompt.rs` the terminal confirmation rule. The pieces the cores share:
+  are pure. `deploy/` is the release push (`mod.rs` the run, its gates and drift
+  preflight; `checkout.rs` the git reads; `live.rs` the target's live release;
+  `walk.rs` the step walk; `health.rs` the HTTP polls; `rollback.rs` the
+  auto-rollback; `render.rs` its text), `prompt.rs` the terminal confirmation rule. The pieces the cores share:
   `target.rs` (the two eval seams, the private `config_gates`, and binding the
   target), `detect_pass.rs` (the detection pass, its record, and the diff),
   `checks.rs` (the structural and env gates, the plan's findings, and the

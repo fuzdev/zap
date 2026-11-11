@@ -1345,12 +1345,14 @@ async fn a_swap_line_that_cannot_be_checked_is_believed_unconfirmed() {
     };
     // No recording for the read: it fails as a transport would.
     let unreachable = Connection::Mock(MockConnection::new("host"));
-    let release = super::Release {
+    let release = super::walk::Release {
         app: "/root/app",
         version: "abc1234",
         previous: Some("def5678"),
     };
-    let (_, warning) = super::swap_ran(&unreachable, release, ran()).await.unwrap();
+    let (_, warning) = super::walk::swap_ran(&unreachable, release, ran())
+        .await
+        .unwrap();
     let warning = warning.unwrap();
     assert!(
         warning.contains("the swap could not be confirmed"),
@@ -1362,12 +1364,12 @@ async fn a_swap_line_that_cannot_be_checked_is_believed_unconfirmed() {
     std::fs::create_dir(&app).unwrap();
     std::os::unix::fs::symlink(app.join("releases/abc1234"), app.join("current")).unwrap();
     let app = app.to_string_lossy().into_owned();
-    let same = super::Release {
+    let same = super::walk::Release {
         app: &app,
         version: "abc1234",
         previous: Some("abc1234"),
     };
-    let (_, warning) = super::swap_ran(&Connection::Local, same, ran())
+    let (_, warning) = super::walk::swap_ran(&Connection::Local, same, ran())
         .await
         .unwrap();
     let warning = warning.unwrap();
@@ -1377,11 +1379,11 @@ async fn a_swap_line_that_cannot_be_checked_is_believed_unconfirmed() {
         "{warning}"
     );
     // A fresh version that `current` names is a swap, confirmed.
-    let fresh = super::Release {
+    let fresh = super::walk::Release {
         previous: Some("def5678"),
         ..same
     };
-    let (_, warning) = super::swap_ran(&Connection::Local, fresh, ran())
+    let (_, warning) = super::walk::swap_ran(&Connection::Local, fresh, ran())
         .await
         .unwrap();
     let warning = warning.unwrap();
@@ -1406,17 +1408,17 @@ async fn a_lost_swap_line_is_read_from_current() {
     let app = app.to_string_lossy().into_owned();
     let garbled = "partialzap: current swapped\nDeployed version abc1234\n";
     let refused = "zap error: another deploy is running for this app\n";
-    let fresh = super::Release {
+    let fresh = super::walk::Release {
         app: &app,
         version: "abc1234",
         previous: Some("def5678"),
     };
-    let same = super::Release {
+    let same = super::walk::Release {
         previous: Some("abc1234"),
         ..fresh
     };
     for release in [fresh, same] {
-        let (shown, warning) = super::swap_ran(
+        let (shown, warning) = super::walk::swap_ran(
             &Connection::Local,
             release,
             Ok(script_output(garbled, "", true)),
@@ -1428,7 +1430,7 @@ async fn a_lost_swap_line_is_read_from_current() {
         assert!(warning.contains("missing or garbled"), "{warning}");
 
         for stdout in [garbled, refused] {
-            super::swap_ran(
+            super::walk::swap_ran(
                 &Connection::Local,
                 release,
                 Ok(script_output(stdout, "", false)),
@@ -1879,7 +1881,7 @@ async fn a_connection_error_names_a_secret_host_and_user_by_token() {
     let refused = RefusedTarget::new(&serde_json::json!([]));
     let local = Connection::Mock(
         MockConnection::new("local")
-            .with(super::DIRTY_TREE_STATUS, ok(""))
+            .with(super::checkout::DIRTY_TREE_STATUS, ok(""))
             .with("git rev-parse --short=12 HEAD", ok("abc1234\n"))
             .with("whoami", ok("op\n"))
             .with("hostname", ok("box\n")),
@@ -1949,7 +1951,7 @@ impl Rig {
         }))
         .unwrap();
         let local = MockConnection::new("local")
-            .with(super::DIRTY_TREE_STATUS, ok(""))
+            .with(super::checkout::DIRTY_TREE_STATUS, ok(""))
             .with("git rev-parse --short=12 HEAD", ok("abc1234\n"))
             .with("whoami", ok("op\n"))
             .with("hostname", ok("box\n"));
@@ -2113,10 +2115,10 @@ impl Rig {
     /// Everything issued beyond the reads that build the plan.
     fn issued_past_the_plan(&self) -> Vec<String> {
         const PLAN_READS: [&str; 9] = [
-            super::DIRTY_TREE_STATUS,
-            super::DIRTY_TREE_DIFF,
-            super::DIRTY_TREE_UNTRACKED,
-            super::DIRTY_TREE_BLOBS,
+            super::checkout::DIRTY_TREE_STATUS,
+            super::checkout::DIRTY_TREE_DIFF,
+            super::checkout::DIRTY_TREE_UNTRACKED,
+            super::checkout::DIRTY_TREE_BLOBS,
             "git rev-parse --short=12 HEAD",
             "whoami",
             "hostname",
@@ -2421,9 +2423,9 @@ async fn a_change_after_the_preview_refuses_the_wetrun() {
                 rig.local = rig
                     .local
                     .clone()
-                    .with(super::DIRTY_TREE_STATUS, ok(" M src/app.ts\n"))
-                    .with(super::DIRTY_TREE_DIFF, ok("+change\n"))
-                    .with(super::DIRTY_TREE_UNTRACKED, ok(""));
+                    .with(super::checkout::DIRTY_TREE_STATUS, ok(" M src/app.ts\n"))
+                    .with(super::checkout::DIRTY_TREE_DIFF, ok("+change\n"))
+                    .with(super::checkout::DIRTY_TREE_UNTRACKED, ok(""));
             },
             DeployOptions {
                 force: true,
@@ -4464,10 +4466,10 @@ async fn forced_dirty(
     let mut rig = Rig::new("def5678");
     rig.local = rig
         .local
-        .with(super::DIRTY_TREE_STATUS, ok(" M src/app.ts\n"))
-        .with(super::DIRTY_TREE_DIFF, ok(diff))
-        .with(super::DIRTY_TREE_UNTRACKED, ok(untracked))
-        .with(super::DIRTY_TREE_BLOBS, ok(blobs));
+        .with(super::checkout::DIRTY_TREE_STATUS, ok(" M src/app.ts\n"))
+        .with(super::checkout::DIRTY_TREE_DIFF, ok(diff))
+        .with(super::checkout::DIRTY_TREE_UNTRACKED, ok(untracked))
+        .with(super::checkout::DIRTY_TREE_BLOBS, ok(blobs));
     rig.deploy(&DeployOptions {
         force: true,
         ..DeployOptions::default()
@@ -4647,7 +4649,7 @@ fn the_dirty_tree_blob_read_hashes_symlinks_by_their_targets() {
 
     let untracked = run_dirty_tree_script(
         Path::new("sh"),
-        super::DIRTY_TREE_UNTRACKED,
+        super::checkout::DIRTY_TREE_UNTRACKED,
         &repo.join("d"),
         &system_path,
     );
@@ -4675,7 +4677,12 @@ fn the_dirty_tree_blob_read_hashes_symlinks_by_their_targets() {
         ));
     }
     for (label, shell, path) in shells {
-        let blobs = run_dirty_tree_script(&shell, super::DIRTY_TREE_BLOBS, &repo.join("d"), &path);
+        let blobs = run_dirty_tree_script(
+            &shell,
+            super::checkout::DIRTY_TREE_BLOBS,
+            &repo.join("d"),
+            &path,
+        );
         assert_eq!(String::from_utf8(blobs).unwrap(), expected, "{label}");
     }
 }
@@ -4739,25 +4746,25 @@ fn the_dirty_check_reads_what_the_checkouts_config_would_hide() {
         ))
         .unwrap()
     };
-    assert_eq!(read(super::DIRTY_TREE_STATUS), "", "a clean tree");
+    assert_eq!(read(super::checkout::DIRTY_TREE_STATUS), "", "a clean tree");
 
     std::fs::write(repo.join("notes.txt"), "n\n").unwrap();
-    assert_eq!(read(super::DIRTY_TREE_STATUS), "?? notes.txt\n");
+    assert_eq!(read(super::checkout::DIRTY_TREE_STATUS), "?? notes.txt\n");
     assert_eq!(
-        read(super::DIRTY_TREE_UNTRACKED),
+        read(super::checkout::DIRTY_TREE_UNTRACKED),
         "notes.txt\0",
         "the id counts it"
     );
     std::fs::remove_file(repo.join("notes.txt")).unwrap();
 
     std::fs::write(repo.join("sub/f"), "b\n").unwrap();
-    assert_eq!(read(super::DIRTY_TREE_STATUS), " M sub\n");
+    assert_eq!(read(super::checkout::DIRTY_TREE_STATUS), " M sub\n");
     assert!(
-        read(super::DIRTY_TREE_DIFF).contains("-dirty"),
+        read(super::checkout::DIRTY_TREE_DIFF).contains("-dirty"),
         "its commit and dirt name it"
     );
     std::fs::write(repo.join("sub/f"), "a\n").unwrap();
-    assert_eq!(read(super::DIRTY_TREE_STATUS), "", "clean again");
+    assert_eq!(read(super::checkout::DIRTY_TREE_STATUS), "", "clean again");
 
     // a monitor that answers every query with a token and no paths: nothing changed
     git(&repo, &["config", "--unset", "status.showUntrackedFiles"]);
@@ -4768,12 +4775,12 @@ fn the_dirty_check_reads_what_the_checkouts_config_would_hide() {
     std::fs::write(repo.join("late.txt"), "l\n").unwrap();
     assert_eq!(read("git status --porcelain"), "", "the monitor hides both");
     assert_eq!(
-        read(super::DIRTY_TREE_UNTRACKED),
+        read(super::checkout::DIRTY_TREE_UNTRACKED),
         "late.txt\0",
         "the untracked read walks past the cache"
     );
     assert!(
-        read(super::DIRTY_TREE_DIFF).contains("+y\n"),
+        read(super::checkout::DIRTY_TREE_DIFF).contains("+y\n"),
         "the change names it"
     );
     assert_eq!(
@@ -4781,7 +4788,10 @@ fn the_dirty_check_reads_what_the_checkouts_config_would_hide() {
         "",
         "the diff left the monitor's answer standing"
     );
-    assert_eq!(read(super::DIRTY_TREE_STATUS), " M tracked\n?? late.txt\n");
+    assert_eq!(
+        read(super::checkout::DIRTY_TREE_STATUS),
+        " M tracked\n?? late.txt\n"
+    );
 }
 
 /// The dirty check compares contents, not what the checkout's index cached about each
@@ -4855,11 +4865,11 @@ fn the_dirty_check_reads_contents_not_the_indexs_stat_cache() {
     );
     for cwd in [repo.clone(), repo.join("d")] {
         assert_eq!(
-            read(super::DIRTY_TREE_STATUS, &cwd),
+            read(super::checkout::DIRTY_TREE_STATUS, &cwd),
             " M held\n M tracked\n",
             "{cwd:?}"
         );
-        let diff = read(super::DIRTY_TREE_DIFF, &cwd);
+        let diff = read(super::checkout::DIRTY_TREE_DIFF, &cwd);
         assert!(
             diff.contains("+y\n") && diff.contains("+H\n"),
             "{cwd:?}: {diff}"
@@ -4873,12 +4883,19 @@ fn the_dirty_check_reads_contents_not_the_indexs_stat_cache() {
 
     std::fs::write(repo.join("tracked"), "x\n").unwrap();
     std::fs::write(repo.join("held"), "h\n").unwrap();
-    assert_eq!(read(super::DIRTY_TREE_STATUS, &repo), "", "clean again");
+    assert_eq!(
+        read(super::checkout::DIRTY_TREE_STATUS, &repo),
+        "",
+        "clean again"
+    );
     // `core.ignoreStat` would mark every entry of the copy unchanged as it is made
     git(&["config", "core.ignoreStat", "true"]);
     std::fs::write(repo.join("tracked"), "z\n").unwrap();
-    assert_eq!(read(super::DIRTY_TREE_STATUS, &repo), " M tracked\n");
-    assert!(read(super::DIRTY_TREE_DIFF, &repo).contains("+z\n"));
+    assert_eq!(
+        read(super::checkout::DIRTY_TREE_STATUS, &repo),
+        " M tracked\n"
+    );
+    assert!(read(super::checkout::DIRTY_TREE_DIFF, &repo).contains("+z\n"));
     std::fs::write(repo.join("tracked"), "x\n").unwrap();
     git(&["config", "--unset", "core.ignoreStat"]);
 
@@ -4891,17 +4908,27 @@ fn the_dirty_check_reads_contents_not_the_indexs_stat_cache() {
         "",
         "the mode is ignored"
     );
-    assert_eq!(read(super::DIRTY_TREE_STATUS, &repo), " M tracked\n");
-    assert!(read(super::DIRTY_TREE_DIFF, &repo).contains("new mode 100755"));
+    assert_eq!(
+        read(super::checkout::DIRTY_TREE_STATUS, &repo),
+        " M tracked\n"
+    );
+    assert!(read(super::checkout::DIRTY_TREE_DIFF, &repo).contains("new mode 100755"));
     std::fs::set_permissions(repo.join("tracked"), std::fs::Permissions::from_mode(0o644)).unwrap();
     git(&["config", "--unset", "core.fileMode"]);
     git(&["config", "core.autocrlf", "true"]);
     std::fs::write(repo.join("tracked"), "x\r\n").unwrap();
-    assert_eq!(read(super::DIRTY_TREE_STATUS, &repo), " M tracked\n");
-    assert!(read(super::DIRTY_TREE_DIFF, &repo).contains("+x\r\n"));
+    assert_eq!(
+        read(super::checkout::DIRTY_TREE_STATUS, &repo),
+        " M tracked\n"
+    );
+    assert!(read(super::checkout::DIRTY_TREE_DIFF, &repo).contains("+x\r\n"));
     std::fs::write(repo.join("tracked"), "x\n").unwrap();
     git(&["config", "--unset", "core.autocrlf"]);
-    assert_eq!(read(super::DIRTY_TREE_STATUS, &repo), "", "clean again");
+    assert_eq!(
+        read(super::checkout::DIRTY_TREE_STATUS, &repo),
+        "",
+        "clean again"
+    );
 
     // Under `core.splitIndex=true` the reads still write nothing into the checkout's
     // `.git`: the copy of the index keeps no shared index there.
@@ -4919,15 +4946,15 @@ fn the_dirty_check_reads_contents_not_the_indexs_stat_cache() {
     std::fs::write(repo.join("tracked"), "w\n").unwrap();
     std::fs::write(repo.join("late"), "l\n").unwrap();
     for script in [
-        super::DIRTY_TREE_STATUS,
-        super::DIRTY_TREE_DIFF,
-        super::DIRTY_TREE_UNTRACKED,
-        super::DIRTY_TREE_BLOBS,
+        super::checkout::DIRTY_TREE_STATUS,
+        super::checkout::DIRTY_TREE_DIFF,
+        super::checkout::DIRTY_TREE_UNTRACKED,
+        super::checkout::DIRTY_TREE_BLOBS,
     ] {
         read(script, &repo);
     }
     assert_eq!(
-        read(super::DIRTY_TREE_STATUS, &repo),
+        read(super::checkout::DIRTY_TREE_STATUS, &repo),
         " M tracked\n?? late\n"
     );
     assert_eq!(listing(), before, "nothing new in .git");
@@ -4936,9 +4963,12 @@ fn the_dirty_check_reads_contents_not_the_indexs_stat_cache() {
     git(&["config", "--unset", "core.splitIndex"]);
     std::fs::write(repo.join("staged.ignored"), "s\n").unwrap();
     git(&["add", "-f", "staged.ignored"]);
-    assert_eq!(read(super::DIRTY_TREE_STATUS, &repo), "A  staged.ignored\n");
-    assert!(read(super::DIRTY_TREE_DIFF, &repo).contains("+s\n"));
-    assert_eq!(read(super::DIRTY_TREE_UNTRACKED, &repo), "");
+    assert_eq!(
+        read(super::checkout::DIRTY_TREE_STATUS, &repo),
+        "A  staged.ignored\n"
+    );
+    assert!(read(super::checkout::DIRTY_TREE_DIFF, &repo).contains("+s\n"));
+    assert_eq!(read(super::checkout::DIRTY_TREE_UNTRACKED, &repo), "");
 }
 
 /// The tree's state is part of the plan: a tree dirtied after the review ships
@@ -4956,9 +4986,9 @@ async fn a_tree_dirtied_after_the_review_is_a_different_plan() {
     let mut rig = Rig::new("def5678").recording(&clean.plan);
     rig.local = rig
         .local
-        .with(super::DIRTY_TREE_STATUS, ok(" M src/app.ts\n"))
-        .with(super::DIRTY_TREE_DIFF, ok("+change\n"))
-        .with(super::DIRTY_TREE_UNTRACKED, ok(""));
+        .with(super::checkout::DIRTY_TREE_STATUS, ok(" M src/app.ts\n"))
+        .with(super::checkout::DIRTY_TREE_DIFF, ok("+change\n"))
+        .with(super::checkout::DIRTY_TREE_UNTRACKED, ok(""));
     let forced = DeployOptions {
         force: true,
         ..DeployOptions::default()
@@ -4996,7 +5026,9 @@ fn dirty_rig(live: &str) -> Rig {
 /// A rig whose checkout at `abc1234` reads dirty as `status` says.
 fn dirty_rig_with(live: &str, status: &str) -> Rig {
     let mut rig = Rig::new(live);
-    rig.local = rig.local.with(super::DIRTY_TREE_STATUS, ok(status));
+    rig.local = rig
+        .local
+        .with(super::checkout::DIRTY_TREE_STATUS, ok(status));
     rig
 }
 
@@ -5006,7 +5038,7 @@ fn dirty_rig_with(live: &str, status: &str) -> Rig {
 /// `-dirty-<id>` name, before the target is read and with nothing recorded. The
 /// recorded preview it would have bound to is untouched, and binds a wetrun again once
 /// the tree is clean. An untracked file alone makes the tree dirty, as it makes the
-/// id ([`super::dirty_id`] counts it).
+/// id ([`super::checkout::dirty_id`] counts it).
 #[tokio::test]
 async fn a_dirty_tree_wetrun_without_force_is_refused() {
     let mut rig = Rig::new("def5678");
@@ -5034,7 +5066,7 @@ async fn a_dirty_tree_wetrun_without_force_is_refused() {
         assert_eq!(rig.target.issued_commands(), target_reads, "{status:?}");
         assert_eq!(
             rig.local.issued_commands(),
-            vec![super::DIRTY_TREE_STATUS; 2],
+            vec![super::checkout::DIRTY_TREE_STATUS; 2],
             "{status:?}: nothing past the tree check"
         );
     }
@@ -5081,7 +5113,7 @@ async fn a_dirty_tree_on_an_unbindable_plan_still_names_force() {
     let mut rig = Rig::on(&Text::reference("ZAP_T_HOST_TOKEN"), "def5678");
     rig.local = rig
         .local
-        .with(super::DIRTY_TREE_STATUS, ok(" M src/app.ts\n"));
+        .with(super::checkout::DIRTY_TREE_STATUS, ok(" M src/app.ts\n"));
     let dry = rig.deploy(&DeployOptions::default()).await.unwrap();
     assert!(
         matches!(dry.outcome, DeployOutcome::DryRunUnbindable(_)),
@@ -5097,7 +5129,7 @@ async fn a_dirty_tree_on_an_unbindable_plan_still_names_force() {
 async fn an_unreadable_tree_is_an_error_not_a_clean_one() {
     let mut rig = Rig::new("def5678");
     rig.local = rig.local.with(
-        super::DIRTY_TREE_STATUS,
+        super::checkout::DIRTY_TREE_STATUS,
         CommandOutput {
             success: false,
             code: 128,
@@ -5107,7 +5139,7 @@ async fn an_unreadable_tree_is_an_error_not_a_clean_one() {
     );
     let result = rig.deploy(&DeployOptions::default()).await;
     assert!(
-        matches!(&result, Err(crate::error::Error::Git(message)) if message.contains(super::DIRTY_TREE_STATUS)),
+        matches!(&result, Err(crate::error::Error::Git(message)) if message.contains(super::checkout::DIRTY_TREE_STATUS)),
         "{result:?}"
     );
     assert!(!rig.local.issued("git rev-parse --short=12 HEAD"));
@@ -5372,7 +5404,7 @@ async fn a_git_error_says_what_git_said() {
     };
     let dubious = message(
         failing(
-            super::DIRTY_TREE_STATUS,
+            super::checkout::DIRTY_TREE_STATUS,
             "\nfatal: detected dubious ownership in repository at '/srv/a\u{1b}[2Kpp'\n\
              To add an exception for this directory, call:\n",
         )
@@ -5384,7 +5416,7 @@ async fn a_git_error_says_what_git_said() {
         format!(
             "could not read the working tree (`{}`): fatal: detected dubious ownership in \
              repository at '/srv/a<U+001B>[2Kpp'",
-            super::DIRTY_TREE_STATUS
+            super::checkout::DIRTY_TREE_STATUS
         )
     );
     let no_repo = message(
@@ -5401,7 +5433,7 @@ async fn a_git_error_says_what_git_said() {
          repository"
     );
     let silent = message(
-        failing(super::DIRTY_TREE_STATUS, "")
+        failing(super::checkout::DIRTY_TREE_STATUS, "")
             .deploy(&DeployOptions::default())
             .await,
     );
@@ -5517,7 +5549,7 @@ async fn a_git_error_masks_what_git_said_before_escaping_it() {
     let mut rig = Rig::new("def5678");
     rig.masker = registry.freeze().unwrap();
     rig.local = rig.local.with(
-        super::DIRTY_TREE_STATUS,
+        super::checkout::DIRTY_TREE_STATUS,
         CommandOutput {
             success: false,
             code: 128,
