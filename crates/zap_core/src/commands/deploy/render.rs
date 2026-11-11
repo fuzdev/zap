@@ -160,7 +160,7 @@ pub fn render_deploy(report: &DeployReport) -> String {
     crate::commands::render_lock_standing(
         &mut out,
         &report.lock_standing,
-        "so the drift preflight cannot check them and a wetrun stops there",
+        "which the drift preflight cannot check, so a wetrun stops there",
     );
     crate::commands::render_undetermined(&mut out, &report.held);
     crate::commands::render_warnings(&mut out, &plan.warnings);

@@ -435,8 +435,8 @@ fn a_lock_standing_error_exits_one_on_its_own() {
     let rendered = render_status(&report);
     assert!(
         rendered.starts_with(
-            "  LOCK — the pin ledger does not answer for 1 resource(s), so they are withheld \
-             from the comparison below:\n      ghostty — stale: "
+            "  LOCK — the pin ledger does not answer for 1 resource, withheld from the \
+             comparison below:\n      ghostty — stale: "
         ),
         "{rendered}"
     );

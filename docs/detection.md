@@ -270,10 +270,10 @@ The banner lists the resources detection couldn't read first, then the ones
 held behind them, each with what it waits on or would trigger:
 
 ```
-  UNDETERMINED — 1 resource(s) could not be probed, so no change is planned for them and this changeset is partial:
+  UNDETERMINED — 1 resource could not be probed, so no change is planned for it and this changeset is partial:
       web — detection failed: the unit read exited 1
-  their live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
-  held behind them — 2 resource(s) can't change until they do:
+  its live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
+  held behind it — 2 resources can't change until it does:
       after — waits on `web`, which is held
       site — would reload `web`, which is held
 ```

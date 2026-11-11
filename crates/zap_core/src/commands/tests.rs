@@ -1320,14 +1320,51 @@ fn the_undetermined_banner_lists_holds_behind_the_unread() {
     );
     assert_eq!(
         out,
-        "  UNDETERMINED — 1 resource(s) could not be probed, so no change is planned for \
-         them and this changeset is partial:
+        "  UNDETERMINED — 1 resource could not be probed, so no change is planned for \
+         it and this changeset is partial:
       web — detection failed: the unit read exited 1
-  their live state is unknown: neither converged nor drifted. resolve the probe failure \
+  its live state is unknown: neither converged nor drifted. resolve the probe failure \
          and re-run.
-  held behind them — 2 resource(s) can't change until they do:
+  held behind it — 2 resources can't change until it does:
       after — waits on `web`, which is held
       site — would reload `web`, which is held
+"
+    );
+    // several unread, and one held behind them
+    let mut out = String::new();
+    render_undetermined(
+        &mut out,
+        &[
+            held(
+                "web",
+                HoldCause::Undetermined {
+                    reason: "unread".to_owned(),
+                },
+            ),
+            held(
+                "db",
+                HoldCause::Undetermined {
+                    reason: "unread".to_owned(),
+                },
+            ),
+            held(
+                "after",
+                HoldCause::Waits {
+                    on: vec![ResourceId("web".to_owned())],
+                },
+            ),
+        ],
+    );
+    assert_eq!(
+        out,
+        "  UNDETERMINED — 2 resources could not be probed, so no change is planned for \
+         them and this changeset is partial:
+      web — unread
+      db — unread
+  their live state is unknown: neither converged nor drifted. resolve the probe failure \
+         and re-run.
+  held behind them — 1 resource can't change until they do:
+      after — waits on `web`, which is held
 "
     );
 }
@@ -1943,16 +1980,28 @@ fn the_lock_banner_reads_the_same_for_the_comparing_commands() {
     render_lock_standing(&mut out, &standing, LOCK_WITHHELD_FROM_COMPARISON);
     assert_eq!(
         out,
-        "  LOCK — the pin ledger does not answer for 2 resource(s), so they are withheld \
-         from the comparison below:\n      a — no pin yet; run `zap update a`\n      b — \
+        "  LOCK — the pin ledger does not answer for 2 resources, withheld from the \
+         comparison below:\n      a — no pin yet; run `zap update a`\n      b — \
          stale: the config changed since the pin was minted; run `zap update b`\n"
     );
     let mut out = String::new();
-    render_lock_standing(&mut out, &standing, "so nothing checks them");
+    render_lock_standing(&mut out, &standing, "which nothing checks");
     assert!(
         out.starts_with(
-            "  LOCK — the pin ledger does not answer for 2 resource(s), so nothing checks \
-             them:\n"
+            "  LOCK — the pin ledger does not answer for 2 resources, which nothing checks:\n"
+        ),
+        "{out}"
+    );
+    let one = LockStanding {
+        missing: vec!["a".to_owned()],
+        ..LockStanding::default()
+    };
+    let mut out = String::new();
+    render_lock_standing(&mut out, &one, LOCK_WITHHELD_FROM_COMPARISON);
+    assert!(
+        out.starts_with(
+            "  LOCK — the pin ledger does not answer for 1 resource, withheld from the \
+             comparison below:\n"
         ),
         "{out}"
     );
@@ -2184,8 +2233,8 @@ fn plan_and_detect_lead_with_the_comparison_lock_banner() {
     use crate::lock::LockStanding;
     use zap_types::plan::Plan;
 
-    const BANNER: &str = "  LOCK — the pin ledger does not answer for 1 resource(s), so they \
-                          are withheld from the comparison below:\n      a — no pin yet; run \
+    const BANNER: &str = "  LOCK — the pin ledger does not answer for 1 resource, withheld \
+                          from the comparison below:\n      a — no pin yet; run \
                           `zap update a`\n";
     let standing = LockStanding {
         missing: vec!["a".to_owned()],

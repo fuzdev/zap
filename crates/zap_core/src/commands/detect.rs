@@ -112,6 +112,8 @@ pub fn render_detect(report: &DetectReport) -> String {
         "detected live state — target {} (pkg: {pkg}, service: {svc})",
         escape_line(&report.target)
     );
+    // `N resource(s):` as it is, for any count: the differential harness finds this line
+    // by that text (`runner::well_formed` and `compare::is_count_line` in the xtask)
     let _ = writeln!(out, "{} resource(s):", report.resources.len());
     for line in &report.resources {
         let mark = match line.detection {

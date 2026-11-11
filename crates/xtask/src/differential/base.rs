@@ -493,12 +493,15 @@ fn every_hold(holds: &[Hold], behind: &[Hold]) -> Vec<Hold> {
 /// `UNDETERMINED` — any other (`UNVERIFIABLE`, `RESIDUAL`, `LOCK`, `UNBINDABLE`,
 /// `UNRECORDED`, `REFUSED`, or one this list doesn't know) fails it, as a second
 /// `UNDETERMINED` does — the lines under it are exactly `holds`' lines, and the lines
-/// under its `held behind them —` line exactly `behind`'s, ids and reasons, each block
-/// in any order. With nothing expected behind, there is no such line.
+/// under its held-behind line exactly `behind`'s, ids and reasons, each block in any
+/// order. With nothing expected behind, there is no such line.
 ///
 /// Read by zap's own columns: a held resource's line stands six spaces in, directly
 /// under the banner; the banner's closing line stands two in and ends them, and the
-/// `held behind them —` line, two in, follows it directly, its own entries six in.
+/// held-behind line, two in, follows it directly, its own entries six in. That line opens
+/// `held behind it — ` under one resource that could not be probed and
+/// `held behind them — ` under several, and a zap that predates the agreement says
+/// `them` for any count ([`HELD_BEHIND`]): each is read.
 fn exactly_held(stdout: &str, holds: &[Hold], behind: &[Hold]) -> Result<(), String> {
     let lines: Vec<&str> = stdout.lines().collect();
     let banners: Vec<(usize, &str)> = lines
@@ -530,17 +533,21 @@ fn exactly_held(stdout: &str, holds: &[Hold], behind: &[Hold]) -> Result<(), Str
     let behind_at: Vec<usize> = lines
         .iter()
         .enumerate()
-        .filter(|(_, line)| line.starts_with("  held behind them — "))
+        .filter(|(_, line)| HELD_BEHIND.iter().any(|lead| line.starts_with(lead)))
         .map(|(index, _)| index)
         .collect();
     let found_behind = match behind_at[..] {
         [] => Vec::new(),
         [index] if index == at + 1 + roots.len() + 1 => entries(index + 1),
-        _ => return Err("reports a `held behind them —` line out of place".to_owned()),
+        _ => return Err("reports a `held behind` line out of place".to_owned()),
     };
     same_lines("holds", holds, roots)?;
     same_lines("holds behind them", behind, found_behind)
 }
+
+/// How the line of the changes held behind the unprobed resources opens: under one, and
+/// under several (or any count, from a zap that predates the agreement).
+const HELD_BEHIND: [&str; 2] = ["  held behind it — ", "  held behind them — "];
 
 /// `found` is exactly `expected`'s lines, in any order; `what` names the block.
 fn same_lines(what: &str, expected: &[Hold], mut found: Vec<&str>) -> Result<(), String> {
@@ -634,14 +641,15 @@ plan_hash: 3be8125a32b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb10
 "#;
 
     /// [`HELD_WETRUN`] as a zap that times each change prints it: a time column after
-    /// the id, and a verdict line after the summary.
+    /// the id, and a verdict line after the summary; and that says how many its banners
+    /// count in words that agree with the count.
     const HELD_WETRUN_TIMED: &str = r#"apply — target {env:ZAPDIFF_HOST} (wetrun)
   host: 192.168.122.10
   user: ops
   target: {"local":false,"host":{"$env":"ZAPDIFF_HOST"},"user":{"$env":"ZAPDIFF_USER"},"home":"/home/ops","package_manager":"apk","service_manager":"openrc"}
-  UNDETERMINED — 1 resource(s) could not be probed, so no change is planned for them and this changeset is partial:
+  UNDETERMINED — 1 resource could not be probed, so no change is planned for it and this changeset is partial:
       database — detection failed: the PostgreSQL catalog query exited 2
-  their live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
+  its live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
   ok    etc-dir             0.1s
   ok    pipeline            0.0s
   ok    postgresql-service  2.3s
@@ -978,7 +986,7 @@ plan_hash: 7a1c0f3e5b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb1077
         let moved = HELD_PREVIEW.replace("  (dry-run", &format!("{BEHIND_BLOCK}  (dry-run"));
         assert_eq!(
             holds(&moved, &[DATA_DIR]),
-            Err("reports a `held behind them —` line out of place".to_owned())
+            Err("reports a `held behind` line out of place".to_owned())
         );
         // a change held behind is planned
         let planned = preview.replace(
@@ -1015,6 +1023,42 @@ plan_hash: 7a1c0f3e5b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb1077
         assert!(check_second_preview(&captured(2, SECOND_PREVIEW), &every).is_err());
     }
 
+    /// The block held behind the roots is read in either wording of the banner over it:
+    /// the closing line by where it stands, the block by its held-behind line, which says
+    /// `it` under one unprobed resource and `them` under several or from an older zap.
+    #[test]
+    fn the_block_held_behind_reads_in_either_wording() {
+        const FOOTER_ONE: &str = "  its live state is unknown: neither converged nor drifted. \
+            resolve the probe failure and re-run.\n";
+        const BEHIND_ONE: &str = "  held behind it — 1 resource can't change until it does:\n      \
+            data-dir — waits on `database`, which is held\n";
+        let ran =
+            |stdout: &str| held_wetrun_problem(&captured(1, stdout), &[DATABASE], &[DATA_DIR]);
+        assert_eq!(ran(&with_behind(HELD_WETRUN)), Ok(()));
+        assert!(HELD_WETRUN_TIMED.contains(FOOTER_ONE));
+        let timed = HELD_WETRUN_TIMED.replace(FOOTER_ONE, &format!("{FOOTER_ONE}{BEHIND_ONE}"));
+        assert_eq!(ran(&timed), Ok(()));
+        assert!(ran(HELD_WETRUN_TIMED).is_err());
+        // under several unprobed resources, `them`
+        let several = timed.replace("  held behind it — ", "  held behind them — ");
+        assert_eq!(ran(&several), Ok(()));
+        // either form, out of place, is caught as one
+        let moved = HELD_WETRUN_TIMED.replace("applied: ", &format!("{BEHIND_ONE}applied: "));
+        assert_eq!(
+            ran(&moved),
+            Err("reports a `held behind` line out of place".to_owned())
+        );
+        // a line the harness doesn't know is no held-behind line: its entries go unread
+        let unknown = timed.replace("  held behind it — ", "  held behind one — ");
+        assert!(ran(&unknown).is_err());
+        // the held one, run
+        let ran_behind = timed.replacen("  ok    etc-dir ", "  ok    data-dir", 1);
+        assert_eq!(
+            ran(&ran_behind),
+            Err("ran a resource it holds: ok    data-dir            0.1s".to_owned())
+        );
+    }
+
     // `{env:NAME}` is the notation a reference is shown in, written out here as text.
     #[allow(clippy::literal_string_with_formatting_args)]
     #[test]
@@ -1022,7 +1066,9 @@ plan_hash: 7a1c0f3e5b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb1077
         for banner in [
             "  UNVERIFIABLE — 1 referenced variable(s) are unset",
             "  LOCK — the pin ledger does not answer for 1 resource(s)",
+            "  LOCK — the pin ledger does not answer for 1 resource, withheld from the comparison below:",
             "  RESIDUAL — 1 resource(s) do not read converged",
+            "  RESIDUAL — 1 resource does not read converged after this apply:",
             "  UNBINDABLE — the target host `{env:H}` references `{env:H}`, a secret name",
             "  UNRECORDED — no last run is kept for this target",
             "  REFUSED — nothing ran: this plan was not reviewed.",

@@ -831,19 +831,25 @@ fn render_residual(out: &mut String, report: &ApplyReport) {
     if report.residual.is_empty() {
         return;
     }
+    let one = report.residual.len() == 1;
     let _ = writeln!(
         out,
-        "  RESIDUAL — {} resource(s) do not read converged after this apply:",
-        report.residual.len()
+        "  RESIDUAL — {} not read converged after this apply:",
+        count(report.residual.len(), "resource does", "resources do")
     );
     for entry in &report.residual {
         let lead = format!("      {} — ", escape_line(&entry.resource_id.0));
         render_block(out, &lead, &entry.state.describe());
     }
+    let (their, them) = if one {
+        ("its", "it")
+    } else {
+        ("their", "them")
+    };
     let _ = writeln!(
         out,
-        "  their commands (if any) exited 0, but re-detection did not confirm the \
-         declared state. inspect them (zap plan --diff) and re-run."
+        "  {their} commands (if any) exited 0, but re-detection did not confirm the \
+         declared state. inspect {them} (zap plan --diff) and re-run."
     );
 }
 
@@ -3600,6 +3606,17 @@ export default (zap) => {
             verdict(&report),
             "apply did not converge a.example.com in 4.2s — 2 resources do not read \
              converged (RESIDUAL above)"
+        );
+        // the banner says how many too, and its closing line agrees
+        let rendered = render_apply(&report);
+        assert!(
+            rendered.contains(
+                "  RESIDUAL — 2 resources do not read converged after this apply:\n      \
+                 a — absent\n      b — absent\n  their commands (if any) exited 0, but \
+                 re-detection did not confirm the declared state. inspect them (zap plan \
+                 --diff) and re-run.\n"
+            ),
+            "{rendered}"
         );
 
         // held, with nothing else wrong; residual outranks it

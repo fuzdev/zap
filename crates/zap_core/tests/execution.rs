@@ -1068,8 +1068,9 @@ export default (zap) => {
     let rendered = render_apply(&wet);
     assert!(
         rendered.contains(
-            "\n  RESIDUAL — 1 resource(s) do not read converged after this apply:\n      \
-             never-converges — absent\n"
+            "\n  RESIDUAL — 1 resource does not read converged after this apply:\n      \
+             never-converges — absent\n  its commands (if any) exited 0, but re-detection \
+             did not confirm the declared state. inspect it (zap plan --diff) and re-run.\n"
         ),
         "{rendered}"
     );

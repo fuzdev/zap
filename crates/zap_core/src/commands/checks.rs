@@ -11,6 +11,7 @@ use zap_types::schema::{ResourceId, ZapConfig};
 use crate::error::{Error, Result};
 use crate::escape::{escape_join, escape_line, render_block};
 use crate::lock::LockStanding;
+use crate::progress::count;
 use crate::resolve::env_var;
 use crate::secret::SecretMasker;
 
@@ -317,15 +318,15 @@ pub(super) fn render_warnings(out: &mut String, warnings: &[String]) {
 
 /// What a comparing command's `LOCK` banner says follows from a pin the ledger doesn't
 /// answer for: its resource is left out of the comparison rendered under the banner.
-pub(super) const LOCK_WITHHELD_FROM_COMPARISON: &str =
-    "so they are withheld from the comparison below";
+pub(super) const LOCK_WITHHELD_FROM_COMPARISON: &str = "withheld from the comparison below";
 
 /// Render the `lock` standing — the banner that tells an operator the ledger doesn't
 /// answer for part of this config, so those resources were **withheld** from the
 /// comparison below. No-op when every eligible pin is current (orphans alone stay
-/// silent here; `zap lock --check` is where they're reported). `so` is the clause that
-/// says what follows from that for the command at hand
-/// ([`LOCK_WITHHELD_FROM_COMPARISON`] for the ones that compare).
+/// silent here; `zap lock --check` is where they're reported). `so` is the clause after
+/// the count that says what follows from that for the command at hand
+/// ([`LOCK_WITHHELD_FROM_COMPARISON`] for the ones that compare), worded to read after
+/// one resource or several.
 ///
 /// It leads for the same reason [`render_unverifiable`] and [`render_undetermined`] do,
 /// and it leads *them*: a withheld pin is the **cause** of the undetermined resource
@@ -336,8 +337,8 @@ pub(super) fn render_lock_standing(out: &mut String, standing: &LockStanding, so
     }
     let _ = writeln!(
         out,
-        "  LOCK — the pin ledger does not answer for {} resource(s), {so}:",
-        standing.error_count()
+        "  LOCK — the pin ledger does not answer for {}, {so}:",
+        count(standing.error_count(), "resource", "resources")
     );
     for id in &standing.missing {
         let id = escape_line(id);
@@ -419,11 +420,14 @@ pub(super) fn render_undetermined(out: &mut String, held: &[HeldResource]) {
     }
     let (roots, behind): (Vec<&HeldResource>, Vec<&HeldResource>) =
         held.iter().partition(|entry| entry.is_undetermined());
+    // `them` / `their` agree with how many could not be probed
+    let one = roots.len() == 1;
     let _ = writeln!(
         out,
-        "  UNDETERMINED — {} resource(s) could not be probed, so no change is planned for \
-         them and this changeset is partial:",
-        roots.len()
+        "  UNDETERMINED — {} could not be probed, so no change is planned for {} and this \
+         changeset is partial:",
+        count(roots.len(), "resource", "resources"),
+        if one { "it" } else { "them" }
     );
     let render_entries = |out: &mut String, entries: &[&HeldResource]| {
         for entry in entries {
@@ -434,14 +438,27 @@ pub(super) fn render_undetermined(out: &mut String, held: &[HeldResource]) {
     render_entries(out, &roots);
     let _ = writeln!(
         out,
-        "  their live state is unknown: neither converged nor drifted. resolve the probe \
-         failure and re-run."
+        "  {} live state is unknown: neither converged nor drifted. resolve the probe \
+         failure and re-run.",
+        if one { "its" } else { "their" }
     );
     if !behind.is_empty() {
+        // `held behind it — ` or `held behind them — `, as many as could not be probed:
+        // the differential harness finds this line by those two texts (`exactly_held` in
+        // the xtask)
+        let (them, they_do) = if one {
+            ("it", "it does")
+        } else {
+            ("them", "they do")
+        };
         let _ = writeln!(
             out,
-            "  held behind them — {} resource(s) can't change until they do:",
-            behind.len()
+            "  held behind {them} — {} until {they_do}:",
+            count(
+                behind.len(),
+                "resource can't change",
+                "resources can't change"
+            )
         );
         render_entries(out, &behind);
     }

@@ -1,4 +1,4 @@
-  LOCK — the pin ledger does not answer for 1 resource(s), so they are withheld from the comparison below:
+  LOCK — the pin ledger does not answer for 1 resource, withheld from the comparison below:
       blob-tracked — no pin yet; run `zap update blob-tracked`
   UNVERIFIABLE — 1 referenced variable(s) are unset or empty, so this comparison cannot be trusted:
       ZR_UNSET

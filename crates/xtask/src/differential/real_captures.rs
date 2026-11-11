@@ -87,6 +87,31 @@ const PAIRS: [(&str, &str, &str, &str); 18] = {
 /// nothing the projection reads.
 const SAME: [&str; 4] = ["absent", "drifted", "held", "converged"];
 
+/// `old` with its banners worded as the renderer words them now: the frozen `old`
+/// captures predate the `LOCK` and `UNDETERMINED` banners' counts agreeing with their
+/// noun (`1 resource`, not `1 resource(s)`), and the projection keeps a banner whole, so
+/// the two generations' decisions compare only once the older's banners read as the
+/// newer's. Each phrase is one the `held` case's frozen captures hold (one resource
+/// withheld, one that could not be probed), rewritten whole.
+fn as_worded_now(old: &str) -> String {
+    [
+        (
+            "for 1 resource(s), so they are withheld from the comparison below:",
+            "for 1 resource, withheld from the comparison below:",
+        ),
+        (
+            "1 resource(s) could not be probed, so no change is planned for them and",
+            "1 resource could not be probed, so no change is planned for it and",
+        ),
+        (
+            "\n  their live state is unknown:",
+            "\n  its live state is unknown:",
+        ),
+    ]
+    .into_iter()
+    .fold(old.to_owned(), |text, (then, now)| text.replace(then, now))
+}
+
 fn pair_of(case: &str, command: &str) -> (&'static str, &'static str) {
     PAIRS
         .iter()
@@ -102,7 +127,7 @@ fn two_generations_of_the_same_decision_project_equal() {
             continue;
         }
         assert_eq!(
-            project(command, old),
+            project(command, &as_worded_now(old)),
             project(command, new),
             "{case} {command}"
         );
@@ -139,7 +164,7 @@ fn a_drifted_plan_diff_projects_to_its_changes_and_attributes() {
 fn a_held_plan_keeps_every_banner_line() {
     let (old, new) = pair_of("held", "plan");
     let projected = project("plan", new);
-    assert_eq!(projected, project("plan", old));
+    assert_eq!(projected, project("plan", &as_worded_now(old)));
     let header = new.find("plan — target ").expect("a header");
     assert!(projected.starts_with(&new[..header]), "{projected}");
     for banner in ["  LOCK — ", "  UNVERIFIABLE — ", "  UNDETERMINED — "] {
@@ -363,7 +388,7 @@ fn pairs_of(case: &str, code: i32) -> Vec<Pair> {
             let (old, new) = pair_of(case, command);
             Pair {
                 command,
-                oracle: run_of(code, old),
+                oracle: run_of(code, &as_worded_now(old)),
                 candidate: run_of(code, new),
             }
         })

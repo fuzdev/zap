@@ -655,6 +655,8 @@ async fn cmd_config_validate(args: &ConfigValidate) -> Result<u8, Error> {
     // bare eval — `config validate` is the pre-flight an operator/CI runs to catch a
     // hardcoded secret, a dangling reference, or a cycle before a real plan/apply.
     let count = zap_core::commands::run_config_validate(path, fgro.as_deref()).await?;
+    // `ok: N resource(s)` as it is, for any count: the differential harness reads the
+    // count from this line by that text (`parse_resource_count` in the xtask)
     Ok(deliver(
         ReportTo::Stdout,
         &format!("ok: {count} resource(s)\n"),

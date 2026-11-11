@@ -3778,8 +3778,8 @@ async fn the_preflight_digest_names_the_on_disk_pin() {
     let rendered = render_deploy(&dry.unwrap());
     assert!(
         rendered.contains(
-            "  LOCK — the pin ledger does not answer for 1 resource(s), so the drift \
-             preflight cannot check them and a wetrun stops there:\n"
+            "  LOCK — the pin ledger does not answer for 1 resource, which the drift \
+             preflight cannot check, so a wetrun stops there:\n"
         ),
         "{rendered}"
     );
@@ -4358,8 +4358,8 @@ async fn a_wetrun_bailing_on_a_withheld_pin_renders_the_lock_standing() {
     assert_eq!(refused.lock_standing.stale, ["blob"]);
     assert!(
         render_deploy(&refused).contains(
-            "  LOCK — the pin ledger does not answer for 1 resource(s), so the drift \
-             preflight cannot check them and a wetrun stops there:\n      blob — stale: "
+            "  LOCK — the pin ledger does not answer for 1 resource, which the drift \
+             preflight cannot check, so a wetrun stops there:\n      blob — stale: "
         ),
         "{}",
         render_deploy(&refused)
