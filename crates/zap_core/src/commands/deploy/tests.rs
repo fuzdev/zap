@@ -108,6 +108,7 @@ fn failed(left: FailureState) -> DeployOutcome {
 
 fn report(outcome: DeployOutcome, step_outcomes: Vec<StepOutcome>) -> DeployReport {
     DeployReport {
+        preview: None,
         target: "host.example".to_owned(),
         wetrun: !matches!(
             outcome,
@@ -8134,5 +8135,63 @@ async fn each_step_is_timed_around_its_run_and_the_total_covers_the_rollback() {
         "total {:?} < preflight {:?} + steps {steps:?} + rollback {took:?}",
         run.total,
         run.preflight
+    );
+}
+
+/// A deploy preview carries its record, for the binary to withdraw when the report that
+/// shows it never arrives: withdrawn, the next wetrun has nothing to bind to and refuses
+/// with nothing run. A dry run and a refusal carry one; a deploy that ran carries none.
+#[tokio::test]
+async fn a_withdrawn_deploy_preview_binds_no_wetrun() {
+    use crate::commands::Withdrawal;
+
+    let rig = Rig::new("def5678");
+    let dry = rig.deploy(&DeployOptions::default()).await.unwrap();
+    let rig = rig.recording(&dry.plan);
+    // through what the binary reads of the report, as it withdraws one
+    let preview = crate::commands::Delivered::preview(&dry).expect("a dry run records its preview");
+    assert_eq!(preview.withdraw().unwrap(), Withdrawal::Withdrawn);
+    assert_eq!(rig.preview(), None);
+
+    let refused = rig.deploy(&wetrun()).await.unwrap();
+    assert_eq!(
+        refused.outcome,
+        DeployOutcome::Refused(PlanUnreviewed::NoPreview { prior: None })
+    );
+    assert_eq!(rig.issued_past_the_plan(), Vec::<String>::new());
+    // the refusal is a preview too, with its own record; left standing, it binds
+    assert!(crate::commands::Delivered::preview(&refused).is_some());
+    let deployed = rig.deploy(&wetrun()).await.unwrap();
+    assert!(
+        matches!(deployed.outcome, DeployOutcome::Deployed(_)),
+        "{deployed:?}"
+    );
+    assert_eq!(crate::commands::Delivered::preview(&deployed), None);
+}
+
+/// The binary withdraws the preview a deploy's report carries, and only that one: what
+/// it reads of the report is the report's own record, for every outcome that holds one.
+#[test]
+fn a_deploy_report_hands_the_binary_its_own_preview() {
+    use crate::commands::{Delivered, RecordedPreview};
+    use zap_types::deploy_preview::DeployPreviewPass;
+
+    let record = RecordedPreview::deploy(
+        "/zap-test-home/previews/host.example.json".into(),
+        DeployPreviewPass::DryRun,
+        "host.example".to_owned(),
+        "deadbeef".to_owned(),
+        "2026-01-02T03:04:05Z".to_owned(),
+    );
+    for outcome in [DeployOutcome::DryRun, refused("stale")] {
+        let report = DeployReport {
+            preview: Some(record.clone()),
+            ..report(outcome.clone(), vec![])
+        };
+        assert_eq!(Delivered::preview(&report), Some(&record), "{outcome:?}");
+    }
+    assert_eq!(
+        Delivered::preview(&report(DeployOutcome::DryRun, vec![])),
+        None
     );
 }

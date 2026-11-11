@@ -60,6 +60,9 @@ impl super::Delivered for LockReport {
     fn changed(&self) -> bool {
         true
     }
+    fn preview(&self) -> Option<&super::RecordedPreview> {
+        None
+    }
 }
 
 /// Result of a `zap lock` re-baseline.
@@ -283,6 +286,9 @@ impl super::Delivered for LockCheckReport {
     }
     fn changed(&self) -> bool {
         false
+    }
+    fn preview(&self) -> Option<&super::RecordedPreview> {
+        None
     }
 }
 

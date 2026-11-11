@@ -17,6 +17,7 @@ use zap_types::last_run::RunCommand;
 use zap_types::plan::{Change, ChangeAction, HeldResource, Plan};
 use zap_types::schema::{ResourceId, ZapConfig};
 
+use super::preview::RecordedPreview;
 use super::{
     Diffed, PassContext, PlanAddress, detect_and_diff, eval_target, render_trigger,
     resolve_machine, target_location,
@@ -60,6 +61,9 @@ pub struct PlanReport {
     /// withheld from detection, so an entry here is normally *why* its resource is
     /// [`held`](Self::held) — and it's the standing an operator can act on.
     pub lock_standing: LockStanding,
+    /// The preview this pass was recorded as, when it was: what the binary withdraws
+    /// when the report never arrives ([`RecordedPreview::withdraw`]).
+    pub preview: Option<RecordedPreview>,
 }
 
 /// A plan only answers.
@@ -69,6 +73,9 @@ impl super::Delivered for PlanReport {
     }
     fn changed(&self) -> bool {
         false
+    }
+    fn preview(&self) -> Option<&RecordedPreview> {
+        self.preview.as_ref()
     }
 }
 
@@ -202,6 +209,7 @@ async fn plan_unmasked(
         result,
         detected,
         plan_hash: hash,
+        recorded: preview,
         ..
     } = detect_and_diff(conn, config, ctx, &machine, lock.as_ref(), RunCommand::Plan).await?;
     let unrecorded = machine.unidentified_host;
@@ -225,6 +233,7 @@ async fn plan_unmasked(
         unrecorded,
         warnings,
         detected,
+        preview,
     })
 }
 
@@ -383,6 +392,7 @@ mod tests {
 
     fn report(changes: Vec<Change>, detected: BTreeMap<ResourceId, Detection>) -> PlanReport {
         PlanReport {
+            preview: None,
             target: "local".to_owned(),
             plan: Plan {
                 references: BTreeMap::new(),

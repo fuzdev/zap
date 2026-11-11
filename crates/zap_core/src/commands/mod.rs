@@ -28,6 +28,7 @@ pub mod detect;
 mod detect_pass;
 pub mod lock;
 pub mod plan;
+pub mod preview;
 pub mod prompt;
 mod render;
 pub mod status;
@@ -44,6 +45,7 @@ pub use lock::{
     LockCheckReport, LockReport, render_lock, render_lock_check, run_lock, run_lock_check,
 };
 pub use plan::{render_plan, render_plan_diff, run_plan};
+pub use preview::{RecordedPreview, Withdrawal};
 pub use prompt::{Confirmation, Prompt};
 pub use render::REFERENCE_VALUE_SHOWN;
 pub use status::{render_status, run_status};
@@ -54,7 +56,9 @@ pub use update::{UpdateReport, render_update, run_update};
 /// Its exit code, and whether its run changed something besides answering, which decides
 /// the exit code of a run whose report couldn't be written: a run that changed the machine
 /// or the lock keeps its own code, which describes them; one whose report was its answer
-/// fails where it would have succeeded, since the answer never arrived.
+/// fails where it would have succeeded, since the answer never arrived. And the preview
+/// the run recorded, which the binary withdraws when the report that shows it can't be
+/// written ([`RecordedPreview::withdraw`]).
 ///
 /// Each report says so beside its own type, where its fixtures can hold it to it, so the
 /// binary holds no per-report rule of its own.
@@ -63,6 +67,9 @@ pub trait Delivered {
     fn exit_code(&self) -> u8;
     /// Whether the run changed the machine or the lock.
     fn changed(&self) -> bool;
+    /// The preview the run recorded, if it recorded one. No default, so a report that
+    /// records one can't leave it bound by leaving this out.
+    fn preview(&self) -> Option<&RecordedPreview>;
 }
 
 // The helpers the command modules share, each reached from them as `super::<name>`.

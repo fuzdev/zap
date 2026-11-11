@@ -177,7 +177,8 @@ plain reference's value), is in
 `--expect-plan` with the hash you approved, or a pipeline given the hash approved
 in a pull request, can execute only that plan. Without `--expect-plan`, the
 reviewed plan is the host's last recorded preview, which Zap records when it
-prints it, not when anyone reads it. A plan whose host, connecting
+prints it, not when anyone reads it, and withdraws when its output couldn't be
+written. A plan whose host, connecting
 user, or deploy health domain resolves through a masked reference gets no hash,
 and its wetrun is an error ([env.md](./env.md#masked-hosts-and-review)).
 

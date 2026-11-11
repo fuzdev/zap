@@ -23,7 +23,7 @@ use std::io::IsTerminal as _;
 use std::sync::Arc;
 
 use argh::FromArgs;
-use zap_core::commands::{Delivered, Prompt};
+use zap_core::commands::{Delivered, Prompt, RecordedPreview, Withdrawal};
 use zap_core::error::Error;
 use zap_core::escape::{escape_join, escape_line};
 use zap_core::progress::ProgressSink;
@@ -462,7 +462,8 @@ const fn exit_code_after(code: u8, effect: Effect, written: bool) -> u8 {
 
 /// Write `report` (rendered as `rendered`) to `to`, and return the run's exit code
 /// ([`exit_code_after`]). A write that fails says so on standard error, best-effort:
-/// when standard error is the stream that failed, nothing more can be said.
+/// when standard error is the stream that failed, nothing more can be said. It also
+/// withdraws the preview the run recorded ([`withdraw`]), whose report never arrived.
 fn deliver(to: ReportTo, rendered: &str, report: &impl Delivered) -> u8 {
     let written = to.write(rendered);
     if let Err(why) = &written {
@@ -470,9 +471,32 @@ fn deliver(to: ReportTo, rendered: &str, report: &impl Delivered) -> u8 {
             "{}\n",
             escape_line(&format!("error: the report could not be written: {why}"))
         ));
+        if let Some(preview) = report.preview() {
+            withdraw(preview);
+        }
     }
     let effect = Effect::changed_if(report.changed());
     exit_code_after(report.exit_code(), effect, written.is_ok())
+}
+
+/// Withdraw `preview`, recorded by a run whose report couldn't be written, so the next
+/// wetrun without `--expect-plan` refuses rather than binding to a plan whose report
+/// never arrived; say so on standard error, best-effort. A record that is no longer this
+/// run's (a later preview, another pass's report) is left alone, and nothing is said. A
+/// withdrawal that fails is said too, and changes no exit code: the run's is the lost
+/// report's.
+fn withdraw(preview: &RecordedPreview) {
+    let said = match preview.withdraw() {
+        Ok(Withdrawal::Withdrawn) => {
+            "its preview was withdrawn: a wetrun without --expect-plan needs a new one".to_owned()
+        }
+        Ok(Withdrawal::Superseded | Withdrawal::Gone) => return,
+        Err(why) => format!(
+            "error: its preview could not be withdrawn ({why}), so a wetrun without \
+             --expect-plan can still bind to the plan whose report never arrived"
+        ),
+    };
+    say(&format!("{}\n", escape_line(&said)));
 }
 
 /// The prompt a wetrun with no review asks on: this process's terminal, never under
@@ -614,6 +638,9 @@ impl Delivered for Answer {
     }
     fn changed(&self) -> bool {
         false
+    }
+    fn preview(&self) -> Option<&RecordedPreview> {
+        None
     }
 }
 

@@ -175,11 +175,13 @@ as the same user, with the same values for every reference that isn't a secret.
 An empty plan needs no review.
 
 A preview is recorded when Zap prints it, not when anyone reads it: Zap knows
-what it wrote, not what reached a reader. A preview sent to `/dev/null`, cut
-short by `head`, or whose output couldn't be written at all still binds the
-next wetrun run without `--expect-plan`. When the output may be truncated, or
-the one who reads the preview isn't the one who runs the wetrun, bind with
-`--expect-plan`: its hash is the preview's last line, the first one a
+what it wrote, not what reached a reader. When the write itself fails (a full
+device, a pipe whose reader has gone), Zap withdraws the preview it recorded
+and says so, and the next wetrun run without `--expect-plan` refuses. A preview
+that was written but not read still binds that wetrun: one sent to `/dev/null`,
+or cut short by `head` after the pipe took it whole. When the output may be
+truncated, or the one who reads the preview isn't the one who runs the wetrun,
+bind with `--expect-plan`: its hash is the preview's last line, the first one a
 cut-short preview loses.
 
 On an interactive terminal, a wetrun whose plan has no review asks for the

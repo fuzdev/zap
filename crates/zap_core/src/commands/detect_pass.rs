@@ -13,7 +13,7 @@ use zap_types::schema::{ResourceId, ResourceKind, ZapConfig};
 
 use crate::connection::Connection;
 use crate::error::{Error, Previewed, Result};
-use crate::home::take_record;
+use crate::home::{last_run_path_for, take_record};
 use crate::last_run::{build_last_run, report_var, write_last_run};
 use crate::lock::{ColdStart, ResolvedLock, inspect_lock, resolve_lock};
 use crate::resolve::env_var;
@@ -21,6 +21,7 @@ use crate::resource::pending::{declares_trigger, marker_stem};
 use crate::resource::{DetectionPass, Markers, detect_all};
 use crate::secret::SecretMasker;
 
+use super::preview::RecordedPreview;
 use super::{PlanAddress, ResolvedMachine, unverifiable_refs};
 
 /// Build the in-memory lock for a run: load `zap.lock` and resolve any missing tracked
@@ -115,6 +116,10 @@ pub(super) async fn detect_pass(
 /// `plan_hash` is the plan the pass computed, when it planned and the plan has an
 /// address ([`detect_and_diff`]).
 ///
+/// Returns the record as a [`RecordedPreview`] when it was written and is a preview —
+/// a pass that rendered a plan for review ([`RunCommand::previews_plan`]) with a hash —
+/// for the binary to withdraw if the report that shows it never arrives.
+///
 /// None either for a host that resolves through a masked reference
 /// ([`unidentified_host_message`]): the report's file name and `host` would be a token
 /// every machine behind the reference shares, so one machine's verdicts would be read
@@ -128,18 +133,16 @@ pub(super) fn record_pass(
     pass: &DetectionPass,
     command: RunCommand,
     plan_hash: Option<&str>,
-) {
-    let Some(zap_home) = ctx.zap_home else {
-        return;
-    };
+) -> Option<RecordedPreview> {
+    let zap_home = ctx.zap_home?;
     let config_path = ctx.config_path;
     if machine.unidentified_host.is_some() {
-        return;
+        return None;
     }
     let host = machine.machine.host().to_owned();
     let var = report_var(config, ctx.masker);
     let Ok((on_disk, _)) = inspect_lock(config, config_path, env_var) else {
-        return;
+        return None;
     };
     let unverifiable = unverifiable_refs(config);
     let report = build_last_run(
@@ -152,7 +155,14 @@ pub(super) fn record_pass(
         unverifiable,
         plan_hash.map(str::to_owned),
     );
-    let _ = write_last_run(zap_home, config_path, &report);
+    write_last_run(zap_home, config_path, &report).ok()?;
+    let plan_hash = report.plan_hash.filter(|_| command.previews_plan())?;
+    Some(RecordedPreview::last_run(
+        last_run_path_for(zap_home, config_path, &report.host),
+        command,
+        plan_hash,
+        report.ran_at,
+    ))
 }
 
 /// Spend the review a wetrun passed, before its first change: take the recorded
@@ -206,6 +216,8 @@ pub(super) struct Diffed {
     pub plan_hash: PlanAddress,
     /// The pass the diff was taken from.
     pub pass: DetectionPass,
+    /// The preview [`detect_and_diff`] recorded the pass as, when it was one.
+    pub recorded: Option<RecordedPreview>,
 }
 
 /// Detect live state and diff it to the plan fact — the shared core of `plan`, `apply`,
@@ -238,11 +250,11 @@ pub(super) async fn detect_and_diff(
     lock: Option<&ZapLock>,
     command: RunCommand,
 ) -> Result<Diffed> {
-    let diffed = diff_unrecorded(conn, config, ctx, machine, lock).await?;
+    let mut diffed = diff_unrecorded(conn, config, ctx, machine, lock).await?;
     // The report carries the plan this pass computed, so a later wetrun can bind to it
     // (`review_plan`); recorded after the diff, which is why this doesn't go through
     // `detect_pass`.
-    record_pass(
+    diffed.recorded = record_pass(
         ctx,
         config,
         machine,
@@ -311,6 +323,7 @@ pub(super) async fn diff_unrecorded(
         detected,
         plan_hash,
         pass,
+        recorded: None,
     })
 }
 

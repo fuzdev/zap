@@ -155,7 +155,8 @@ changes ran. Exit 1. [concepts.md](./concepts.md#apply-asserts-convergence)
 
 **Reviewed plan** — the plan a wetrun must match to execute: the one named by
 `--expect-plan <hash>`, or the one in the host's last-run report when that pass
-was a preview, recorded when Zap printed it, whether or not anyone read it.
+was a preview, recorded when Zap printed it, whether or not anyone read it, and
+withdrawn when its output couldn't be written.
 [concepts.md](./concepts.md#a-wetrun-executes-only-the-plan-you-reviewed)
 
 **Root** — a detection privilege: root on every connection.

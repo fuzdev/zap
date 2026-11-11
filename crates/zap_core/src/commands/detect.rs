@@ -64,6 +64,9 @@ impl super::Delivered for DetectReport {
     fn changed(&self) -> bool {
         false
     }
+    fn preview(&self) -> Option<&super::RecordedPreview> {
+        None
+    }
 }
 
 impl DetectReport {

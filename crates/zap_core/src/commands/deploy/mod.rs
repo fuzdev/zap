@@ -32,9 +32,11 @@
 //! from the drift preflight on, and anything else is the refusal. The hash is rendered
 //! only with the plan it stands for, and a preview is recorded only by a pass that
 //! renders one ([`DeployOutcome::preview_pass`]), before the binary writes it: the record
-//! says the plan was printed, not that anyone read it, so a preview whose output was
-//! discarded or cut short still binds the next bare wetrun, and `--expect-plan` is the
-//! binding for output that may be truncated or a reader who isn't the runner. A deploy
+//! says the plan was printed, not that anyone read it. The binary withdraws it when its
+//! write fails ([`DeployReport::preview`], `super::preview`); a preview whose output was
+//! written but discarded or cut short still binds the next bare wetrun, and
+//! `--expect-plan` is the binding for output that may be truncated or a reader who isn't
+//! the runner. A deploy
 //! that gets as far as its steps withdraws the preview first, so one review covers one
 //! execution, whichever way it ends. The preview is a record of its own: the last-run
 //! report `apply` binds to is neither read nor written by it.
@@ -94,6 +96,7 @@ use zap_types::plan::{HeldResource, PlanResult, Trigger};
 use zap_types::schema::{ResourceId, ResourceKind, ZapConfig};
 use zap_types::text::Text;
 
+use super::preview::RecordedPreview;
 use super::prompt::{self, Confirmation, DEPLOY_QUESTION, Prompt};
 use super::{
     Diffed, NAMES_NO_ONE_MACHINE, PassContext, connecting_user, detect_and_diff, eval_target,
@@ -350,6 +353,9 @@ pub struct DeployReport {
     /// [`Declined`](Confirmation::Declined) on one [`Refused`](DeployOutcome::Refused)
     /// after it. `None` when nothing was asked.
     pub confirmation: Option<Confirmation>,
+    /// The record behind [`recorded`](Self::recorded): what the binary withdraws when
+    /// the report never arrives ([`RecordedPreview::withdraw`]).
+    pub preview: Option<RecordedPreview>,
 }
 
 impl DeployOutcome {
@@ -373,8 +379,9 @@ impl DeployOutcome {
     /// executed none of it. `Some` exactly for the outcomes whose plan and hash were
     /// rendered with nothing run, which are the ones recorded as the host's deploy
     /// preview — so a recorded hash is always one rendered with its plan. Rendered, not
-    /// read: the record is written before the binary writes the report, and stays when
-    /// that write fails or a reader cuts it short.
+    /// read: the record is written before the binary writes the report, which withdraws
+    /// it when that write fails, and leaves it when a reader discards or cuts short what
+    /// was written.
     #[must_use]
     pub const fn preview_pass(&self) -> Option<DeployPreviewPass> {
         match self {
@@ -426,6 +433,9 @@ impl super::Delivered for DeployReport {
     }
     fn changed(&self) -> bool {
         self.streamed()
+    }
+    fn preview(&self) -> Option<&RecordedPreview> {
+        self.preview.as_ref()
     }
 }
 
@@ -712,7 +722,10 @@ async fn deploy_unmasked(
                 &report.plan.host,
                 &report.plan_hash,
             ) {
-                Ok(()) => report.recorded = Some(pass),
+                Ok(preview) => {
+                    report.recorded = Some(pass);
+                    report.preview = Some(preview);
+                }
                 Err(why) => report.warnings.push(format!(
                     "this preview was not recorded ({why}), so a wetrun binds to it only \
                      with --expect-plan {}",
@@ -755,6 +768,7 @@ async fn deploy_unmasked(
         lock_standing: LockStanding::default(),
         recorded: None,
         confirmation: None,
+        preview: None,
     };
 
     // Already-deployed short-circuit — for a `current` that names a release on the host.
@@ -1044,7 +1058,8 @@ fn spend_preview(
     )
 }
 
-/// Record `pass` as the deploy preview of `plan_hash` on `host`.
+/// Record `pass` as the deploy preview of `plan_hash` on `host`, and return the record
+/// for the binary to withdraw if the report that shows it never arrives.
 ///
 /// # Errors
 /// Why nothing was recorded — no `~/.zap` root, or the write failed — for the warning
@@ -1055,14 +1070,17 @@ fn record_preview(
     pass: DeployPreviewPass,
     host: &str,
     plan_hash: &str,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<RecordedPreview, String> {
     let zap_home = zap_home.ok_or("zap has no state directory: set ZAP_HOME or HOME")?;
-    write_deploy_preview(
-        zap_home,
-        config_path,
-        &new_deploy_preview(pass, host, plan_hash),
-    )
-    .map_err(|error| error.to_string())
+    let preview = new_deploy_preview(pass, host, plan_hash);
+    write_deploy_preview(zap_home, config_path, &preview).map_err(|error| error.to_string())?;
+    Ok(RecordedPreview::deploy(
+        deploy_preview_path_for(zap_home, config_path, host),
+        pass,
+        preview.host,
+        preview.plan_hash,
+        preview.ran_at,
+    ))
 }
 
 /// Why this config's deploy plan names no one machine, if it doesn't: its target host,

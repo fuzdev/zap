@@ -122,6 +122,9 @@ impl super::Delivered for StatusReport {
     fn changed(&self) -> bool {
         false
     }
+    fn preview(&self) -> Option<&super::RecordedPreview> {
+        None
+    }
 }
 
 impl StatusReport {

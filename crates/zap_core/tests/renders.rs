@@ -763,6 +763,7 @@ fn plan_report(plan_hash: PlanAddress) -> PlanReport {
     changes.push(triggered_change());
     changes.extend(declared_changes());
     PlanReport {
+        preview: None,
         target: h("report.target"),
         plan: Plan {
             references: references("plan.reference"),
@@ -823,6 +824,7 @@ fn apply_report(wetrun: bool, refused: Option<PlanUnreviewed>, hash: PlanAddress
     let plan = plan_report(hash);
     let executed = wetrun && refused.is_none();
     ApplyReport {
+        preview: None,
         target: plan.target,
         wetrun,
         plan: plan.plan,
@@ -998,6 +1000,7 @@ fn deploy_report(outcome: DeployOutcome) -> DeployReport {
     );
     let stepped = outcome.run().is_some();
     DeployReport {
+        preview: None,
         target: h("report.target"),
         wetrun,
         recorded: match outcome {
@@ -1866,6 +1869,7 @@ fn a_change() -> Change {
 /// `plan` under the header a target with a referenced host has, as each preview renders it.
 fn previews(plan: &Plan) -> [(&'static str, String); 3] {
     let report = PlanReport {
+        preview: None,
         target: marker("HOST"),
         plan: plan.clone(),
         plan_hash: PlanAddress::Hash("deadbeef".to_owned()),
@@ -1877,6 +1881,7 @@ fn previews(plan: &Plan) -> [(&'static str, String); 3] {
         lock_standing: LockStanding::default(),
     };
     let applied = ApplyReport {
+        preview: None,
         target: report.target.clone(),
         wetrun: false,
         plan: plan.clone(),

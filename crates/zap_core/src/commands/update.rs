@@ -124,6 +124,9 @@ impl super::Delivered for UpdateReport {
             )
         })
     }
+    fn preview(&self) -> Option<&super::RecordedPreview> {
+        None
+    }
 }
 
 impl UpdateReport {

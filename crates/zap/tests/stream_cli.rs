@@ -125,3 +125,66 @@ fn a_lost_apply_report_fails_only_a_wetrun_that_changed_nothing() {
     assert_eq!(converged.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains(LOST), "{stderr}");
 }
+
+/// A preview whose report couldn't be written is withdrawn: the next wetrun without
+/// `--expect-plan` has nothing to bind to, refuses, and runs nothing. A preview whose
+/// report was written and thrown away (`>/dev/null`) is no lost report, and binds.
+#[test]
+fn a_preview_whose_report_never_arrived_binds_no_wetrun() {
+    if !fgro_available() {
+        eprintln!("skipping the withdrawn preview test: ZAP_FGRO not set");
+        return;
+    }
+    let proj = scratch::tempdir().unwrap();
+    let home = scratch::tempdir().unwrap();
+    let managed = proj.path().join("managed");
+    scratch::write_config(
+        proj.path().join("zap.ts"),
+        format!(
+            "export default (zap) => {{\n    zap.target({{local: true}});\n    \
+             zap.directory({{id: 'managed', path: {:?}}});\n}};\n",
+            managed.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    let run = |args: &[&str], full| zap_in(proj.path(), home.path(), args, full);
+    let run_quietly = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args(args)
+            .current_dir(proj.path())
+            .env("ZAP_HOME", home.path().join(".zap"))
+            .env("HOME", home.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .output()
+            .expect("failed to spawn the zap binary")
+    };
+
+    for (preview, code) in [(&["apply"][..], 2), (&["plan"][..], 1)] {
+        let lost = run(preview, Full::Stdout);
+        let stderr = String::from_utf8_lossy(&lost.stderr);
+        assert_eq!(lost.status.code(), Some(code), "{preview:?}: {stderr}");
+        assert!(stderr.contains(LOST), "{preview:?}: {stderr}");
+        assert!(
+            stderr.contains("its preview was withdrawn"),
+            "{preview:?}: {stderr}"
+        );
+
+        let refused = run(&["apply", "--wetrun"], Full::Stderr);
+        let stdout = String::from_utf8_lossy(&refused.stdout);
+        assert_eq!(refused.status.code(), Some(2), "{preview:?}: {stdout}");
+        assert!(stdout.contains("REFUSED"), "{preview:?}: {stdout}");
+        assert!(!managed.exists(), "{preview:?}");
+    }
+
+    // written whole, then discarded: the preview stands, and the wetrun binds to it
+    assert_eq!(run_quietly(&["apply"]).status.code(), Some(2));
+    let ran = run(&["apply", "--wetrun"], Full::Stderr);
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ran.stdout)
+    );
+    assert!(managed.is_dir());
+}

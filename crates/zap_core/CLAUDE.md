@@ -26,7 +26,10 @@ A map; each module's `//!` doc and its items' rustdoc are the detail.
   are pure. `deploy/` is the release push (`mod.rs` the run, its gates and drift
   preflight; `checkout.rs` the git reads; `live.rs` the target's live release;
   `walk.rs` the step walk; `health.rs` the HTTP polls; `rollback.rs` the
-  auto-rollback; `render.rs` its text), `prompt.rs` the terminal confirmation rule. The pieces the cores share:
+  auto-rollback; `render.rs` its text), `prompt.rs` the terminal confirmation rule,
+  `preview.rs` the preview a run recorded (`RecordedPreview`) and its compare-and-delete
+  withdrawal, which the bin runs when the report that shows it can't be written. The
+  pieces the cores share:
   `target.rs` (the two eval seams, the private `config_gates`, and binding the
   target), `detect_pass.rs` (the detection pass, its record, and the diff),
   `checks.rs` (the structural and env gates, the plan's findings, and the

@@ -2192,6 +2192,7 @@ fn plan_and_detect_lead_with_the_comparison_lock_banner() {
         ..LockStanding::default()
     };
     let plan = PlanReport {
+        preview: None,
         target: "local".to_owned(),
         plan: Plan {
             references: std::collections::BTreeMap::new(),

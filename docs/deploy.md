@@ -271,11 +271,12 @@ with the same flags. A wetrun fired cold becomes the preview, and the next one
 executes if nothing moved. There is no flag that skips the review, and a dry
 run rejects `--expect-plan`.
 
-The preview is recorded when Zap prints it, not when anyone reads it: a dry run
-sent to `/dev/null`, cut short by `head`, or whose output couldn't be written
-still binds the next wetrun run without `--expect-plan`. When the output may be
-truncated, or the one who reads the preview isn't the one who deploys, pass
-`--expect-plan` with the hash on the preview's last line
+The preview is recorded when Zap prints it, not when anyone reads it. A dry run
+whose output couldn't be written is withdrawn, so the next wetrun run without
+`--expect-plan` refuses; one sent to `/dev/null`, or cut short by `head` after
+the pipe took it whole, still binds it. When the output may be truncated, or
+the one who reads the preview isn't the one who deploys, pass `--expect-plan`
+with the hash on the preview's last line
 ([concepts.md](./concepts.md#a-wetrun-executes-only-the-plan-you-reviewed)).
 
 On an interactive terminal (standard input and standard error both terminals),

@@ -208,8 +208,10 @@ line.
 A wetrun executes only the plan you reviewed: the plan it computes must equal,
 hash for hash, the one named by `--expect-plan <hash>` or the one in the most
 recent preview on this host. Otherwise it **refuses**, changes nothing, and
-exits 2. A preview binds once Zap has printed it, read or not: one sent to
-`/dev/null` or cut short by `head` binds the same. The rules are in
+exits 2. A preview binds once Zap has written it, read or not: one sent to
+`/dev/null`, or cut short by `head` after the pipe took it whole, binds the
+same. One whose output couldn't be written is withdrawn, and binds nothing. The
+rules are in
 [concepts.md](./concepts.md#a-wetrun-executes-only-the-plan-you-reviewed).
 
 On an interactive terminal, a wetrun whose plan has no review (no preview, or a
@@ -512,8 +514,13 @@ or a full device) prints `error: the report could not be written:` and the
 reason on standard error.
 A run whose report is its answer (`plan`, `detect`, `status`, `lock --check`,
 `config validate`, `version`, the help, a dry run, a refused wetrun) then exits
-1 where it would have exited 0. A preview whose report couldn't be written was
-still recorded, and binds the next wetrun run without `--expect-plan`. A run
+1 where it would have exited 0. A preview whose report couldn't be written is
+withdrawn, and `its preview was withdrawn` follows on standard error: the next
+wetrun run without `--expect-plan` refuses. The preview of a `plan` or an
+`apply` is the host's last-run report, so `zap status` then has no last run for
+that host until the next pass. A record another run has written at its name
+since is left alone, and a run stopped while it writes (a signal) withdraws
+nothing. A run
 that changed something keeps its own code, which describes the machine or the
 lock: an `apply` wetrun that ran changes or pinned what the lock lacked, a
 `deploy` wetrun that reached its steps, `lock`, and an `update` that advanced or

@@ -107,7 +107,7 @@ events. Give the agent `zap plan` and `zap apply` freely and keep `--wetrun` for
 the human, or let it wetrun with `--expect-plan` set to the hash you approved.
 Without the flag, a wetrun binds to the last preview Zap printed on that host,
 whether or not anyone read it: a preview an agent cut short with `head` still
-binds, and the hash is its last line.
+binds once the pipe took it whole, and the hash is its last line.
 
 **How is this different from a shell script with `if` guards?** That script is
 reaching toward what Zap declares: detection (skip what's done), idempotent

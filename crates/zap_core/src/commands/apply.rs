@@ -15,10 +15,11 @@
 //! fired with nothing reviewed becomes the review, and an agent given `--expect-plan`
 //! can prove the plan whose hash it showed is the plan that ran. A preview is recorded
 //! here, before the binary writes the report, so the record says the plan was printed,
-//! not that anyone read it: a preview whose output was discarded, cut short, or never
-//! written still binds the next bare wetrun. `--expect-plan` is the binding for output
-//! that may be truncated, or a reader who isn't the runner. An empty plan needs no
-//! review. **One preview binds
+//! not that anyone read it: the binary withdraws it when its write fails
+//! ([`ApplyReport::preview`], `super::preview`), and a preview whose output was written
+//! but discarded or cut short still binds the next bare wetrun. `--expect-plan` is the
+//! binding for output that may be truncated, or a reader who isn't the runner. An empty
+//! plan needs no review. **One preview binds
 //! one wetrun**: a wetrun that passes the gate claims the recorded preview
 //! (`super::spend_review`) before the lock write and records its own pass only then,
 //! so of two wetruns started on one preview exactly one executes, and the other stops
@@ -47,6 +48,7 @@ use zap_types::lock::ZapLock;
 use zap_types::plan::{HeldResource, HoldCause, Plan, ResidualResource, collect_residual};
 use zap_types::schema::ZapConfig;
 
+use super::preview::RecordedPreview;
 use super::prompt::{self, APPLY_QUESTION, Confirmation, Prompt};
 use super::{
     Diffed, PassContext, PlanAddress, detect_and_diff, detect_pass, diff_unrecorded, eval_target,
@@ -157,6 +159,10 @@ pub struct ApplyReport {
     /// [`Declined`](Confirmation::Declined) on one that then
     /// [`refused`](Self::refused). `None` when nothing was asked.
     pub confirmation: Option<Confirmation>,
+    /// The preview this run was recorded as — a dry run, or a wetrun that refused — when
+    /// it was: what the binary withdraws when the report never arrives
+    /// ([`RecordedPreview::withdraw`]). `None` for a wetrun that executed.
+    pub preview: Option<RecordedPreview>,
 }
 
 impl ApplyReport {
@@ -375,6 +381,7 @@ async fn apply_unmasked(
         result,
         plan_hash: address,
         pass,
+        recorded,
         ..
     } = if wetrun {
         diff_unrecorded(conn, config, ctx, &resolved, lock).await?
@@ -413,7 +420,8 @@ async fn apply_unmasked(
                    warnings: Vec<String>,
                    held: Vec<HeldResource>,
                    refused: Option<PlanUnreviewed>,
-                   confirmation: Option<Confirmation>| ApplyReport {
+                   confirmation: Option<Confirmation>,
+                   preview: Option<RecordedPreview>| ApplyReport {
         target: target_location(&config.target),
         wetrun,
         plan,
@@ -429,6 +437,7 @@ async fn apply_unmasked(
         post_detect_error: None,
         refused,
         confirmation,
+        preview,
     };
 
     // A dry run ends here, with whatever address its plan has. Only a wetrun goes on,
@@ -441,7 +450,7 @@ async fn apply_unmasked(
         }
         (false, address) => {
             super::warn_unrunnable(&mut warnings, unrunnable);
-            return Ok(preview(plan, address, warnings, held, None, None));
+            return Ok(preview(plan, address, warnings, held, None, None, recorded));
         }
     };
 
@@ -474,6 +483,7 @@ async fn apply_unmasked(
                     held.clone(),
                     refused.clone(),
                     Some(Confirmation::Asking),
+                    None,
                 ))
             },
             APPLY_QUESTION,
@@ -485,7 +495,7 @@ async fn apply_unmasked(
     if refused.is_some() {
         // This pass rendered the plan without running it — a preview. Recorded as one
         // so the next wetrun can bind to it.
-        record_pass(
+        let recorded = record_pass(
             ctx,
             config,
             &resolved,
@@ -501,14 +511,18 @@ async fn apply_unmasked(
             held,
             refused,
             confirmation,
+            recorded,
         ));
     }
 
     if !unrunnable.is_empty() {
         // Before the lock write and before any change: a refusal has no side effect. The
         // plan was the reviewed one, and none of it ran — recorded as the preview it
-        // was, so the wetrun that follows the fix needs no second review.
-        record_pass(
+        // was, so the wetrun that follows the fix needs no second review. Its error
+        // reaches the binary as an error, with no report to lose, so this record is never
+        // withdrawn: it re-records the hash that already bound, whether it was printed
+        // here or not.
+        let _ = record_pass(
             ctx,
             config,
             &resolved,
@@ -635,6 +649,7 @@ async fn apply_unmasked(
         post_detect_error,
         refused: None,
         confirmation,
+        preview: None,
     })
 }
 
@@ -644,6 +659,9 @@ impl super::Delivered for ApplyReport {
     }
     fn changed(&self) -> bool {
         Self::changed(self)
+    }
+    fn preview(&self) -> Option<&RecordedPreview> {
+        self.preview.as_ref()
     }
 }
 
@@ -1449,10 +1467,24 @@ export default (zap) => {{
         let dry = rig.dry().await;
         let ran = rig.apply(wetrun()).await.unwrap();
         assert!(ran.refused.is_none() && !ran.plan.changes.is_empty());
-        for (report, changed) in [(&refused, false), (&dry, false), (&ran, true)] {
+        for (report, changed, previewed) in [
+            (&refused, false, true),
+            (&dry, false, true),
+            (&ran, true, false),
+        ] {
             assert_eq!(Delivered::changed(report), changed, "{report:?}");
             assert_eq!(Delivered::exit_code(report), report.exit_code());
+            assert_eq!(
+                Delivered::preview(report).is_some(),
+                previewed,
+                "{report:?}"
+            );
+            assert_eq!(Delivered::preview(report), report.preview.as_ref());
         }
+        // a plan is a preview too, and hands the binary its record
+        let planned = rig.plan().await;
+        assert!(Delivered::preview(&planned).is_some());
+        assert_eq!(Delivered::preview(&planned), planned.preview.as_ref());
 
         let mut converged = Rig::on("a.example.com");
         converged.target.answers.clear();
