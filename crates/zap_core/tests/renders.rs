@@ -29,7 +29,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::local_machine;
-use zap_core::commands::apply::ApplyReport;
+use zap_core::commands::apply::{ApplyReport, ApplyRun};
 use zap_core::commands::deploy::{
     DeployOutcome, DeployReport, DeployRun, FailureState, Rollback, RollbackOutcome, StepRecord,
     StepSummary,
@@ -850,11 +850,20 @@ fn apply_report(wetrun: bool, refused: Option<PlanUnreviewed>, hash: PlanAddress
         } else {
             Vec::new()
         },
-        summary: executed.then_some(RunSummary {
-            total: 3,
-            completed: 1,
-            failed: 1,
-            skipped: 1,
+        run: executed.then(|| ApplyRun {
+            summary: RunSummary {
+                total: 3,
+                completed: 1,
+                failed: 1,
+                skipped: 1,
+            },
+            changes: ["outcome.completed.id", "outcome.failed.id"]
+                .map(|name| zap_core::resource::ChangeRecord {
+                    resource_id: id(name),
+                    took: std::time::Duration::from_millis(1_234),
+                })
+                .to_vec(),
+            total: std::time::Duration::from_secs(83),
         }),
         auto_locked: vec![h("auto_locked")],
         unverifiable: plan.unverifiable,
@@ -1637,6 +1646,7 @@ const HELPERS: &[&str] = &[
     "commands::apply::render_refused",
     "commands::apply::render_residual",
     "commands::apply::render_outcomes",
+    "commands::apply::render_verdict",
     "commands::plan::render_change_diff",
     "commands::status::render_run_unverifiable",
     "commands::deploy::render::render_plan_preview",
@@ -1645,7 +1655,7 @@ const HELPERS: &[&str] = &[
     "commands::deploy::render::render_swap",
     "commands::deploy::render::render_poll",
     "commands::deploy::render::render_run",
-    "commands::deploy::render::render_rows",
+    "commands::result_table::render_rows",
     "commands::deploy::render::render_summary",
     "commands::deploy::render::render_verdict",
 ];
@@ -1889,7 +1899,7 @@ fn previews(plan: &Plan) -> [(&'static str, String); 3] {
         unrecorded: None,
         warnings: Vec::new(),
         outcomes: Vec::new(),
-        summary: None,
+        run: None,
         auto_locked: Vec::new(),
         unverifiable: Vec::new(),
         held: Vec::new(),

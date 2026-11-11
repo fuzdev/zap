@@ -41,15 +41,17 @@
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use zap_types::event::{ChangeOutcome, Event, RunSummary};
 use zap_types::last_run::{PlanUnreviewed, RunCommand, review_plan};
 use zap_types::lock::ZapLock;
 use zap_types::plan::{HeldResource, HoldCause, Plan, ResidualResource, collect_residual};
-use zap_types::schema::ZapConfig;
+use zap_types::schema::{ResourceId, ZapConfig};
 
 use super::preview::RecordedPreview;
 use super::prompt::{self, APPLY_QUESTION, Confirmation, Prompt};
+use super::result_table::{Row, format_elapsed, render_rows};
 use super::{
     Diffed, PassContext, PlanAddress, detect_and_diff, detect_pass, diff_unrecorded, eval_target,
     prepare_lock, record_pass, resolve_machine, target_location,
@@ -61,8 +63,8 @@ use crate::event::{EventHandler, mask_handler};
 use crate::home::{last_run_path_for, zap_home_default};
 use crate::last_run::{read_last_run, read_last_run_file};
 use crate::lock::{ColdStart, lock_path_for, update_zap_lock};
-use crate::progress::{Notice, ProgressSink};
-use crate::resource::{Markers, execute_plan};
+use crate::progress::{Notice, ProgressSink, count};
+use crate::resource::{ChangeRecord, Markers, execute_plan};
 use crate::secret::mask_outcomes;
 
 /// Knobs for an apply run. A struct (not positional bools) so call sites read
@@ -125,8 +127,9 @@ pub struct ApplyReport {
     pub warnings: Vec<String>,
     /// Per-change outcomes, in plan order. Empty on a dry-run.
     pub outcomes: Vec<ChangeOutcome>,
-    /// Derived run counts. `Some` only on a wetrun.
-    pub summary: Option<RunSummary>,
+    /// What the run counted and measured as it ran: its summary, how long each change
+    /// took, and the whole of it. `Some` only on a wetrun that executed.
+    pub run: Option<ApplyRun>,
     /// Tracked `remote_file` ids the cold-start resolve pass pinned this run —
     /// persisted to `zap.lock` on a wetrun, only previewed on a dry-run.
     pub auto_locked: Vec<String>,
@@ -163,6 +166,33 @@ pub struct ApplyReport {
     /// it was: what the binary withdraws when the report never arrives
     /// ([`RecordedPreview::withdraw`]). `None` for a wetrun that executed.
     pub preview: Option<RecordedPreview>,
+}
+
+/// What an apply wetrun that reached its changes counted and measured as it ran.
+///
+/// Carried on the report rather than read from a clock at render time, so a render is a
+/// function of its report; and one value, so a report that executed can't hold a summary
+/// without the time its verdict states, or the reverse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplyRun {
+    /// The run's counts, derived from its outcomes.
+    pub summary: RunSummary,
+    /// Each change that ran, in the order run ([`ChangeRecord`]).
+    pub changes: Vec<ChangeRecord>,
+    /// From the `zap.lock` write before the first change to the end of the re-detect
+    /// after the last: what the apply took once it was bound to its review, the
+    /// re-detect included, since the run's verdict waits on it.
+    pub total: Duration,
+}
+
+impl ApplyRun {
+    /// The record of the change to `resource`, if it ran.
+    #[must_use]
+    pub fn change(&self, resource: &ResourceId) -> Option<&ChangeRecord> {
+        self.changes
+            .iter()
+            .find(|record| &record.resource_id == resource)
+    }
 }
 
 impl ApplyReport {
@@ -214,7 +244,7 @@ impl ApplyReport {
         if !self.held.is_empty() {
             1
         } else if self.wetrun && self.refused.is_none() {
-            let failed = self.summary.is_some_and(|s| s.failed > 0);
+            let failed = self.run.as_ref().is_some_and(|run| run.summary.failed > 0);
             u8::from(failed || !self.residual.is_empty() || self.post_detect_error.is_some())
         } else if !self.unverifiable.is_empty() {
             1
@@ -429,7 +459,7 @@ async fn apply_unmasked(
         unrecorded: unrecorded.clone(),
         warnings,
         outcomes: Vec::new(),
-        summary: None,
+        run: None,
         auto_locked: auto_locked.clone(),
         unverifiable: unverifiable.clone(),
         held,
@@ -558,7 +588,10 @@ async fn apply_unmasked(
     // its steps resolve them again as they run. Nothing of it runs unless both agree.
     super::check_references(&plan, &crate::last_run::report_var(config, masker))?;
 
-    let (outcomes, summary, residual, post_detect_error) = {
+    let (outcomes, run, residual, post_detect_error) = {
+        // The run's clock: from here, the lock write before the first change, to the end
+        // of the re-detect after the last (`ApplyRun::total`).
+        let started = Instant::now();
         // Persist the resolved lock (the operator-side intent ledger) before executing —
         // a write failure aborts before any work, so we never apply without recording
         // intent. Skip an empty lock (nothing to pin → don't litter an empty file).
@@ -594,7 +627,8 @@ async fn apply_unmasked(
 
         // Mask resolved secrets out of the outcomes (command stdout/stderr) at the
         // consumption boundary — `execute_plan` stays masking-unaware.
-        let outcomes = mask_outcomes(masker, execute_plan(conn, &plan, zap_home, &handler).await);
+        let executed = execute_plan(conn, &plan, zap_home, &handler).await;
+        let outcomes = mask_outcomes(masker, executed.outcomes);
         let summary = RunSummary::from_outcomes(&outcomes);
         handler.emit(&Event::RunFinished { summary });
         // Post-apply re-detect — the Observe pass, consumed twice from one probe run.
@@ -630,7 +664,12 @@ async fn apply_unmasked(
             ),
             Err(error) => (Vec::new(), Some(masker.mask(&error.to_string()))),
         };
-        (outcomes, Some(summary), residual, post_detect_error)
+        let run = ApplyRun {
+            summary,
+            changes: executed.records,
+            total: started.elapsed(),
+        };
+        (outcomes, Some(run), residual, post_detect_error)
     };
 
     Ok(ApplyReport {
@@ -641,7 +680,7 @@ async fn apply_unmasked(
         unrecorded,
         warnings,
         outcomes,
-        summary,
+        run,
         auto_locked,
         unverifiable,
         held,
@@ -733,6 +772,9 @@ pub fn render_apply(report: &ApplyReport) -> String {
 
     super::render_warnings(&mut out, &report.warnings);
     super::render_unrecorded(&mut out, report.unrecorded.as_deref());
+    if let Some(run) = &report.run {
+        render_verdict(&mut out, report, run);
+    }
     super::render_address(&mut out, &report.plan_hash);
     out
 }
@@ -805,41 +847,130 @@ fn render_residual(out: &mut String, report: &ApplyReport) {
     );
 }
 
-/// Wetrun body: per-change outcome lines + the run summary.
+/// Wetrun body: a table of each change's outcome — its status, its id, how long it ran
+/// (a skipped change never ran), and a failure's code and error or a skip's reason, in
+/// aligned columns — then the run summary.
 fn render_outcomes(out: &mut String, report: &ApplyReport) {
     if report.outcomes.is_empty() {
         let _ = writeln!(out, "{}", super::empty_changeset_line(&report.held));
     }
-    for outcome in &report.outcomes {
-        match outcome {
-            ChangeOutcome::Completed { resource_id, .. } => {
-                let _ = writeln!(out, "  ok    {}", escape_line(&resource_id.0));
-            }
+    let took = |resource: &ResourceId| {
+        report
+            .run
+            .as_ref()
+            .and_then(|run| run.change(resource))
+            .map(|record| format_elapsed(record.took))
+            .unwrap_or_default()
+    };
+    let rows: Vec<Row> = report
+        .outcomes
+        .iter()
+        .map(|outcome| match outcome {
+            ChangeOutcome::Completed { resource_id, .. } => Row {
+                status: "ok",
+                id: escape_line(&resource_id.0).into_owned(),
+                took: took(resource_id),
+                tag: String::new(),
+                text: String::new(),
+            },
             // A failure quotes what the command or the target said, which can run to
-            // several lines: a block under the outcome's own line.
+            // several lines: a block under the row's own line.
             ChangeOutcome::Failed {
                 resource_id,
                 error,
                 code,
-            } => {
-                let lead = format!("  FAIL  {}  [{code:?}]  — ", escape_line(&resource_id.0));
-                render_block(out, &lead, error);
-            }
+            } => Row {
+                status: "FAIL",
+                id: escape_line(&resource_id.0).into_owned(),
+                took: took(resource_id),
+                tag: format!("[{code:?}]  — "),
+                text: error.clone(),
+            },
             ChangeOutcome::Skipped {
                 resource_id,
                 reason,
-            } => {
-                let lead = format!("  skip  {}  — ", escape_line(&resource_id.0));
-                render_block(out, &lead, reason);
-            }
-        }
-    }
-    if let Some(summary) = report.summary {
+            } => Row {
+                status: "skip",
+                id: escape_line(&resource_id.0).into_owned(),
+                took: took(resource_id),
+                tag: "— ".to_owned(),
+                text: reason.clone(),
+            },
+        })
+        .collect();
+    render_rows(out, &rows);
+    if let Some(run) = &report.run {
+        let summary = run.summary;
         let _ = writeln!(
             out,
             "applied: {} ok, {} failed, {} skipped (of {})",
             summary.completed, summary.failed, summary.skipped, summary.total
         );
+    }
+}
+
+/// The closing verdict of a wetrun that executed, which measured `run`: one line naming
+/// the outcome, the machine the plan is for, and the time the run took
+/// ([`ApplyRun::total`]). Converged,
+/// which is exit 0, or the first of what made it exit 1: the change that failed and what
+/// ran around it, a re-detect that failed, resources that don't read converged, or
+/// resources that were held. The banner it points to says which.
+///
+/// It never opens with `applied: `, the summary line's own start.
+fn render_verdict(out: &mut String, report: &ApplyReport, run: &ApplyRun) {
+    let host = escape_line(report.plan.machine.host());
+    let total = format_elapsed(run.total);
+    let line = match report.outcomes.iter().position(ChangeOutcome::is_failure) {
+        Some(at) => {
+            let id = escape_line(&report.outcomes[at].resource_id().0);
+            let after = report.outcomes.len() - at - 1;
+            format!(
+                "apply FAILED at {id} on {host} after {total} — {}; {}",
+                ran_before(at),
+                skipped_after(after)
+            )
+        }
+        None if report.post_detect_error.is_some() => format!(
+            "apply did not establish convergence on {host} in {total} — the re-detect failed \
+             (RESIDUAL above)"
+        ),
+        None if !report.residual.is_empty() => format!(
+            "apply did not converge {host} in {total} — {} read converged (RESIDUAL above)",
+            count(
+                report.residual.len(),
+                "resource does not",
+                "resources do not"
+            )
+        ),
+        None if !report.held.is_empty() => format!(
+            "apply did not establish convergence on {host} in {total} — {} held \
+             (UNDETERMINED above)",
+            count(report.held.len(), "resource was", "resources were")
+        ),
+        None => format!("converged {host} in {total}, the re-detect included"),
+    };
+    let _ = writeln!(out, "{line}");
+}
+
+/// What a failed run's verdict says of the `ran` changes before the one that failed:
+/// they stay applied, since nothing is rolled back.
+fn ran_before(ran: usize) -> String {
+    match ran {
+        0 => "nothing ran before it".to_owned(),
+        1 => "1 change ran before it and stays applied".to_owned(),
+        _ => format!("{ran} changes ran before it and stay applied"),
+    }
+}
+
+/// What a failed run's verdict says of the `skipped` changes after the one that failed.
+fn skipped_after(skipped: usize) -> String {
+    if skipped == 0 {
+        "it was the last change".to_owned()
+    } else {
+        format!(
+            "{} skipped",
+            count(skipped, "later change was", "later changes were")
+        )
     }
 }
 
@@ -1367,7 +1498,7 @@ export default (zap) => {{
         };
         assert_eq!(ran.refused, None);
         assert_eq!(hash_of(&ran), hash_of(&preview));
-        assert!(ran.summary.is_some());
+        assert!(ran.run.is_some());
         assert!(
             matches!(
                 stopped,
@@ -1618,10 +1749,7 @@ export default (zap) => {{
         assert!(ran.refused.is_none(), "{}", render_apply(&ran));
         assert_eq!(ran.outcomes.len(), 1);
         assert!(
-            matches!(
-                ran.outcomes[0],
-                zap_types::event::ChangeOutcome::Completed { .. }
-            ),
+            matches!(ran.outcomes[0], ChangeOutcome::Completed { .. }),
             "{:?}",
             ran.outcomes
         );
@@ -2000,7 +2128,7 @@ export default (zap) => {{
         );
         let fail = rendered
             .lines()
-            .position(|line| line.starts_with("  FAIL  go  ["))
+            .position(|line| line.starts_with("  FAIL  go  "))
             .unwrap_or_else(|| panic!("{rendered}"));
         let block: Vec<&str> = rendered.lines().skip(fail).take(3).collect();
         assert!(
@@ -2917,7 +3045,12 @@ export default (zap) => {
                 rendered.starts_with("apply — target a.example.com (wetrun, confirmed)\n"),
                 "{rendered}"
             );
-            assert!(rendered.contains("  ok    go\n"), "{rendered}");
+            assert!(
+                rendered
+                    .lines()
+                    .any(|line| line.starts_with("  ok    go  ") && line.ends_with('s')),
+                "{rendered}"
+            );
             // The plan it ran is the one a preview computes.
             assert_eq!(hash_of(&rig.dry().await), hash_of(&ran));
         }
@@ -3214,7 +3347,7 @@ export default (zap) => {
 
         let wet = rig.apply(wetrun()).await.unwrap();
         assert_eq!(wet.held.len(), 3, "{:?}", wet.held);
-        assert_eq!(wet.exit_code(), 1, "{:?}", wet.summary);
+        assert_eq!(wet.exit_code(), 1, "{:?}", wet.run);
         assert!(rig.ran(), "what waits on nothing held runs");
         let issued = rig.target.issued_commands();
         for never in ["touch /srv/src", "touch /srv/after"] {
@@ -3272,5 +3405,273 @@ export default (zap) => {
             .unwrap();
         assert!(rig.ran() && ran.streamed());
         assert!(sink.lines().is_empty(), "{:?}", sink.lines());
+    }
+
+    use std::time::Duration;
+
+    use zap_types::event::{ChangeOutcome, RunSummary};
+    use zap_types::plan::{HeldResource, HoldCause, ResidualResource};
+    use zap_types::schema::ResourceId;
+
+    use super::ApplyRun;
+    use crate::resource::ChangeRecord;
+
+    /// The rig's preview as a wetrun that executed `outcomes` leaves it: each change
+    /// that ran taking what `took` says, in milliseconds, and the whole run `total`.
+    async fn executed_with(
+        outcomes: Vec<ChangeOutcome>,
+        took: &[(&str, u64)],
+        total: u64,
+    ) -> ApplyReport {
+        let mut report = Rig::on("a.example.com").dry().await;
+        report.wetrun = true;
+        report.preview = None;
+        report.run = Some(ApplyRun {
+            summary: RunSummary::from_outcomes(&outcomes),
+            changes: took
+                .iter()
+                .map(|&(id, ms)| ChangeRecord {
+                    resource_id: ResourceId(id.to_owned()),
+                    took: Duration::from_millis(ms),
+                })
+                .collect(),
+            total: Duration::from_millis(total),
+        });
+        report.outcomes = outcomes;
+        report
+    }
+
+    fn completed(id: &str) -> ChangeOutcome {
+        ChangeOutcome::Completed {
+            resource_id: ResourceId(id.to_owned()),
+            output: "said nothing a row shows".to_owned(),
+        }
+    }
+
+    fn failed(id: &str) -> ChangeOutcome {
+        ChangeOutcome::Failed {
+            resource_id: ResourceId(id.to_owned()),
+            error: "denied\nby sudo".to_owned(),
+            code: zap_types::error_code::ErrorCode::Permission,
+        }
+    }
+
+    fn skipped(id: &str, after: &str) -> ChangeOutcome {
+        ChangeOutcome::Skipped {
+            resource_id: ResourceId(id.to_owned()),
+            reason: format!("aborted after `{after}` failed"),
+        }
+    }
+
+    /// The lines of `rendered` from its first outcome row to its end: the table, the
+    /// summary, any banner after it, the verdict, and the `plan_hash`.
+    fn from_the_table(rendered: &str) -> String {
+        let at = rendered
+            .find("\n  ok    ")
+            .or_else(|| rendered.find("\n  FAIL  "))
+            .unwrap_or_else(|| panic!("{rendered}"));
+        rendered[at + 1..].to_owned()
+    }
+
+    /// An executed wetrun's outcomes are a table: each row's status, its id padded to
+    /// the widest, how long it ran right-aligned (a skipped change never ran), then a
+    /// failure's code and error, whose further lines stand under its first, or a skip's
+    /// reason. The summary follows, then the verdict, then the `plan_hash`.
+    #[tokio::test]
+    async fn an_executed_wetrun_is_a_timed_table_and_a_verdict() {
+        let report = executed_with(
+            vec![completed("a"), failed("bb"), skipped("c", "bb")],
+            &[("a", 1_234), ("bb", 12_000)],
+            83_000,
+        )
+        .await;
+        let hash = hash_of(&report);
+        assert_eq!(
+            from_the_table(&render_apply(&report)),
+            format!(
+                "  ok    a   1.2s\n\
+                 \x20 FAIL  bb   12s  [Permission]  — denied\n\
+                 \x20                                 by sudo\n\
+                 \x20 skip  c         — aborted after `bb` failed\n\
+                 applied: 1 ok, 1 failed, 1 skipped (of 3)\n\
+                 apply FAILED at bb on a.example.com after 1m 23s — 1 change ran before it \
+                 and stays applied; 1 later change was skipped\n\
+                 plan_hash: {hash}\n"
+            )
+        );
+        // a dry run has no verdict line, and no time
+        let dry = render_apply(&Rig::on("a.example.com").dry().await);
+        assert!(!dry.contains("converged a.example.com"), "{dry}");
+        assert!(!dry.contains(" in 0.0s"), "{dry}");
+    }
+
+    /// The verdict names the first of what made the run exit 1, or that it converged
+    /// (exit 0), with the machine and the time; it never opens the way the summary does.
+    #[tokio::test]
+    async fn the_verdict_names_how_the_wetrun_ended() {
+        let verdict = |report: &ApplyReport| {
+            let rendered = render_apply(report);
+            let lines: Vec<&str> = rendered.lines().collect();
+            assert!(
+                lines[lines.len() - 1].starts_with("plan_hash: "),
+                "{rendered}"
+            );
+            let verdict = lines[lines.len() - 2].to_owned();
+            assert!(!verdict.starts_with("applied: "), "{rendered}");
+            assert_eq!(
+                lines
+                    .iter()
+                    .filter(|line| line.starts_with("applied: "))
+                    .count(),
+                1,
+                "{rendered}"
+            );
+            verdict
+        };
+        let converged = executed_with(vec![completed("a"), completed("b")], &[], 4_200).await;
+        assert_eq!(converged.exit_code(), 0);
+        assert_eq!(
+            verdict(&converged),
+            "converged a.example.com in 4.2s, the re-detect included"
+        );
+
+        // a failed change: what ran before it, and what was skipped after it
+        for (outcomes, said) in [
+            (
+                vec![failed("x")],
+                "apply FAILED at x on a.example.com after 4.2s — nothing ran before it; it \
+                 was the last change",
+            ),
+            (
+                vec![failed("x"), skipped("y", "x"), skipped("z", "x")],
+                "apply FAILED at x on a.example.com after 4.2s — nothing ran before it; 2 \
+                 later changes were skipped",
+            ),
+            (
+                vec![completed("v"), completed("w"), failed("x")],
+                "apply FAILED at x on a.example.com after 4.2s — 2 changes ran before it and \
+                 stay applied; it was the last change",
+            ),
+        ] {
+            assert_eq!(verdict(&executed_with(outcomes, &[], 4_200).await), said);
+        }
+
+        let residual = |id: &str| ResidualResource {
+            resource_id: ResourceId(id.to_owned()),
+            state: zap_types::plan::ResidualState::Absent,
+        };
+        let held = |id: &str| HeldResource {
+            resource_id: ResourceId(id.to_owned()),
+            cause: HoldCause::Undetermined {
+                reason: "probe failed".to_owned(),
+            },
+            trigger: None,
+        };
+        // a failure outranks what the re-detect found
+        let mut report = executed_with(vec![failed("x")], &[], 4_200).await;
+        report.post_detect_error = Some("connection lost".to_owned());
+        assert!(verdict(&report).starts_with("apply FAILED at x "));
+
+        let mut report = executed_with(vec![completed("a")], &[], 4_200).await;
+        report.post_detect_error = Some("connection lost".to_owned());
+        assert_eq!(report.exit_code(), 1);
+        assert_eq!(
+            verdict(&report),
+            "apply did not establish convergence on a.example.com in 4.2s — the re-detect \
+             failed (RESIDUAL above)"
+        );
+
+        // and outranks resources that don't read converged, or are held
+        let mut report = executed_with(vec![completed("a"), failed("x")], &[], 4_200).await;
+        report.residual = vec![residual("a")];
+        report.held = vec![held("h")];
+        assert!(verdict(&report).starts_with("apply FAILED at x "));
+
+        let mut report = executed_with(vec![completed("a")], &[], 4_200).await;
+        report.residual = vec![residual("a")];
+        assert_eq!(report.exit_code(), 1);
+        assert_eq!(
+            verdict(&report),
+            "apply did not converge a.example.com in 4.2s — 1 resource does not read \
+             converged (RESIDUAL above)"
+        );
+        report.residual.push(residual("b"));
+        assert_eq!(
+            verdict(&report),
+            "apply did not converge a.example.com in 4.2s — 2 resources do not read \
+             converged (RESIDUAL above)"
+        );
+
+        // held, with nothing else wrong; residual outranks it
+        let mut report = executed_with(vec![completed("a")], &[], 4_200).await;
+        report.held = vec![held("h")];
+        assert_eq!(report.exit_code(), 1);
+        assert_eq!(
+            verdict(&report),
+            "apply did not establish convergence on a.example.com in 4.2s — 1 resource was \
+             held (UNDETERMINED above)"
+        );
+        report.held.push(held("i"));
+        assert!(
+            verdict(&report).ends_with("— 2 resources were held (UNDETERMINED above)"),
+            "{}",
+            verdict(&report)
+        );
+        report.residual = vec![residual("a")];
+        assert!(verdict(&report).starts_with("apply did not converge "));
+
+        // an empty plan that executed converges, as a local machine reads
+        let mut report = executed_with(Vec::new(), &[], 300).await;
+        report.plan.machine = Machine::Local(LocalAccount {
+            user: "ops".to_owned(),
+            home: Some("/home/ops".to_owned()),
+        });
+        let rendered = render_apply(&report);
+        assert!(
+            rendered.contains("  (no changes — converged)\napplied: 0 ok, 0 failed, 0 skipped (of 0)\nconverged local in 0.3s, the re-detect included\n"),
+            "{rendered}"
+        );
+    }
+
+    /// The verdict closes the report, below the `locked:` line and the warnings, and its
+    /// count of held resources takes in the ones held behind another with the unread.
+    #[tokio::test]
+    async fn the_verdict_follows_the_warnings_and_counts_every_hold() {
+        let mut report = executed_with(vec![completed("a")], &[("a", 100)], 4_200).await;
+        report.auto_locked = vec!["blob".to_owned()];
+        report.warnings = vec!["a warning the run raised".to_owned()];
+        report.held = vec![
+            HeldResource {
+                resource_id: ResourceId("h".to_owned()),
+                cause: HoldCause::Undetermined {
+                    reason: "probe failed".to_owned(),
+                },
+                trigger: None,
+            },
+            HeldResource {
+                resource_id: ResourceId("w".to_owned()),
+                cause: HoldCause::Waits {
+                    on: vec![ResourceId("h".to_owned())],
+                },
+                trigger: None,
+            },
+        ];
+        let rendered = render_apply(&report);
+        let lines: Vec<&str> = rendered.lines().collect();
+        let at = lines
+            .iter()
+            .position(|line| line.starts_with("apply did not establish convergence "))
+            .unwrap_or_else(|| panic!("{rendered}"));
+        assert_eq!(at, lines.len() - 2, "{rendered}");
+        assert!(
+            lines[at].ends_with("— 2 resources were held (UNDETERMINED above)"),
+            "{rendered}"
+        );
+        for earlier in ["locked: blob", "a warning the run raised"] {
+            assert!(
+                lines[..at].iter().any(|line| line.contains(earlier)),
+                "{rendered}"
+            );
+        }
     }
 }

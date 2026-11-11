@@ -128,7 +128,9 @@ async fn a_script_whose_cwd_another_resource_creates_converges_in_one_apply() {
         .collect();
     assert_eq!(order, ["dir", "s"]);
 
-    let outcomes = execute_plan(&conn, &first.plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &first.plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
     let failures: Vec<&ChangeOutcome> = outcomes.iter().filter(|o| o.is_failure()).collect();
     assert!(failures.is_empty(), "no change should fail: {failures:?}");
     assert_eq!(
@@ -204,7 +206,9 @@ async fn wetrun_then_redetect_is_idempotent() {
     );
 
     // Wetrun: execute. Every change must complete.
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
     let failures: Vec<&ChangeOutcome> = outcomes.iter().filter(|o| o.is_failure()).collect();
     assert!(failures.is_empty(), "no change should fail: {failures:?}");
 
@@ -267,7 +271,9 @@ async fn command_steps_stop_on_first_failure() {
 
     // `cmd-a` fails; `cmd-b` is intentionally unrecorded — if it ran, the mock errors.
     let conn = Connection::Mock(MockConnection::new("mock").with("cmd-a", fail_output()));
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
 
     assert_eq!(outcomes.len(), 2);
     assert!(
@@ -279,6 +285,59 @@ async fn command_steps_stop_on_first_failure() {
         matches!(&outcomes[1], ChangeOutcome::Skipped { resource_id, .. } if resource_id.0 == "b"),
         "second change skipped after the failure: {:?}",
         outcomes[1]
+    );
+}
+
+/// Each change that ran is timed around its run, the one that failed included; one that
+/// was skipped never ran and has no time. Against a real local target, whose commands
+/// take as long as they say.
+#[tokio::test]
+async fn each_change_that_ran_is_timed_around_its_run() {
+    let resources = vec![
+        res(serde_json::json!({"id": "a", "type": "script", "check": "false", "run": "sleep 0.3"})),
+        res(serde_json::json!({
+            "id": "b", "type": "script", "check": "false", "run": "sleep 0.2; exit 3",
+            "depends_on": ["a"],
+        })),
+        res(serde_json::json!({
+            "id": "c", "type": "script", "check": "false", "run": "true", "depends_on": ["b"],
+        })),
+    ];
+    let target = local_target();
+    let plan = diff(DiffInputs {
+        resources: &resources,
+        detected: &all_absent(&resources),
+        target: &target,
+        machine: &local_machine(),
+        lock: None,
+        pending: &BTreeMap::new(),
+        var: &zap_types::last_run::ReportVar::unset,
+    })
+    .plan;
+
+    let executed = execute_plan(&Connection::Local, &plan, None, &EventHandler::Null).await;
+    assert!(
+        matches!(
+            &executed.outcomes[..],
+            [
+                ChangeOutcome::Completed { .. },
+                ChangeOutcome::Failed { .. },
+                ChangeOutcome::Skipped { .. },
+            ]
+        ),
+        "{:?}",
+        executed.outcomes
+    );
+    let timed: Vec<(&str, std::time::Duration)> = executed
+        .records
+        .iter()
+        .map(|record| (record.resource_id.0.as_str(), record.took))
+        .collect();
+    assert!(
+        matches!(timed[..], [("a", a), ("b", b)]
+            if a >= std::time::Duration::from_millis(300)
+                && b >= std::time::Duration::from_millis(200)),
+        "{timed:?}"
     );
 }
 
@@ -308,7 +367,9 @@ async fn command_steps_all_complete() {
             .with("cmd-a", ok_output())
             .with("cmd-b", ok_output()),
     );
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
 
     assert!(
         outcomes
@@ -346,7 +407,9 @@ async fn command_steps_resolve_env_var_references() {
 
     // Recorded under the resolved form (empty var collapses the marker).
     let conn = Connection::Mock(MockConnection::new("mock").with("echo ready--done", ok_output()));
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
 
     assert!(
         matches!(&outcomes[0], ChangeOutcome::Completed { .. }),
@@ -383,7 +446,9 @@ async fn verify_failure_aborts_the_plan() {
 
     // The gate assertion command fails; `cmd-after` is unrecorded (must not run).
     let conn = Connection::Mock(MockConnection::new("mock").with("gate-check", fail_output()));
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
 
     assert_eq!(outcomes.len(), 2);
     assert!(
@@ -408,7 +473,9 @@ async fn empty_plan_executes_to_nothing() {
         target: local_target(),
         machine: local_machine(),
     };
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
     assert!(outcomes.is_empty());
 }
 
@@ -417,6 +484,64 @@ fn last_command(home: &std::path::Path, config_path: &std::path::Path) -> RunCom
     zap_core::last_run::read_last_run(home, config_path, "local")
         .unwrap()
         .command
+}
+
+/// A wetrun's time covers what it ran once bound to its review: each change, and the
+/// re-detect after them, whose check here takes as long as it says. A change's own time
+/// is its run. Gated on `ZAP_FGRO` (config eval).
+#[tokio::test]
+async fn a_wetruns_time_covers_its_changes_and_the_re_detect() {
+    use std::time::Duration;
+
+    use zap_core::commands::apply::{ApplyOptions, run_apply_in};
+
+    if !fgro_available() {
+        eprintln!("skipping a_wetruns_time_covers_its_changes_and_the_re_detect: ZAP_FGRO not set");
+        return;
+    }
+    let proj = scratch::tempdir().unwrap();
+    let config_path = proj.path().join("zap.ts");
+    let marker = proj.path().join("marker");
+    scratch::write_config(
+        &config_path,
+        format!(
+            r"
+export default (zap) => {{
+    zap.target({{local: true}});
+    zap.script({{id: 'slow', check: 'sleep 0.3; test -f {marker}', run: 'sleep 0.2; touch {marker}'}});
+}};
+",
+            marker = marker.display()
+        ),
+    )
+    .unwrap();
+    let home = scratch::tempdir().unwrap();
+    let options = |wetrun| ApplyOptions {
+        wetrun,
+        ..ApplyOptions::default()
+    };
+    let dry = run_apply_in(Some(home.path()), fgro(), &config_path, options(false))
+        .await
+        .unwrap();
+    assert_eq!(dry.run, None);
+    let wet = run_apply_in(Some(home.path()), fgro(), &config_path, options(true))
+        .await
+        .unwrap();
+    assert_eq!(
+        wet.exit_code(),
+        0,
+        "{}",
+        zap_core::commands::render_apply(&wet)
+    );
+    let run = wet.run.expect("an executed wetrun is timed");
+    let [slow] = &run.changes[..] else {
+        panic!("{run:?}")
+    };
+    assert_eq!(slow.resource_id.0, "slow");
+    assert!(slow.took >= Duration::from_millis(200), "{run:?}");
+    // the change's 0.2s and the re-detect's check, 0.3s
+    assert!(run.total >= Duration::from_millis(500), "{run:?}");
+    assert!(run.total >= slow.took, "{run:?}");
 }
 
 /// Full wiring through `run_apply_in`: dry-run shows a create, wetrun applies it, and
@@ -554,7 +679,7 @@ export default (zap) => {{
         "{refused:?}"
     );
     assert_eq!(refused.exit_code(), 2);
-    assert!(refused.summary.is_none());
+    assert!(refused.run.is_none());
     assert!(!refused.streamed(), "a refusal emits no event");
     assert!(!managed.exists(), "a refused wetrun must create nothing");
     assert_eq!(
@@ -870,7 +995,7 @@ export default (zap) => {
     .await
     .unwrap();
     assert_eq!(wet.held.len(), 1, "{:?}", wet.held);
-    assert_eq!(wet.exit_code(), 1, "{:?}", wet.summary);
+    assert_eq!(wet.exit_code(), 1, "{:?}", wet.run);
 }
 
 /// A wetrun whose every command exits 0 can still leave a resource unconverged — the
@@ -927,7 +1052,7 @@ export default (zap) => {
     )
     .await
     .unwrap();
-    let summary = wet.summary.expect("wetrun has a summary");
+    let summary = wet.run.as_ref().expect("wetrun has a summary").summary;
     assert_eq!(
         (summary.completed, summary.failed),
         (1, 0),
@@ -1004,7 +1129,8 @@ async fn remote_none_vendored_fetches_verifies_and_writes_the_target() {
         Some(home.path()),
         &EventHandler::Null,
     )
-    .await;
+    .await
+    .outcomes;
     assert!(
         outcomes.iter().all(|o| !o.is_failure()),
         "remote fetch+write must succeed: {outcomes:?}"
@@ -1166,7 +1292,9 @@ async fn a_users_files_are_put_by_the_put_script_as_the_plan_says() {
         mock = mock.with(command, ok_output());
     }
     let conn = Connection::Mock(mock);
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
     assert!(
         outcomes
             .iter()
@@ -1210,7 +1338,9 @@ async fn a_failed_typed_step_is_named_without_its_script() {
         let plan = plan.clone();
         async move {
             let conn = Connection::Mock(mock);
-            let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+            let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+                .await
+                .outcomes;
             let ChangeOutcome::Failed { error, .. } = &outcomes[0] else {
                 panic!("the change must fail: {outcomes:?}");
             };
@@ -1328,7 +1458,9 @@ async fn a_lowered_step_runs_its_command_and_fails_under_its_own_name() {
             mock = mock.with(execution.text(), output);
         }
         let conn = Connection::Mock(mock);
-        let outcomes = execute_plan(&conn, &plan, Some(home.path()), &EventHandler::Null).await;
+        let outcomes = execute_plan(&conn, &plan, Some(home.path()), &EventHandler::Null)
+            .await
+            .outcomes;
         let ChangeOutcome::Failed { error, .. } = &outcomes[0] else {
             panic!("the change must fail: {outcomes:?}");
         };
@@ -1392,7 +1524,9 @@ async fn a_triggered_restart_records_then_clears_its_pending_marker() {
         mock = mock.with(step.clone(), ok_output());
     }
     let conn = Connection::Mock(mock);
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
     assert!(
         outcomes
             .iter()
@@ -1420,7 +1554,9 @@ async fn a_failed_restart_leaves_its_pending_marker() {
         mock = mock.with(step.clone(), fail_output());
     }
     let conn = Connection::Mock(mock);
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
     assert!(
         matches!(&outcomes[1], ChangeOutcome::Failed { resource_id, .. } if resource_id.0 == "svc"),
         "{outcomes:?}"
@@ -1438,7 +1574,9 @@ async fn a_failed_restart_leaves_its_pending_marker() {
 async fn an_unrecordable_marker_fails_the_source_before_it_runs() {
     let (plan, _) = triggered_restart_plan();
     let conn = Connection::Mock(MockConnection::new("mock").with(pending_mkdir(), fail_output()));
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
     let ChangeOutcome::Failed {
         resource_id, error, ..
     } = &outcomes[0]
@@ -1490,7 +1628,9 @@ async fn plan_for(resources: &[Resource]) -> Plan {
 /// Plan, execute, and re-detect — the `apply --wetrun` core.
 async fn apply_for(resources: &[Resource]) {
     let plan = plan_for(resources).await;
-    let outcomes = execute_plan(&Connection::Local, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&Connection::Local, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
     assert!(outcomes.iter().all(|o| !o.is_failure()), "{outcomes:?}");
     detect_all(
         &Connection::Local,
@@ -1694,7 +1834,9 @@ async fn a_directory_change_is_a_mkdir_and_one_attrs_command() {
             .with(mkdir.clone(), ok_output())
             .with(attrs.clone(), ok_output()),
     );
-    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null).await;
+    let outcomes = execute_plan(&conn, &plan, None, &EventHandler::Null)
+        .await
+        .outcomes;
     assert!(outcomes.iter().all(|o| !o.is_failure()), "{outcomes:?}");
     let Connection::Mock(mock) = &conn else {
         unreachable!()

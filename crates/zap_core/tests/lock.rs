@@ -261,7 +261,8 @@ async fn execute_plan_materializes_a_tracked_file_from_the_folded_pin() {
         Some(home.path()),
         &EventHandler::Null,
     )
-    .await;
+    .await
+    .outcomes;
     assert!(
         outcomes.iter().all(|o| !o.is_failure()),
         "tracked fetch+write must succeed: {outcomes:?}"

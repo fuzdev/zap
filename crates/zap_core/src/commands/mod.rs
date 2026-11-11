@@ -31,6 +31,7 @@ pub mod plan;
 pub mod preview;
 pub mod prompt;
 mod render;
+mod result_table;
 pub mod status;
 mod target;
 #[cfg(test)]

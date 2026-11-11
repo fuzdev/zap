@@ -33,7 +33,9 @@ A map; each module's `//!` doc and its items' rustdoc are the detail.
   `target.rs` (the two eval seams, the private `config_gates`, and binding the
   target), `detect_pass.rs` (the detection pass, its record, and the diff),
   `checks.rs` (the structural and env gates, the plan's findings, and the
-  verdict and refusal banners), and `render.rs` (the plan renders).
+  verdict and refusal banners), `render.rs` (the plan renders), and
+  `result_table.rs` (the timed table of what a wetrun ran, apply's and deploy's,
+  and the duration format of it and of their verdict lines).
 - `config` (`config/`) — `eval` (`eval_config`: the raw `fuz_eval` call with
   `DRIVER_JS` read from `builder_fgro.js`, `map_eval_error` onto Zap's `Error`, the
   `ZapConfig` parse), `eval_cache` (`eval_cached`, the L0 eval cache every command

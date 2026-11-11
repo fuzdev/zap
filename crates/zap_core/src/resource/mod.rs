@@ -12,7 +12,7 @@ pub mod execute;
 pub mod pending;
 
 pub use detect::{DetectionPass, Markers, detect_all, detect_resource};
-pub use execute::{execute_plan, refused_changes};
+pub use execute::{ChangeRecord, Executed, execute_plan, refused_changes};
 
 use zap_types::schema::{ResolvedField, ResolvedFields, ResourceKind};
 use zap_types::validate::resolved_field_problem;

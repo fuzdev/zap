@@ -129,6 +129,20 @@ pub fn with_report(problem: &str, apply: &Captured) -> String {
     }
 }
 
+/// The status and resource id of a wetrun's outcome row: `  ok    <id>`, `  FAIL  <id>`
+/// or `  skip  <id>`, the status padded to six columns two spaces in, and the id the
+/// first field after it, whatever follows: a time, a failure's code and error, a skip's
+/// reason. An id holds no whitespace, so a row with or without a time column reads the
+/// same.
+pub fn outcome_of(line: &str) -> Option<(&str, &str)> {
+    let rest = line.strip_prefix("  ")?;
+    let status = ["ok    ", "FAIL  ", "skip  "]
+        .into_iter()
+        .find(|status| rest.starts_with(status))?;
+    let id = rest[status.len()..].split_whitespace().next()?;
+    Some((status.trim_end(), id))
+}
+
 /// A wetrun that completed every change it ran: no `  FAIL  <id>` or `  skip  <id>`
 /// outcome line, and one `applied: <n> ok, <n> failed, <n> skipped (of <n>)` summary
 /// at column 0 with nothing failed or skipped.
@@ -246,7 +260,7 @@ pub fn only_imperative_changes(stdout: &str) -> Result<(), String> {
 pub mod tests {
     use super::{
         change_of, check_preview, incomplete_counts, one_plan_hash, only_imperative_changes,
-        plan_hashes, plans_exactly, prints_plan_hash, wetrun_problem, with_report,
+        outcome_of, plan_hashes, plans_exactly, prints_plan_hash, wetrun_problem, with_report,
     };
     use crate::differential::compare::is_change_line;
     use crate::differential::process::Captured;
@@ -436,6 +450,35 @@ pub mod tests {
         assert_eq!(change_of("  [+] bare"), None);
     }
 
+    /// An outcome row names its status and id with or without the time column zap
+    /// prints between the id and the rest; nothing else is a row.
+    #[test]
+    fn an_outcome_row_names_its_status_and_id() {
+        for (line, read) in [
+            ("  ok    etc-dir", Some(("ok", "etc-dir"))),
+            ("  ok    etc-dir           1.2s", Some(("ok", "etc-dir"))),
+            ("  ok    db  0.0s", Some(("ok", "db"))),
+            (
+                "  FAIL  db  [ExecutionFailed]  — exit 1",
+                Some(("FAIL", "db")),
+            ),
+            (
+                "  FAIL  db  12s  [ExecutionFailed]  — exit 1",
+                Some(("FAIL", "db")),
+            ),
+            ("  skip  db  — aborted", Some(("skip", "db"))),
+            ("  skip  db        — aborted", Some(("skip", "db"))),
+            // not a row: further in, at column 0, another status, no id
+            ("      ok    db", None),
+            ("ok    db", None),
+            ("  okay  db", None),
+            ("  ok    ", None),
+            ("  UNDETERMINED — 1 resource could not be probed", None),
+        ] {
+            assert_eq!(outcome_of(line), read, "{line:?}");
+        }
+    }
+
     #[test]
     fn a_summary_gives_its_failed_and_skipped_counts() {
         assert_eq!(
@@ -460,9 +503,33 @@ pub mod tests {
         user: ops\n  ok    firewall\n  ok    pipeline\n\
         applied: 2 ok, 0 failed, 0 skipped (of 2)\nplan_hash: 9f0e\n";
 
+    /// [`WETRUN_REPORT`] as a zap that times each change prints it: a time column after
+    /// the id, and a verdict line after the summary.
+    const WETRUN_REPORT_TIMED: &str = "apply — target {env:ZAPDIFF_HOST} (wetrun)\n  \
+        host: 192.168.122.11\n  user: ops\n  ok    firewall  1.4s\n  ok    pipeline  0.0s\n\
+        applied: 2 ok, 0 failed, 0 skipped (of 2)\n\
+        converged 192.168.122.11 in 2.9s, the re-detect included\nplan_hash: 9f0e\n";
+
     #[test]
     fn the_wetrun_runs_the_reviewed_plan_to_completion() {
         assert_eq!(wetrun_problem(&captured(0, WETRUN_REPORT), "9f0e"), Ok(()));
+        assert_eq!(
+            wetrun_problem(&captured(0, WETRUN_REPORT_TIMED), "9f0e"),
+            Ok(())
+        );
+        let failed = WETRUN_REPORT_TIMED
+            .replace(
+                "  ok    pipeline  0.0s\n",
+                "  FAIL  pipeline  0.0s  [ExecutionFailed]  — exit 1\n",
+            )
+            .replace("2 ok, 0 failed", "1 ok, 1 failed");
+        assert_eq!(
+            wetrun_problem(&captured(0, &failed), "9f0e"),
+            Err(
+                "did not complete every change: FAIL  pipeline  0.0s  [ExecutionFailed]  — exit 1"
+                    .to_owned()
+            )
+        );
         assert_eq!(
             wetrun_problem(&captured(0, WETRUN_REPORT), "1234"),
             Err("ran plan_hash 9f0e, not the reviewed 1234".to_owned())

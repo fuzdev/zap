@@ -13,8 +13,8 @@ use std::time::Duration;
 use super::compare;
 use super::process::Captured;
 use super::reviewed::{
-    PREVIEW, WETRUN, change_of, check_idempotent, check_preview, plans_exactly, prints_plan_hash,
-    summary_problem, with_report,
+    PREVIEW, WETRUN, change_of, check_idempotent, check_preview, outcome_of, plans_exactly,
+    prints_plan_hash, summary_problem, with_report,
 };
 use super::runner::{self, HostRun, REMOTE_HARNESS_DIR, VmHome, VmRun, ZAP_TIMEOUT};
 use super::scenarios::Suite;
@@ -432,9 +432,11 @@ fn held_preview_problem(apply: &Captured, holds: &[Hold], behind: &[Hold]) -> Re
 /// `RESIDUAL` or `REFUSED` fails it), no change failed or was skipped, and none of
 /// the held resources ran.
 ///
-/// A wetrun prints one outcome line per change — `  ok    <id>`,
-/// `  FAIL  <id>  [<code>]  — …`, or `  skip  <id>  — …` — and then
-/// `applied: <n> ok, <n> failed, <n> skipped (of <n>)` at column 0.
+/// A wetrun prints one outcome row per change — `  ok    <id>`,
+/// `  FAIL  <id>  [<code>]  — …`, or `  skip  <id>  — …`, with the time it ran between
+/// the id and the rest when zap prints one — and then
+/// `applied: <n> ok, <n> failed, <n> skipped (of <n>)` at column 0. A row's id is read as
+/// the first field after its status ([`outcome_of`]), so both forms are read.
 fn check_held_wetrun(apply: &Captured, holds: &[Hold], behind: &[Hold]) -> Result<(), String> {
     held_wetrun_problem(apply, holds, behind).map_err(|problem| with_report(&problem, apply))
 }
@@ -458,8 +460,7 @@ fn held_wetrun_problem(apply: &Captured, holds: &[Hold], behind: &[Hold]) -> Res
         .stdout
         .lines()
         .filter(|line| {
-            line.strip_prefix("  ok    ")
-                .is_some_and(|id| is_held(&every, id))
+            outcome_of(line).is_some_and(|(status, id)| status != "skip" && is_held(&every, id))
         })
         .map(str::trim)
         .collect();
@@ -629,6 +630,23 @@ plan_hash: 3be8125a32b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb10
   ok    pipeline
   ok    postgresql-service
 applied: 3 ok, 0 failed, 0 skipped (of 3)
+plan_hash: 3be8125a32b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb10
+"#;
+
+    /// [`HELD_WETRUN`] as a zap that times each change prints it: a time column after
+    /// the id, and a verdict line after the summary.
+    const HELD_WETRUN_TIMED: &str = r#"apply — target {env:ZAPDIFF_HOST} (wetrun)
+  host: 192.168.122.10
+  user: ops
+  target: {"local":false,"host":{"$env":"ZAPDIFF_HOST"},"user":{"$env":"ZAPDIFF_USER"},"home":"/home/ops","package_manager":"apk","service_manager":"openrc"}
+  UNDETERMINED — 1 resource(s) could not be probed, so no change is planned for them and this changeset is partial:
+      database — detection failed: the PostgreSQL catalog query exited 2
+  their live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
+  ok    etc-dir             0.1s
+  ok    pipeline            0.0s
+  ok    postgresql-service  2.3s
+applied: 3 ok, 0 failed, 0 skipped (of 3)
+apply did not establish convergence on 192.168.122.10 in 4.1s — 1 resource was held (UNDETERMINED above)
 plan_hash: 3be8125a32b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb10
 "#;
 
@@ -1203,6 +1221,35 @@ plan_hash: 7a1c0f3e5b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb1077
             held_wetrun(&ran),
             Err("ran a resource it holds: ok    database".to_owned())
         );
+    }
+
+    /// A held resource that ran is caught whether or not zap prints a time column
+    /// after the id: the id is the row's first field after its status, matched whole.
+    #[test]
+    fn a_held_resource_that_ran_is_caught_in_either_row_form() {
+        for (report, etc_dir, database) in [
+            (HELD_WETRUN, "  ok    etc-dir\n", "  ok    database\n"),
+            (
+                HELD_WETRUN_TIMED,
+                "  ok    etc-dir             0.1s\n",
+                "  ok    database            0.1s\n",
+            ),
+        ] {
+            assert!(report.contains(etc_dir), "{report}");
+            assert_eq!(held_wetrun(report), Ok(()), "{report}");
+            let ran = report.replace(etc_dir, database);
+            assert_eq!(
+                held_wetrun(&ran),
+                Err(format!("ran a resource it holds: {}", database.trim())),
+                "{ran}"
+            );
+            // an id the held one starts is another resource
+            let other = report.replace(
+                etc_dir,
+                &database.replacen("database", "database-replica", 1),
+            );
+            assert_eq!(held_wetrun(&other), Ok(()), "{other}");
+        }
     }
 
     #[test]

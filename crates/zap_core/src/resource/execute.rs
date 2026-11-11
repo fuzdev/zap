@@ -44,6 +44,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use zap_types::config_hash::{build_provenance, extract_provenance};
 use zap_types::error_code::{ErrorCode, NO_EXIT_CODE, classify_error};
@@ -133,8 +134,32 @@ impl Failure {
     }
 }
 
+/// One change a wetrun ran, and how long it took.
+///
+/// Timed from just before the pending markers it arms (its own work, since one it can't
+/// record fails it) to the trigger it settles, so the time is what the change cost the
+/// run. A change that was skipped never ran and has none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeRecord {
+    /// Which change, by its resource.
+    pub resource_id: ResourceId,
+    /// How long it ran.
+    pub took: Duration,
+}
+
+/// What [`execute_plan`] did: one [`ChangeOutcome`] per change in plan order, and a
+/// [`ChangeRecord`] for each change it ran (completed or failed), in the order it ran
+/// them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Executed {
+    /// Each change's outcome, in plan order.
+    pub outcomes: Vec<ChangeOutcome>,
+    /// Each change that ran, timed.
+    pub records: Vec<ChangeRecord>,
+}
+
 /// Execute a plan against `conn`, returning one [`ChangeOutcome`] per change in plan
-/// order.
+/// order, and how long each change that ran took ([`Executed`]).
 ///
 /// Stops at the first failure (later changes become `Skipped`). Native-fs paths are
 /// resolved through the shared `resolve_kind_fields`
@@ -154,8 +179,9 @@ pub async fn execute_plan(
     plan: &Plan,
     zap_home: Option<&Path>,
     handler: &EventHandler,
-) -> Vec<ChangeOutcome> {
+) -> Executed {
     let mut outcomes = Vec::with_capacity(plan.changes.len());
+    let mut records = Vec::with_capacity(plan.changes.len());
     let mut aborted_by: Option<String> = None;
     let arming = trigger_arming(&plan.changes);
     let mut armed: BTreeSet<&str> = BTreeSet::new();
@@ -172,6 +198,7 @@ pub async fn execute_plan(
                 action: change.action,
                 kind: change.desired.kind(),
             });
+            let started = Instant::now();
             let result = match arm_pending(conn, &arming, &mut armed, change).await {
                 Ok(()) => match run_change(conn, zap_home, change).await {
                     Ok(output) => Ok(settle_trigger(conn, change, output).await),
@@ -179,6 +206,10 @@ pub async fn execute_plan(
                 },
                 Err(error) => Err(error),
             };
+            records.push(ChangeRecord {
+                resource_id: change.resource_id.clone(),
+                took: started.elapsed(),
+            });
             match result {
                 Ok(output) => ChangeOutcome::Completed {
                     resource_id: change.resource_id.clone(),
@@ -197,7 +228,7 @@ pub async fn execute_plan(
         handler.emit(&Event::from_outcome(&outcome));
         outcomes.push(outcome);
     }
-    outcomes
+    Executed { outcomes, records }
 }
 
 /// For each change id, the services its completion fires and the action each owes —

@@ -7591,29 +7591,6 @@ fn the_duration_column_right_aligns_every_width() {
     }
 }
 
-/// A duration reads in tenths of a second, then whole seconds, then minutes and hours.
-#[test]
-fn a_duration_reads_at_the_scale_it_is() {
-    use std::time::Duration;
-
-    use super::render::format_elapsed;
-
-    for (millis, shown) in [
-        (0, "0.0s"),
-        (49, "0.0s"),
-        (420, "0.4s"),
-        (9_999, "9.9s"),
-        (10_000, "10s"),
-        (59_999, "59s"),
-        (60_000, "1m 00s"),
-        (187_000, "3m 07s"),
-        (3_600_000, "1h 00m"),
-        (3_720_000, "1h 02m"),
-    ] {
-        assert_eq!(format_elapsed(Duration::from_millis(millis)), shown);
-    }
-}
-
 /// A size reads in bytes under a thousand, then in tenths of its largest decimal unit.
 #[test]
 fn a_size_reads_at_the_scale_it_is() {

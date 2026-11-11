@@ -19,6 +19,7 @@ use super::{
 };
 use crate::commands::RefusalText;
 use crate::commands::prompt::Confirmation;
+use crate::commands::result_table::{Row, format_elapsed, render_rows};
 use crate::escape::{escape_line, render_block};
 use crate::progress::count;
 
@@ -469,7 +470,7 @@ fn poll_budget(poll: &Poll<'_>) -> String {
 /// seconds with as many decimals as the value needs (`2s`, `1.5s`, `0.25s`, `1m 43s`,
 /// `1m 32.5s`, `1h 5s`), so the value is stated exactly.
 ///
-/// The wetrun's own durations ([`format_elapsed`]) are measured, so they are cut to a
+/// The wetrun's own durations (`format_elapsed`) are measured, so they are cut to a
 /// tenth of a second, a second, or a minute (truncated, never rounded up) and take a
 /// fixed shape, two parts with the second one padded (`1m 07s`, `1m 00s`), so they read
 /// alike down the result table's time column. A plan's are declared: cut, one would
@@ -495,19 +496,6 @@ pub(super) fn format_millis(ms: u64) -> String {
     parts.join(" ")
 }
 
-/// One row of a wetrun's table: its status, what it is, how long it took when it ran,
-/// and what it says.
-struct Row {
-    /// `ok`, `FAIL`, or `skip`.
-    status: &'static str,
-    /// The step id, or `preflight`, escaped.
-    id: String,
-    /// How long it ran, or empty for one that didn't.
-    took: String,
-    /// Its summary, error, or reason, escaped as a block when written; may be empty.
-    text: String,
-}
-
 /// Wetrun body: a table of the drift preflight, each step, and the rollback when one
 /// ran — each row's status, its id, how long it took, and its summary, error, or
 /// reason, in aligned columns. A step's summary is text the engine wrote
@@ -524,6 +512,7 @@ fn render_run(
             status: "ok",
             id: "preflight".to_owned(),
             took: run.preflight.map(took).unwrap_or_default(),
+            tag: String::new(),
             text: format!(
                 "{}, no drift",
                 count(
@@ -537,12 +526,14 @@ fn render_run(
             status: "skip",
             id: "preflight".to_owned(),
             took: String::new(),
+            tag: String::new(),
             text: "--skip-preflight".to_owned(),
         },
         DriftPreflight::NothingDeclared => Row {
             status: "skip",
             id: "preflight".to_owned(),
             took: String::new(),
+            tag: String::new(),
             text: "no apply-managed resources declared".to_owned(),
         },
     }];
@@ -566,6 +557,7 @@ fn render_run(
                 .step(step)
                 .map(|record| took(record.took))
                 .unwrap_or_default(),
+            tag: String::new(),
             text,
         });
     }
@@ -616,42 +608,11 @@ fn render_run(
             status,
             id: DeployStepId::Rollback.as_str().to_owned(),
             took: took_text,
+            tag: String::new(),
             text,
         });
     }
     render_rows(out, &rows);
-}
-
-/// `rows` as a table: the status, the id padded to the widest, the duration
-/// right-aligned in its own column, then the text, whose further lines align under its
-/// first.
-fn render_rows(out: &mut String, rows: &[Row]) {
-    let id_width = rows
-        .iter()
-        .map(|row| row.id.chars().count())
-        .max()
-        .unwrap_or(0);
-    let took_width = rows
-        .iter()
-        .map(|row| row.took.chars().count())
-        .max()
-        .unwrap_or(0);
-    for row in rows {
-        // a table with no time in it has no column for one
-        let lead = if took_width == 0 {
-            format!("  {:<6}{:<id_width$}", row.status, row.id)
-        } else {
-            format!(
-                "  {:<6}{:<id_width$}  {:>took_width$}",
-                row.status, row.id, row.took
-            )
-        };
-        if row.text.is_empty() {
-            let _ = writeln!(out, "{}", lead.trim_end());
-        } else {
-            render_block(out, &format!("{lead}  "), &row.text);
-        }
-    }
 }
 
 /// The most of a summary the outcome line shows, in characters.
@@ -778,22 +739,4 @@ pub(super) fn format_size(bytes: u64) -> String {
     }
     let tenths = u128::from(bytes) * 10 / scale;
     format!("{}.{} {unit}", tenths / 10, tenths % 10)
-}
-
-/// A duration as an outcome line shows it, truncated: tenths of a second under ten
-/// seconds (`0.4s`, and `9.9s` for 9999 ms), whole seconds under a minute (`42s`), then
-/// minutes and seconds (`3m 07s`) and hours and minutes (`1h 02m`).
-pub(super) fn format_elapsed(took: Duration) -> String {
-    let tenths = took.as_millis() / 100;
-    if tenths < 100 {
-        return format!("{}.{}s", tenths / 10, tenths % 10);
-    }
-    let seconds = took.as_secs();
-    if seconds < 60 {
-        format!("{seconds}s")
-    } else if seconds < 3600 {
-        format!("{}m {:02}s", seconds / 60, seconds % 60)
-    } else {
-        format!("{}h {:02}m", seconds / 3600, seconds % 3600 / 60)
-    }
 }

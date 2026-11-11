@@ -164,7 +164,8 @@ Expected:
   `apk add chrony`, `rc-update add chronyd default` and
   `rc-service chronyd start` (inside the `sh -c` that resets a crashed service
   first), and the file;
-- the wetrun reports `applied: 4 ok, 0 failed, 0 skipped (of 4)`;
+- the wetrun reports `applied: 4 ok, 0 failed, 0 skipped (of 4)` and closes
+  with `converged <vm-ip> in <time>, the re-detect included`;
 - the **final run reports `(no changes — converged)`**: the probes
   (`apk info -e`, `rc-service <svc> status`, the service's entry under
   `/etc/runlevels`) read

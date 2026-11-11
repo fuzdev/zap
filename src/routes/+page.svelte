@@ -45,10 +45,11 @@ apply — target local (wetrun)
   user: ada
   home: /home/ada
   target: {"local":true,"package_manager":"apt","service_manager":"systemd"}
-  ok    cache-update-apt
-  ok    gitconfig
-  ok    ripgrep
+  ok    cache-update-apt  2.8s
+  ok    gitconfig         0.0s
+  ok    ripgrep           3.1s
 applied: 3 ok, 0 failed, 0 skipped (of 3)
+converged local in 6.4s, the re-detect included
 plan_hash: d317a15e82f2f1117f0d9fa1fdafc079b70f9e3ac5e3103c4b3333f1b6afeab0
 `;
 </script>

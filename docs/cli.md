@@ -203,6 +203,23 @@ standard error as they start (`→ notes: create directory`); the report, on
 standard output when the run ends, holds every outcome. `--json` prints no such
 line.
 
+The report lists each change as a row: its status (`ok`, `FAIL`, or `skip`),
+its id, how long it ran (a skipped change never ran, so it has no time), and a
+failure's error code and message or a skip's reason. The `applied:` line counts
+them, and the last line before the `plan_hash` is the verdict, with the
+machine's host (`local` for the machine Zap runs on) and the time the run took
+from the lock write before the first change to the end of the re-detection:
+
+| Verdict line | Exit |
+|---|---|
+| `converged <host> in <time>, the re-detect included` | 0 |
+| `apply FAILED at <id> on <host> after <time> — …`, which says what ran before it and what was skipped after it | 1 |
+| `apply did not establish convergence on <host> in <time> — the re-detect failed (RESIDUAL above)` | 1 |
+| `apply did not converge <host> in <time> — N resources do not read converged (RESIDUAL above)` | 1 |
+| `apply did not establish convergence on <host> in <time> — N resources were held (UNDETERMINED above)` | 1 |
+
+When more than one applies, the verdict names the first in that order.
+
 ### Binding to the review
 
 A wetrun executes only the plan you reviewed: the plan it computes must equal,
@@ -241,9 +258,10 @@ apply — target local (wetrun, confirmed)
   user: ops
   home: /home/ops
   target: {"local":true}
-  ok    notes
-  ok    hello
+  ok    notes  0.0s
+  ok    hello  0.0s
 applied: 2 ok, 0 failed, 0 skipped (of 2)
+converged local in 0.0s, the re-detect included
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61
 ```
 
