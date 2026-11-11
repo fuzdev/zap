@@ -6,14 +6,19 @@
 //! connection). Reuses the same load →
 //! detect → diff pipeline as `plan`, then walks the plan fact via `execute_plan`.
 //!
-//! **A wetrun executes only a reviewed plan.** The plan it computes must be the one
-//! that was shown: either the hash `--expect-plan` names, or — by default — the one the
-//! most recent preview on this host (`zap plan`, a dry `zap apply`, a refused wetrun)
+//! **A wetrun executes only a reviewed plan.** The plan it computes must be a reviewed
+//! one: either the hash `--expect-plan` names, or — by default — the one the most
+//! recent preview on this host (`zap plan`, a dry `zap apply`, a refused wetrun)
 //! recorded in the last-run report (`review_plan`). Otherwise it refuses before any
 //! side effect, renders the plan it would have run, and records that preview — so the
 //! everyday `zap apply` then `zap apply --wetrun` binds with no extra step, a wetrun
-//! fired with nothing reviewed becomes the review, and an agent can prove the plan it
-//! showed is the plan that ran. An empty plan needs no review. **One preview binds
+//! fired with nothing reviewed becomes the review, and an agent given `--expect-plan`
+//! can prove the plan whose hash it showed is the plan that ran. A preview is recorded
+//! here, before the binary writes the report, so the record says the plan was printed,
+//! not that anyone read it: a preview whose output was discarded, cut short, or never
+//! written still binds the next bare wetrun. `--expect-plan` is the binding for output
+//! that may be truncated, or a reader who isn't the runner. An empty plan needs no
+//! review. **One preview binds
 //! one wetrun**: a wetrun that passes the gate claims the recorded preview
 //! (`super::spend_review`) before the lock write and records its own pass only then,
 //! so of two wetruns started on one preview exactly one executes, and the other stops

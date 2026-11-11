@@ -151,8 +151,9 @@ so rotating one changes neither.
 
 A wetrun doesn't take a saved plan as input; it detects and plans again, because
 the machine may have moved. What it guarantees instead is that the plan it
-executes is the plan you saw. Before it changes anything, it compares its fresh
-`plan_hash` against the plan you reviewed:
+executes is a reviewed one: a plan whose hash you named, or one Zap printed as a
+preview. Before it changes anything, it compares its fresh `plan_hash` against
+the reviewed plan:
 
 - `--expect-plan <hash>` names the reviewed plan explicitly, and the wetrun
   executes only if the fresh plan has exactly that hash;
@@ -172,6 +173,14 @@ preview only one goes on. An agent given `--expect-plan` with the hash it
 showed you can execute only that plan: the same changes, on the same machine,
 as the same user, with the same values for every reference that isn't a secret.
 An empty plan needs no review.
+
+A preview is recorded when Zap prints it, not when anyone reads it: Zap knows
+what it wrote, not what reached a reader. A preview sent to `/dev/null`, cut
+short by `head`, or whose output couldn't be written at all still binds the
+next wetrun run without `--expect-plan`. When the output may be truncated, or
+the one who reads the preview isn't the one who runs the wetrun, bind with
+`--expect-plan`: its hash is the preview's last line, the first one a
+cut-short preview loses.
 
 On an interactive terminal, a wetrun whose plan has no review asks for the
 first eight characters of its `plan_hash` instead of refusing

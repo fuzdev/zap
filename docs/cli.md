@@ -208,7 +208,8 @@ line.
 A wetrun executes only the plan you reviewed: the plan it computes must equal,
 hash for hash, the one named by `--expect-plan <hash>` or the one in the most
 recent preview on this host. Otherwise it **refuses**, changes nothing, and
-exits 2. The rules are in
+exits 2. A preview binds once Zap has printed it, read or not: one sent to
+`/dev/null` or cut short by `head` binds the same. The rules are in
 [concepts.md](./concepts.md#a-wetrun-executes-only-the-plan-you-reviewed).
 
 On an interactive terminal, a wetrun whose plan has no review (no preview, or a
@@ -266,7 +267,9 @@ standard input that isn't a terminal (`< /dev/null`). A non-interactive wetrun
 with no review of its plan refuses, and `--json` never asks.
 
 `--expect-plan` makes the binding explicit: the hash from the plan you reviewed,
-perhaps in a pull request or an agent's transcript. The match is exact. A dry run
+perhaps in a pull request or an agent's transcript. It is the binding to use
+when the preview's output may be truncated, or when the one who reads it isn't
+the one who runs the wetrun. The match is exact. A dry run
 rejects the flag. `zap deploy` follows the same rule against its own preview
 ([below](#zap-deploy)).
 
@@ -509,9 +512,11 @@ or a full device) prints `error: the report could not be written:` and the
 reason on standard error.
 A run whose report is its answer (`plan`, `detect`, `status`, `lock --check`,
 `config validate`, a dry run, a refused wetrun) then exits 1 where it would
-have exited 0. A run that changed something (an `apply` or `deploy` wetrun
-that reached its work, `lock`, `update`) keeps its own code, which describes
-the machine or the lock. A non-zero code is kept either way.
+have exited 0. A preview whose report couldn't be written was still recorded,
+and binds the next wetrun run without `--expect-plan`. A run that changed
+something (an `apply` or `deploy` wetrun that reached its work, `lock`,
+`update`) keeps its own code, which describes the machine or the lock. A
+non-zero code is kept either way.
 
 An error prints as `error:` and its message; a message of several lines is
 indented under it, and any advice Zap adds follows at the left margin.

@@ -251,8 +251,9 @@ deploy — target {env:DEPLOY_HOST} (dry-run)
 plan_hash: 2d09162e11f59e2b2409f6d89dcf0f469a877baf09d6e9f770bf5218eb6fcb95
 ```
 
-A wetrun executes only a plan you were shown. It computes its plan again, and
-that plan's hash must equal the reviewed one:
+A wetrun executes only a reviewed plan: one whose hash you named, or one Zap
+printed as a preview. It computes its plan again, and that plan's hash must
+equal the reviewed one:
 
 - `--expect-plan <hash>` names the reviewed plan explicitly, and binds alone;
 - with no flag, the reviewed plan is the **deploy preview** recorded for this
@@ -266,6 +267,13 @@ uploaded. The everyday flow is `zap deploy`, read it, `zap deploy --wetrun`
 with the same flags. A wetrun fired cold becomes the preview, and the next one
 executes if nothing moved. There is no flag that skips the review, and a dry
 run rejects `--expect-plan`.
+
+The preview is recorded when Zap prints it, not when anyone reads it: a dry run
+sent to `/dev/null`, cut short by `head`, or whose output couldn't be written
+still binds the next wetrun run without `--expect-plan`. When the output may be
+truncated, or the one who reads the preview isn't the one who deploys, pass
+`--expect-plan` with the hash on the preview's last line
+([concepts.md](./concepts.md#a-wetrun-executes-only-the-plan-you-reviewed)).
 
 On an interactive terminal (standard input and standard error both terminals),
 a wetrun with no review and no `--expect-plan` shows the plan instead, under an

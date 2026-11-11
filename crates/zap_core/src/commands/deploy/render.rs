@@ -26,7 +26,7 @@ use crate::progress::count;
 ///
 /// Every plan-derived line is read from the report's plan, and the `plan_hash` is
 /// printed only under a render that lists the whole of it — so what the hash covers is
-/// what was shown — and never for a plan that names no one machine. Text that came from
+/// what the render lists — and never for a plan that names no one machine. Text that came from
 /// the config, the environment, the command line, the checkout, or the target is
 /// escaped on its way out (`escape_line`).
 ///

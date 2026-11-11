@@ -96,7 +96,8 @@ SSH. [Getting started](./getting-started.md) walks through both.
 
 1. **A wetrun executes only the plan you reviewed.** Dry run is the default,
    with no flag to auto-approve. `--wetrun` re-plans against the live machine,
-   then refuses unless the plan matches the one you saw, by hash; on a
+   then refuses unless the plan matches, by hash, the one you name or the last
+   preview Zap printed; on a
    terminal, when the plan isn't the reviewed one, it shows you the plan and asks first.
 2. **Unknown means hold, not guess.** A resource Zap can't read is left out of
    the plan and reported as undetermined, with exit 1. It never reads as

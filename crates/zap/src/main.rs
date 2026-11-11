@@ -400,8 +400,10 @@ impl ReportTo {
         }
     }
 
-    /// Write the report, flushed, so a closed or full stream is an error here rather
-    /// than a panic, or a loss nobody hears of at exit.
+    /// Write the report, flushed, so a pipe whose reader has gone or a full device is an
+    /// error here rather than a panic, or a loss nobody hears of at exit. A standard
+    /// output closed when zap starts (`>&-`) is no error: std reopens it on `/dev/null`
+    /// before `main`, so the report is discarded as it is under `>/dev/null`.
     fn write(self, rendered: &str) -> std::io::Result<()> {
         match self {
             Self::Stdout => write_flushed(&mut std::io::stdout().lock(), rendered),

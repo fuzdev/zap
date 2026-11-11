@@ -175,7 +175,9 @@ plain reference's value), is in
 `zap deploy` binds its own plan the same way
 ([deploy.md](./deploy.md#binding-a-wetrun-to-a-reviewed-plan)). So an agent given
 `--expect-plan` with the hash you approved, or a pipeline given the hash approved
-in a pull request, can execute only that plan. A plan whose host, connecting
+in a pull request, can execute only that plan. Without `--expect-plan`, the
+reviewed plan is the host's last recorded preview, which Zap records when it
+prints it, not when anyone reads it. A plan whose host, connecting
 user, or deploy health domain resolves through a masked reference gets no hash,
 and its wetrun is an error ([env.md](./env.md#masked-hosts-and-review)).
 

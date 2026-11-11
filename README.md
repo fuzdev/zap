@@ -84,7 +84,8 @@ sandbox `fgro` evaluates in, and an `fgro` built on x86_64 Linux.
 
 - **A wetrun executes only the plan you reviewed.** Dry run is the default, with
   no flag to auto-approve. `--wetrun` re-plans against the live machine and
-  refuses unless the hash matches the plan you saw; on a terminal, when the plan
+  refuses unless the hash matches the plan you name or the last preview Zap
+  printed; on a terminal, when the plan
   isn't the reviewed one, it shows you the plan and asks for the start of its
   hash first.
 - **Unknown means hold.** A resource Zap can't read is left out of the plan and

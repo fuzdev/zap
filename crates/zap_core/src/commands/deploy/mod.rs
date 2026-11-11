@@ -29,9 +29,12 @@
 //! that render as the preview, so a wetrun fired with nothing reviewed becomes the
 //! review — or, on an interactive terminal, shows that plan and asks to deploy it
 //! (`super::prompt`): the start of its hash typed back runs it as a bound wetrun runs,
-//! from the drift preflight on, and anything else is the refusal. The hash is printed
-//! only with the plan it stands for, and a preview is
-//! recorded only by a pass that printed one ([`DeployOutcome::preview_pass`]). A deploy
+//! from the drift preflight on, and anything else is the refusal. The hash is rendered
+//! only with the plan it stands for, and a preview is recorded only by a pass that
+//! renders one ([`DeployOutcome::preview_pass`]), before the binary writes it: the record
+//! says the plan was printed, not that anyone read it, so a preview whose output was
+//! discarded or cut short still binds the next bare wetrun, and `--expect-plan` is the
+//! binding for output that may be truncated or a reader who isn't the runner. A deploy
 //! that gets as far as its steps withdraws the preview first, so one review covers one
 //! execution, whichever way it ends. The preview is a record of its own: the last-run
 //! report `apply` binds to is neither read nor written by it.
@@ -353,10 +356,10 @@ pub struct DeployReport {
 }
 
 impl DeployOutcome {
-    /// Whether the render prints the `plan_hash`. Only under a plan it showed — its
-    /// steps previewed in full, or as their outcomes — since a hash is a handle on a plan that was shown,
-    /// and `--expect-plan` must not be able to name one that wasn't — and only for a
-    /// plan that names one machine.
+    /// Whether the render prints the `plan_hash`. Only under the plan it stands for —
+    /// its steps previewed in full, or as their outcomes — since a hash is a handle on a
+    /// plan rendered with it, and `--expect-plan` must not be able to name one that
+    /// wasn't — and only for a plan that names one machine.
     #[must_use]
     pub const fn shows_hash(&self) -> bool {
         match self {
@@ -371,8 +374,10 @@ impl DeployOutcome {
 
     /// The preview this outcome stands as: the pass that rendered a plan for review and
     /// executed none of it. `Some` exactly for the outcomes whose plan and hash were
-    /// printed with nothing run, which are the ones recorded as the host's deploy
-    /// preview — so a recorded hash is always one that was shown.
+    /// rendered with nothing run, which are the ones recorded as the host's deploy
+    /// preview — so a recorded hash is always one rendered with its plan. Rendered, not
+    /// read: the record is written before the binary writes the report, and stays when
+    /// that write fails or a reader cuts it short.
     #[must_use]
     pub const fn preview_pass(&self) -> Option<DeployPreviewPass> {
         match self {
