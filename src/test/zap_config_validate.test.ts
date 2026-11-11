@@ -178,8 +178,11 @@ test.skipIf(runnable === null)(
  * A config declaring the nginx site recipe's content, as `nginx_site_core` returns it
  * for `redirect_domains`, in a file resource.
  */
-const nginx_site_config = (redirect_domains: Array<string>): string => {
-	const content = nginx_site_core({
+const nginx_site_config = (
+	redirect_domains: Array<string>,
+	edit: (template: string) => string = (template) => template
+): string => {
+	const site = nginx_site_core({
 		ssl_snippet_path: '/etc/nginx/snippets/ssl_params.conf',
 		domain: env_ref('DEPLOY_DOMAIN'),
 		port: '4040',
@@ -187,6 +190,7 @@ const nginx_site_config = (redirect_domains: Array<string>): string => {
 		csp: "default-src 'self'",
 		redirect_domains
 	});
+	const content = { ...site, template: edit(site.template) };
 	return `export default (zap) => {
 	zap.target({local: true, package_manager: 'apt'});
 	zap.file({id: 'nginx-site', path: '/etc/nginx/sites-available/app', content: ${JSON.stringify(content)}});
@@ -215,11 +219,18 @@ test.skipIf(runnable === null)(
 	}
 );
 
+// The recipe refuses a `{{mirror}}` redirect name itself (`recipe_nginx.test.ts`), so the
+// placeholder is put into the template after the recipe built it: what this pins is the
+// engine's refusal, of a template placeholder its vars don't name, at the binary's exit.
 test.skipIf(runnable === null)(
-	'config validate refuses an nginx site redirect_domains placeholder naming no variable',
+	'config validate refuses an nginx site template placeholder naming no variable',
 	() => {
 		const ctx = runnable!;
-		const { path, zap_home, cleanup } = temp_config(ctx.zap, nginx_site_config(['{{mirror}}']));
+		const config = nginx_site_config(['mirror.example.com'], (template) => {
+			assert.include(template, 'mirror.example.com');
+			return template.replaceAll('mirror.example.com', '{{mirror}}');
+		});
+		const { path, zap_home, cleanup } = temp_config(ctx.zap, config);
 		try {
 			const result = validate(ctx.zap, path, zap_home);
 			assert.notStrictEqual(result.status, 0, 'a foreign placeholder must fail validation');
