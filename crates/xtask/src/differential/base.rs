@@ -349,10 +349,7 @@ fn apply_reviewed(
                 .map_err(|problem| format!("{what}: the preview apply {problem}"))?;
             let applied = apply(WETRUN, APPLY_TIMEOUT)?;
             if !applied.success() {
-                return Err(format!(
-                    "{what}: the base apply failed: {}",
-                    applied.describe_failure()
-                ));
+                return Err(wetrun_failed(&format!("{what}: the base apply"), &applied));
             }
         }
         FromPristine::Holds { .. } => {
@@ -368,10 +365,9 @@ fn apply_reviewed(
                 .map_err(|problem| format!("{what}: round 2: the preview apply {problem}"))?;
             let applied = apply(WETRUN, APPLY_TIMEOUT)?;
             if !applied.success() {
-                return Err(format!(
-                    "{what}: round 2: the base apply failed: {}\n{}",
-                    applied.describe_failure(),
-                    applied.stdout
+                return Err(wetrun_failed(
+                    &format!("{what}: round 2: the base apply"),
+                    &applied,
                 ));
             }
         }
@@ -380,6 +376,14 @@ fn apply_reviewed(
     check_idempotent(&again).map_err(|problem| {
         format!("{what} doesn't converge on a second apply (a fixture bug): {problem}")
     })
+}
+
+/// A base wetrun that didn't exit 0, as `which` (`<fixture>: the base apply`) failed:
+/// how it ended, then its whole report ([`with_report`]), where its verdict is. Its
+/// stderr is the progress lines of a text-mode wetrun, so a tail of it would show the
+/// last change that started rather than the one that failed.
+fn wetrun_failed(which: &str, applied: &Captured) -> String {
+    with_report(&format!("{which} failed: {}", applied.status()), applied)
 }
 
 /// The first round's preview of a fixture that declares `holds` and the changes
@@ -401,7 +405,8 @@ fn held_preview_problem(apply: &Captured, holds: &[Hold], behind: &[Hold]) -> Re
                 hold_ids(holds)
             ));
         }
-        _ => return Err(format!("failed: {}", apply.describe_failure())),
+        // the caller adds the report (`with_report`), stderr and all
+        _ => return Err(format!("failed: {}", apply.status())),
     }
     if !prints_plan_hash(&apply.stdout) {
         return Err("printed no plan_hash:".to_owned());
@@ -443,7 +448,8 @@ fn held_wetrun_problem(apply: &Captured, holds: &[Hold], behind: &[Hold]) -> Res
                 hold_ids(holds)
             ));
         }
-        _ => return Err(format!("failed: {}", apply.describe_failure())),
+        // the caller adds the report (`with_report`): a wetrun's stderr is its progress
+        _ => return Err(format!("failed: {}", apply.status())),
     }
     exactly_held(&apply.stdout, holds, behind)?;
     summary_problem(&apply.stdout)?;
@@ -785,6 +791,76 @@ plan_hash: 7a1c0f3e5b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb1077
         let (result, calls) = scripted(HOLDS_DATABASE, Vec::new());
         assert_eq!(result, Err("no reply scripted for this call".to_owned()));
         assert_eq!(calls.len(), 1);
+    }
+
+    /// A text-mode wetrun whose last change failed: its progress lines on stderr, its
+    /// report, with the `FAIL` row, on stdout.
+    const PROGRESS: &str = "→ etc-dir: create directory\n→ pipeline: create pipeline\n\
+        → postgresql-service: update service\n\
+        → re-detect: reading 4 declared resources back to confirm what the changes left\n";
+    const FAIL_ROW: &str =
+        "  FAIL  postgresql-service  [ExecutionFailed]  — rc-service: postgresql failed to start";
+
+    fn failed_wetrun(code: i32) -> Captured {
+        let stdout = HELD_WETRUN
+            .replace("  ok    postgresql-service\n", &format!("{FAIL_ROW}\n"))
+            .replace("applied: 3 ok, 0 failed", "applied: 2 ok, 1 failed");
+        Captured {
+            code: Some(code),
+            stdout,
+            stderr: PROGRESS.to_owned(),
+            timed_out: false,
+        }
+    }
+
+    /// A base wetrun that fails is described by how it ended and its report, where its
+    /// `FAIL` row is, never by the tail of its stderr, which is its progress lines.
+    #[test]
+    fn a_failed_base_wetrun_is_described_by_its_report_not_its_progress() {
+        let failed = failed_wetrun(1);
+        let replies = [
+            // one round: the preview, then the wetrun that fails
+            (
+                FromPristine::Converges,
+                vec![captured(2, PIPELINE_ONLY_WITH_SUBJECT), failed.clone()],
+                "the candidate's fixture: the base apply failed: exit 1",
+            ),
+            // two rounds: round 2's wetrun fails
+            (
+                HOLDS_DATABASE,
+                {
+                    let mut replies = two_rounds();
+                    replies[3] = failed;
+                    replies.truncate(4);
+                    replies
+                },
+                "the candidate's fixture: round 2: the base apply failed: exit 1",
+            ),
+            // two rounds: round 1's wetrun stops on an error rather than its holds
+            (
+                HOLDS_DATABASE,
+                {
+                    let mut replies = two_rounds();
+                    replies[1] = failed_wetrun(2);
+                    replies.truncate(2);
+                    replies
+                },
+                "the candidate's fixture: round 1: the base apply failed: exit 2",
+            ),
+        ];
+        for (expected, replies, headline) in replies {
+            let stdout = replies.last().expect("a reply").stdout.clone();
+            let (result, _) = scripted(expected, replies);
+            let error = result.expect_err("a failed wetrun");
+            assert_eq!(error.lines().next(), Some(headline), "{error}");
+            assert!(error.contains(FAIL_ROW), "{error}");
+            assert!(error.ends_with(&stdout), "{error}");
+            // the progress is kept whole, below the headline, as what stderr held
+            assert!(
+                error.contains(&format!("\nstderr: {}\n", PROGRESS.trim())),
+                "{error}"
+            );
+        }
     }
 
     fn held_preview(stdout: &str, holds: &[Hold]) -> Result<(), String> {

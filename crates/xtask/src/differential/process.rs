@@ -25,16 +25,26 @@ impl Captured {
         matches!(self.code, Some(0))
     }
 
-    /// A one-line failure description for an error message.
-    pub fn describe_failure(&self) -> String {
-        let status = if self.timed_out {
+    /// How the child ended: `exit <code>`, `timed out`, or `killed by a signal`.
+    pub fn status(&self) -> String {
+        if self.timed_out {
             "timed out".to_owned()
         } else {
             self.code.map_or_else(
                 || "killed by a signal".to_owned(),
                 |code| format!("exit {code}"),
             )
-        };
+        }
+    }
+
+    /// A failure description for an error message: the [`status`](Self::status), then
+    /// the tail of stderr, or of stdout when stderr is empty.
+    ///
+    /// Not for a text-mode `apply --wetrun`, whose stderr holds its progress lines and
+    /// whose verdict is the report on stdout: its failure is the status beside the whole
+    /// report (`reviewed::with_report`).
+    pub fn describe_failure(&self) -> String {
+        let status = self.status();
         let stderr = self.stderr.trim();
         let stdout = self.stdout.trim();
         let detail = if stderr.is_empty() { stdout } else { stderr };

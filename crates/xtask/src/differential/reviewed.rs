@@ -117,7 +117,9 @@ pub fn plans_exactly(apply: &Captured, ids: &[&str], what: &str) -> Result<(), S
 }
 
 /// `problem`, then what the run wrote to stderr — where a zap that stopped on an
-/// error says why, with nothing on stdout — and its whole report.
+/// error says why, with nothing on stdout, and where a text-mode wetrun's progress
+/// lines say how far it got — and its whole report, which holds a wetrun's verdict
+/// (its `FAIL` and `skip` rows, its banners).
 pub fn with_report(problem: &str, apply: &Captured) -> String {
     let stderr = apply.stderr.trim();
     if stderr.is_empty() {
@@ -172,9 +174,12 @@ fn incomplete_counts(summary: &str) -> Option<(u32, u32)> {
 /// The wetrun bound to a preview whose plan hashed to `reviewed`: it exited 0, with no
 /// verdict banner, every change completed ([`summary_problem`]), and the same
 /// `plan_hash`.
+///
+/// A failure names how the run ended and no more: a wetrun's stderr is its progress
+/// lines, and why it failed is in its report, which the caller adds ([`with_report`]).
 pub fn wetrun_problem(apply: &Captured, reviewed: &str) -> Result<(), String> {
     if apply.code != Some(0) {
-        return Err(format!("failed: {}", apply.describe_failure()));
+        return Err(format!("failed: {}", apply.status()));
     }
     if let Some(banner) = apply.stdout.lines().find_map(compare::banner_name) {
         return Err(format!("reports {banner}"));
@@ -241,7 +246,7 @@ pub fn only_imperative_changes(stdout: &str) -> Result<(), String> {
 pub mod tests {
     use super::{
         change_of, check_preview, incomplete_counts, one_plan_hash, only_imperative_changes,
-        plan_hashes, plans_exactly, prints_plan_hash, wetrun_problem,
+        plan_hashes, plans_exactly, prints_plan_hash, wetrun_problem, with_report,
     };
     use crate::differential::compare::is_change_line;
     use crate::differential::process::Captured;
@@ -468,6 +473,26 @@ pub mod tests {
                 .expect_err("refused")
                 .starts_with("failed: exit 1")
         );
+        // a failed wetrun is named by how it ended; its stderr is progress, and why it
+        // failed is the report the caller adds
+        let mut failed = captured(
+            1,
+            &WETRUN_REPORT.replace(
+                "  ok    pipeline\n",
+                "  FAIL  pipeline  [ExecutionFailed]  — exit 1\n",
+            ),
+        );
+        failed.stderr = "→ firewall: update firewall\n→ pipeline: create pipeline\n".to_owned();
+        let problem = wetrun_problem(&failed, "9f0e").expect_err("failed");
+        assert_eq!(problem, "failed: exit 1");
+        let described = with_report(&problem, &failed);
+        assert!(
+            described.starts_with(
+                "failed: exit 1\nstderr: → firewall: update firewall\n→ pipeline: create pipeline\n"
+            ),
+            "{described}"
+        );
+        assert!(described.ends_with(&failed.stdout), "{described}");
         let residual = WETRUN_REPORT.replace(
             "applied: ",
             "  RESIDUAL — 1 resource(s) do not read converged after this apply:\napplied: ",
