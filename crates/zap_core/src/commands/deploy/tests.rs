@@ -8080,3 +8080,59 @@ async fn who_deploys_never_has_an_empty_side() {
         "op@unknown"
     );
 }
+
+/// Each step is timed around its own run, and the run's total covers the preflight,
+/// every step, and the rollback: a health check that waits between its attempts took at
+/// least that wait, and the total is at least the sum of the parts. Lower bounds from
+/// the polls' own sleeps, so nothing here depends on how fast the machine is.
+#[tokio::test]
+async fn each_step_is_timed_around_its_run_and_the_total_covers_the_rollback() {
+    const INTERVAL_MS: u64 = 60;
+    let port = refusing_port();
+    let slow = |live: &str| {
+        let mut rig = Rig::new(live).with_deploy(serde_json::json!({
+            "build": "make", "artifacts": ["build/"], "path": "/srv/app", "service": "app",
+            "health": {"domain": Text::literal(&format!("127.0.0.1:{port}")), "path": "/health",
+                       "attempts": 2, "interval_ms": INTERVAL_MS},
+        }));
+        rig.config.target.service_manager = Some(ServiceManager::Systemd);
+        rig
+    };
+    let dry = slow("def5678")
+        .deploy(&DeployOptions::default())
+        .await
+        .unwrap();
+    let mut rig = slow("def5678").recording(&dry.plan);
+    let swap_back =
+        zap_types::deploy::rollback_swap_command("/srv/app", &dry.plan.version, "def5678");
+    rig.target = rig.target.with(swap_back, ok("rolled_back\n"));
+    let report = rig.deploy(&wetrun_expecting(&dry.plan_hash)).await.unwrap();
+    let DeployOutcome::Failed {
+        run,
+        left: FailureState::AfterSwap(Rollback::Ran { took, .. }),
+    } = &report.outcome
+    else {
+        panic!("{report:?}");
+    };
+    let interval = std::time::Duration::from_millis(INTERVAL_MS);
+    let health = run
+        .steps
+        .iter()
+        .find(|record| record.id == DeployStepId::Health)
+        .expect("a health row");
+    assert!(
+        health.took >= interval,
+        "the health step waited {interval:?} between its attempts, but took {:?}",
+        health.took
+    );
+    // the rollback re-checks health, waiting the same interval
+    assert!(*took >= interval, "the rollback took {took:?}");
+    let steps: std::time::Duration = run.steps.iter().map(|record| record.took).sum();
+    let parts = run.preflight.unwrap_or_default() + steps + *took;
+    assert!(
+        run.total >= parts,
+        "total {:?} < preflight {:?} + steps {steps:?} + rollback {took:?}",
+        run.total,
+        run.preflight
+    );
+}

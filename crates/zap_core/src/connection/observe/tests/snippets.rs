@@ -251,22 +251,20 @@ async fn the_home_entry_read_holds_a_link_or_a_file_under_both_shells() {
     let homes = dir.path().join("homes");
     let home = homes.join("deploy");
     let snippet = user::home_entry_snippet("deploy");
-    let localized = snippet
-        .replace(
-            "'/home/deploy'",
-            &zap_types::shell::single_quote(&home.to_string_lossy()),
-        )
-        .replace(
-            " /home ",
-            &format!(
-                " {} ",
-                zap_types::shell::single_quote(&homes.to_string_lossy())
-            ),
-        );
-    assert!(
-        !localized.contains("/home/") && !localized.contains(" /home "),
-        "{localized}"
+    let home_quoted = zap_types::shell::single_quote(&home.to_string_lossy());
+    let homes_quoted = format!(
+        " {} ",
+        zap_types::shell::single_quote(&homes.to_string_lossy())
     );
+    let localized = snippet
+        .replace("'/home/deploy'", &home_quoted)
+        .replace(" /home ", &homes_quoted);
+    // Every `/home` the snippet names was replaced: with the scratch paths taken out
+    // (which may themselves sit under `/home`, as under a `TMPDIR` there), none is left.
+    let unreplaced = localized
+        .replace(&home_quoted, "")
+        .replace(&homes_quoted, " ");
+    assert!(!unreplaced.contains("/home"), "{localized}");
     let exited = |code: i32, stdout: &str| {
         Ok(Observation::Command(CommandObservation {
             code,
