@@ -118,7 +118,7 @@ types, validated where the JSON is parsed.
   holds) rather than returning a neutral value that reads as a finding: a neutral
   default in a defensive arm is a guessed fact.
 
-See the [fuz-stack skill](https://docs.fuz.dev/skills/fuz-stack)'s `rust-patterns.md` §Idioms for the cross-ecosystem statement.
+See the [fuz-stack skill](https://docs.fuz.dev/skills/fuz-stack)'s `rust-patterns.md` §Type modeling for the cross-ecosystem statement.
 
 ## Testing
 
