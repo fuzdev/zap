@@ -28,7 +28,7 @@
 		<link href="/_app/immutable/chunks/CkSeWg2M.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Cyt8LZpN.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/nqpJJcfP.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.DaSMZjRK.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.DoQSmrUM.js" rel="modulepreload">
 		<link href="/_app/immutable/nodes/0.CBD02HwM.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/EpM2J4Cd.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Drx_RGrR.js" rel="modulepreload">
@@ -36,7 +36,7 @@
 		<link href="/_app/immutable/chunks/yWx_1vUe.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMVmPj5_.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJ6hHGax.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/2.CTeavGnV.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/2.LMbwFFm5.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CHEAhmp6.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BbCw5KVU.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BPVwp-J3.js" rel="modulepreload">
@@ -48,10 +48,10 @@
 		<link href="/_app/immutable/chunks/tQA3rDst.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/k6TRNp0w.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DH_LefOd.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/DBPsyPf2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/wYG53CV6.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CtsBFaJL.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/D1RK0gmx.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/GoVQbpeX.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DpZswiyT.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/d9FfLdfy.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CABULNtq.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/B34bN6Wl.js" rel="modulepreload">
@@ -59,18 +59,18 @@
 		<link href="/_app/immutable/chunks/CH4seIGa.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DHlLBREC.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CwC1awOQ.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/df6WGb4l.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Cnn_FLVp.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJMm7Txn.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BXoHXHa0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DKqhmjm7.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMnsbEWi.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Brh7-bty.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/9ZLJ-H4D.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D3GFQ8Ma.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/sNOw6LX0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Ch_dVXHx.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/o9OBPhqj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/bmxvlgsp.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CTnnGNGJ.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/28.D1PXBzo-.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/28.BQ_IO-2n.js" rel="modulepreload">
 		<!--12qhfyh--><!----><!--4fa0a9--><!--[-1--><!--]--><!----><!--gk1h4h--><!----><title>Testing against real targets — zap</title>
 		<link href="/_app/immutable/assets/0.C0PIgcC8.css" rel="stylesheet">
 		<link href="/_app/immutable/assets/Svg.DfrCKcO9.css" rel="stylesheet">
@@ -164,7 +164,8 @@ env ALPINE_HOST=<span class="token_operator">&lt;</span>vm-ip<span class="token_
 (<code>running=false, enabled=false</code>);</li><li>the dry run plans a <code>cache-update-apk</code> change (<code>apk update</code>) ahead of
 <code>apk add chrony</code>, <code>rc-update add chronyd default</code> and
 <code>rc-service chronyd start</code> (inside the <code>sh -c</code> that resets a crashed service
-first), and the file;</li><li>the wetrun reports <code>applied: 4 ok, 0 failed, 0 skipped (of 4)</code>;</li><li>the <strong>final run reports <code>(no changes — converged)</code></strong>: the probes
+first), and the file;</li><li>the wetrun reports <code>applied: 4 ok, 0 failed, 0 skipped (of 4)</code> and closes
+with <code>converged &lt;vm-ip> in &lt;time>, the re-detect included</code>;</li><li>the <strong>final run reports <code>(no changes — converged)</code></strong>: the probes
 (<code>apk info -e</code>, <code>rc-service &lt;svc> status</code>, the service's entry under
 <code>/etc/runlevels</code>) read
 the post-apply state correctly, as the wetrun's own re-read already checked
@@ -259,16 +260,16 @@ when changing an Alpine <code>tar</code> extract or <code>build</code> path.</p>
 			
 			<script>
 				{
-					__sveltekit_h0s9s2 = {
+					__sveltekit_pwsp6i = {
 						base: "",
-						version: "fa7283a6b9e6447582f73bdd3668dc027e726ae2"
+						version: "7d5d6b08255adf135853cb8d69eda97e88f92d81"
 					};
 
 					const element = document.currentScript.parentElement;
 
 					import("/_app/immutable/entry/start.DMWmOBF_.js").then(async (kit) => {
-						kit.init(__sveltekit_h0s9s2);
-						const app = await import("/_app/immutable/entry/app.DaSMZjRK.js");
+						kit.init(__sveltekit_pwsp6i);
+						const app = await import("/_app/immutable/entry/app.DoQSmrUM.js");
 						kit.start(app, element, {
 							node_ids: [0, 2, 28],
 							data: [null,null,null],

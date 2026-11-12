@@ -318,10 +318,10 @@ changes nothing. A change that would restart or reload a held service is held
 too: its change would owe the service the action with nothing to run it, so
 the action would never happen. This follows trigger edges in reverse (a
 file's `,r(8),i(B);var _t=e(B),vt=n(_t);vt.nodeValue=`One exception: a converged service whose only change is the restart or reload a
-`;var yt=e(vt);r(),i(_t);var bt=e(_t,2);oe(bt,{lang:null,content:`  UNDETERMINED — 1 resource(s) could not be probed, so no change is planned for them and this changeset is partial:
+`;var yt=e(vt);r(),i(_t);var bt=e(_t,2);oe(bt,{lang:null,content:`  UNDETERMINED — 1 resource could not be probed, so no change is planned for it and this changeset is partial:
       web — detection failed: the unit read exited 1
-  their live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
-  held behind them — 2 resource(s) can't change until they do:
+  its live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
+  held behind it — 2 resources can't change until it does:
       after — waits on \`web\`, which is held
       site — would reload \`web\`, which is held`});var V=e(bt,2),xt=e(n(V));xt.nodeValue=` is about the observed side. Its twin on the desired side is the
 `;var St=e(xt,3);r(),i(V);var Ct=e(V);o(Ct,`id`,`kinds-that-read-a-failed-probe-as-absent`);var H=e(Ct,3),wt=e(n(H),2);wt.nodeValue=` is declared reads

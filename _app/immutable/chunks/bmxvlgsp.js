@@ -23,7 +23,8 @@ connect time:</p><!><p>Drive it, with <code>ZAP_FGRO</code> set to your <code>fg
 (<a>install.md</a>). The <code>env</code> prefix works in every shell; in <code>bash</code> or <code>zsh</code> you can also
 write the assignments inline, as <code>ALPINE_HOST=… ALPINE_USER=… zap …</code>:</p><!><p>Expected:</p><ul><li><code>detect</code> shows <code>chrony</code> absent and <code>chronyd</code> drifted
 (<code>running=false, enabled=false</code>);</li><li>the dry run plans a <code>cache-update-apk</code> change (<code>apk update</code> <code>apk add chrony</code>, <code>rc-update add chronyd default</code> <code>rc-service chronyd start</code> (inside the <code>sh -c</code> that resets a crashed service
-first), and the file;</li><li>the wetrun reports <code>applied: 4 ok, 0 failed, 0 skipped (of 4)</code>;</li><li>the <strong>final run reports <code>(no changes — converged)</code></strong>: the probes
+first), and the file;</li><li>the wetrun reports <code>applied: 4 ok, 0 failed, 0 skipped (of 4)</code> and closes
+with <code>converged &lt;vm-ip> in &lt;time>, the re-detect included</code>;</li><li>the <strong>final run reports <code>(no changes — converged)</code></strong>: the probes
 (<code>apk info -e</code>, <code>rc-service &lt;svc> status</code> <code>/etc/runlevels</code>) read
 the post-apply state correctly, as the wetrun's own re-read already checked
 (a <code>RESIDUAL</code> banner names anything that doesn't read converged).</li></ul><h2>The Debian VM</h2><p><code>debian-zap</code> is the apt, systemd, and ufw twin of <code>alpine-zap</code>: Debian 13's

@@ -47,7 +47,12 @@ writing a pending-trigger marker on the target before the first source of a
 triggered service and clearing it after the service's change;</li><li> <code>RESIDUAL</code>.</li></ol><p>While steps 8 and 9 run, each change and the re-detection print one line to
 standard error as they start (<code>→ notes: create directory</code>); the report, on
 standard output when the run ends, holds every outcome. <code>--json</code> prints no such
-line.</p><h3>Binding to the review</h3><p>A wetrun executes only the plan you reviewed: the plan it computes must equal,
+line.</p><p>The report lists each change as a row: its status (<code>ok</code>, <code>FAIL</code>, or <code>skip</code>),
+its id, how long it ran (a skipped change never ran, so it has no time), and a
+failure's error code and message or a skip's reason. The <code>applied:</code> line counts
+them, and the last line before the <code>plan_hash</code> is the verdict, with the
+machine's host (<code>local</code> for the machine Zap runs on) and the time the run took
+from the lock write before the first change to the end of the re-detection:</p><table><thead><tr><th>Verdict line</th><th>Exit</th></tr></thead><tbody><tr><td><code>converged &lt;host> in &lt;time>, the re-detect included</code></td><td>0</td></tr><tr><td><code>apply FAILED at &lt;id> on &lt;host> after &lt;time> — …</code>, which says what ran before it and what was skipped after it</td><td>1</td></tr><tr><td><code>apply did not establish convergence on &lt;host> in &lt;time> — the re-detect failed (RESIDUAL above)</code></td><td>1</td></tr><tr><td><code>apply did not converge &lt;host> in &lt;time> — N resources do not read converged (RESIDUAL above)</code></td><td>1</td></tr><tr><td><code>apply did not establish convergence on &lt;host> in &lt;time> — N resources were held (UNDETERMINED above)</code></td><td>1</td></tr></tbody></table><p>When more than one applies, the verdict names the first in that order.</p><h3>Binding to the review</h3><p>A wetrun executes only the plan you reviewed: the plan it computes must equal,
 hash for hash, the one named by <code>--expect-plan &lt;hash></code> or the one in the most
 recent preview on this host. Otherwise it <strong>refuses</strong> <code>/dev/null</code>, or cut short by <code>head</code> <a>concepts.md</a>.</p><p>On an interactive terminal, a wetrun whose plan has no review (no preview, or a
 preview of a different plan) and no <code>--expect-plan</code> shows the plan and asks instead:</p><!><p>The plan and the question go to standard error, as do the <code>→</code> <code>plan_hash</code>, in either case. Input typed before the question appears is
@@ -212,7 +217,7 @@ tracked pin over the network and reports it as
 `,r(2),i(N);var P=e(N,3),F=e(n(P),3),Ye=n(F);Ye.nodeValue=`refuses if any planned command can't take a value its reference resolves to
 (a single quote in a command, for one), naming the resource and the variable;
 `,r(2),i(F);var Xe=e(F,5),Ze=n(Xe);Ze.nodeValue=`re-detects every resource and reports any that still isn't converged as
-`,r(2),i(Xe),i(P);var Qe=e(P,2);o(Qe,`id`,`binding-to-the-review`);var I=e(Qe),$e=e(n(I),4);$e.nodeValue=`, changes nothing, and
+`,r(2),i(Xe),i(P);var Qe=e(P,5);o(Qe,`id`,`binding-to-the-review`);var I=e(Qe),$e=e(n(I),4);$e.nodeValue=`, changes nothing, and
 exits 2. A preview binds once Zap has written it, read or not: one sent to
 `;var et=e($e,4);et.nodeValue=` after the pipe took it whole, binds the
 same. One whose output couldn't be written is withdrawn, and binds nothing. The
@@ -240,9 +245,10 @@ apply — target local (wetrun, confirmed)
   user: ops
   home: /home/ops
   target: {"local":true}
-  ok    notes
-  ok    hello
+  ok    notes  0.0s
+  ok    hello  0.0s
 applied: 2 ok, 0 failed, 0 skipped (of 2)
+converged local in 0.0s, the re-detect included
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61`});var L=e(nt),rt=e(n(L),2);rt.nodeValue=` lines a wetrun
 prints as each change and the re-detection starts; the report goes where it
 always does. The answer is the first eight characters of the plan's

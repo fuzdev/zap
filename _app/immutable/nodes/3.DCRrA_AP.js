@@ -46,9 +46,10 @@ apply — target local (wetrun)
   user: ada
   home: /home/ada
   target: <span class="token_svelte_expression"><span class="token_punctuation">{</span><span class="token_lang_ts"><span class="token_string">"local"</span><span class="token_operator">:</span><span class="token_boolean">true</span><span class="token_punctuation">,</span><span class="token_string_property token_property">"package_manager"</span><span class="token_operator">:</span><span class="token_string">"apt"</span><span class="token_punctuation">,</span><span class="token_string_property token_property">"service_manager"</span><span class="token_operator">:</span><span class="token_string">"systemd"</span></span><span class="token_punctuation">}</span></span>
-  ok    cache-update-apt
-  ok    gitconfig
-  ok    ripgrep
+  ok    cache-update-apt  2.8s
+  ok    gitconfig         0.0s
+  ok    ripgrep           3.1s
 applied: 3 ok, 0 failed, 0 skipped (of 3)
+converged local in 6.4s, the re-detect included
 plan_hash: d317a15e82f2f1117f0d9fa1fdafc079b70f9e3ac5e3103c4b3333f1b6afeab0
 `}),s(2),c(P),c(N);var L=e(N,2),R=o(L),z=e(o(R),2),B=e(o(z),4);s(),c(z),c(R),c(L);var V=e(L,2),H=o(V),U=e(o(H),2);h(U,21,()=>w,e=>e.name,(n,r)=>{var s=x(),l=o(s),d=a(l,!0),f=e(l);c(s),i(()=>{t(d,g(r).name),t(f,` — ${g(r).text??``}`)}),u(n,s)}),c(U),c(H),c(V);var W=e(V,4),G=o(W),K=e(o(G),4),q=e(o(K));s(),c(K),c(G),c(W),c(T),i((e,t,n,r,i)=>{d(A,`href`,e),d(j,`href`,t),d(M,`href`,n),d(B,`href`,r),d(q,`href`,i)},[()=>v(`/docs/introduction`),()=>v(`/docs/getting-started`),()=>v(`/docs`),()=>v(`/docs/recipes`),()=>v(`/docs/comparison`)]),u(l,T),p()}export{C as component};

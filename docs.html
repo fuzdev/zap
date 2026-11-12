@@ -28,7 +28,7 @@
 		<link href="/_app/immutable/chunks/CkSeWg2M.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Cyt8LZpN.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/nqpJJcfP.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.DaSMZjRK.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.DoQSmrUM.js" rel="modulepreload">
 		<link href="/_app/immutable/nodes/0.CBD02HwM.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/EpM2J4Cd.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Drx_RGrR.js" rel="modulepreload">
@@ -36,7 +36,7 @@
 		<link href="/_app/immutable/chunks/yWx_1vUe.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMVmPj5_.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJ6hHGax.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/2.CTeavGnV.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/2.LMbwFFm5.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CHEAhmp6.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BbCw5KVU.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BPVwp-J3.js" rel="modulepreload">
@@ -48,10 +48,10 @@
 		<link href="/_app/immutable/chunks/tQA3rDst.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/k6TRNp0w.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DH_LefOd.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/DBPsyPf2.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/wYG53CV6.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CtsBFaJL.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/D1RK0gmx.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/GoVQbpeX.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DpZswiyT.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/d9FfLdfy.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CABULNtq.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/B34bN6Wl.js" rel="modulepreload">
@@ -59,16 +59,16 @@
 		<link href="/_app/immutable/chunks/CH4seIGa.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DHlLBREC.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CwC1awOQ.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/df6WGb4l.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Cnn_FLVp.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJMm7Txn.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BXoHXHa0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DKqhmjm7.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMnsbEWi.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Brh7-bty.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/9ZLJ-H4D.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D3GFQ8Ma.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/sNOw6LX0.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Ch_dVXHx.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/o9OBPhqj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/bmxvlgsp.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CTnnGNGJ.js" rel="modulepreload">
 		<link href="/_app/immutable/nodes/5.y3AuEkfx.js" rel="modulepreload">
 		<!--12qhfyh--><!----><!--4fa0a9--><!--[-1--><!--]--><!----><!--1xmjmrw--><!----><!--1tljqsr--><!----><!--37fcns--><!----><!--di86c5--><!----><!--mhazmq--><!----><!--ciy330--><!----><!--1d1gc0k--><!----><!--1qwo2vp--><!----><!--1gyxgiy--><!----><!--1hnvmvd--><!----><!--18jy3mg--><!----><!--y492lb--><!----><!--zhuu8u--><!----><!--9yri1g--><!----><!--l74xb3--><!----><!--ztojx8--><!----><!--3uxscg--><!----><!--16o797k--><!----><!--16asznf--><!----><!--1tq343v--><!----><!--gk1h4h--><!----><!--7mqkvy--><!----><!--1c8t0id--><!----><!--k27414--><!----><title>API — zap</title>
@@ -139,10 +139,11 @@ apply — target local (wetrun)
   user: ada
   home: /home/ada
   target: {"local":true,"package_manager":"apt","service_manager":"systemd"}
-  ok    cache-update-apt
-  ok    gitconfig
-  ok    ripgrep
+  ok    cache-update-apt  2.8s
+  ok    gitconfig         0.0s
+  ok    ripgrep           3.1s
 applied: 3 ok, 0 failed, 0 skipped (of 3)
+converged local in 6.4s, the re-detect included
 plan_hash: d317a15e82f2f1117f0d9fa1fdafc079b70f9e3ac5e3103c4b3333f1b6afeab0<!--]--></code><!----><p>The <code>cache-update-apt</code> change is the package index refresh Zap puts in front of
 an install. The wetrun planned again, got the same <code>plan_hash</code> the dry run
 printed, and only then acted. Had the machine changed in between, it would have
@@ -298,14 +299,16 @@ apply — target local (wetrun)
   user: ops
   home: /home/ops
   target: {"local":true}
-  ok    notes
-  ok    hello
+  ok    notes  0.0s
+  ok    hello  0.0s
 applied: 2 ok, 0 failed, 0 skipped (of 2)
+converged local in 0.0s, the re-detect included
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61<!--]--></code><!----><p>The <code>→</code> lines are progress, printed to standard error as each change and the
-re-detection start; the report under them is standard output. After the changes
-ran, Zap read both resources again and found them converged,
-which is why the exit was 0. Had anything still read wrong, the report would
-say <code>RESIDUAL</code> and exit 1.</p><p>The wetrun went through because your preview a moment ago bound it: a wetrun
+re-detection start; the report under them is standard output. Each row says how
+long its change took. After the changes ran, Zap read both resources again and
+found them converged, which is why the exit was 0 and the last line says
+<code>converged</code>. Had anything still read wrong, the report would say <code>RESIDUAL</code> and
+exit 1.</p><p>The wetrun went through because your preview a moment ago bound it: a wetrun
 executes only the plan you reviewed.</p><p>Had you run <code>zap apply --wetrun</code> first, with no preview behind it, it would
 have shown the plan and asked:</p><code class="svelte-jqsy8a"><!--[0-->$ zap apply --wetrun
 apply — target local (wetrun, awaiting confirmation)
@@ -1912,7 +1915,12 @@ triggered service and clearing it after the service's change;</li><li>re-detects
 <code>RESIDUAL</code>.</li></ol><p>While steps 8 and 9 run, each change and the re-detection print one line to
 standard error as they start (<code>→ notes: create directory</code>); the report, on
 standard output when the run ends, holds every outcome. <code>--json</code> prints no such
-line.</p><h3 id="binding-to-the-review">Binding to the review</h3><p>A wetrun executes only the plan you reviewed: the plan it computes must equal,
+line.</p><p>The report lists each change as a row: its status (<code>ok</code>, <code>FAIL</code>, or <code>skip</code>),
+its id, how long it ran (a skipped change never ran, so it has no time), and a
+failure's error code and message or a skip's reason. The <code>applied:</code> line counts
+them, and the last line before the <code>plan_hash</code> is the verdict, with the
+machine's host (<code>local</code> for the machine Zap runs on) and the time the run took
+from the lock write before the first change to the end of the re-detection:</p><table><thead><tr><th>Verdict line</th><th>Exit</th></tr></thead><tbody><tr><td><code>converged &lt;host> in &lt;time>, the re-detect included</code></td><td>0</td></tr><tr><td><code>apply FAILED at &lt;id> on &lt;host> after &lt;time> — …</code>, which says what ran before it and what was skipped after it</td><td>1</td></tr><tr><td><code>apply did not establish convergence on &lt;host> in &lt;time> — the re-detect failed (RESIDUAL above)</code></td><td>1</td></tr><tr><td><code>apply did not converge &lt;host> in &lt;time> — N resources do not read converged (RESIDUAL above)</code></td><td>1</td></tr><tr><td><code>apply did not establish convergence on &lt;host> in &lt;time> — N resources were held (UNDETERMINED above)</code></td><td>1</td></tr></tbody></table><p>When more than one applies, the verdict names the first in that order.</p><h3 id="binding-to-the-review">Binding to the review</h3><p>A wetrun executes only the plan you reviewed: the plan it computes must equal,
 hash for hash, the one named by <code>--expect-plan &lt;hash></code> or the one in the most
 recent preview on this host. Otherwise it <strong>refuses</strong>, changes nothing, and
 exits 2. A preview binds once Zap has written it, read or not: one sent to
@@ -1943,9 +1951,10 @@ apply — target local (wetrun, confirmed)
   user: ops
   home: /home/ops
   target: {"local":true}
-  ok    notes
-  ok    hello
+  ok    notes  0.0s
+  ok    hello  0.0s
 applied: 2 ok, 0 failed, 0 skipped (of 2)
+converged local in 0.0s, the re-detect included
 plan_hash: 5bb79cc9141942676c784abba55826f12be51b3feb86f5f0cf77666545674d61<!--]--></code><!----><p>The plan and the question go to standard error, as do the <code>→</code> lines a wetrun
 prints as each change and the re-detection starts; the report goes where it
 always does. The answer is the first eight characters of the plan's
@@ -3486,10 +3495,10 @@ waits on it, and a source that is itself a service holds its own sources.</p><p>
 trigger source detection couldn't read doesn't hold it; the owed action runs. A
 source that changed and is held behind another still holds the service its
 change fires.</p><p>The banner lists the resources detection couldn't read first, then the ones
-held behind them, each with what it waits on or would trigger:</p><code class="svelte-jqsy8a"><!--[0-->  UNDETERMINED — 1 resource(s) could not be probed, so no change is planned for them and this changeset is partial:
+held behind them, each with what it waits on or would trigger:</p><code class="svelte-jqsy8a"><!--[0-->  UNDETERMINED — 1 resource could not be probed, so no change is planned for it and this changeset is partial:
       web — detection failed: the unit read exited 1
-  their live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
-  held behind them — 2 resource(s) can't change until they do:
+  its live state is unknown: neither converged nor drifted. resolve the probe failure and re-run.
+  held behind it — 2 resources can't change until it does:
       after — waits on `web`, which is held
       site — would reload `web`, which is held<!--]--></code><!----><p>Resolving the probe failure releases the whole chain on the next pass.</p><p><code>undetermined</code> is about the observed side. Its twin on the desired side is the
 <code>unverifiable</code> verdict (<a href="/docs/env">env.md</a>), where the declaration is the half
@@ -3940,7 +3949,8 @@ env ALPINE_HOST=<span class="token_operator">&lt;</span>vm-ip<span class="token_
 (<code>running=false, enabled=false</code>);</li><li>the dry run plans a <code>cache-update-apk</code> change (<code>apk update</code>) ahead of
 <code>apk add chrony</code>, <code>rc-update add chronyd default</code> and
 <code>rc-service chronyd start</code> (inside the <code>sh -c</code> that resets a crashed service
-first), and the file;</li><li>the wetrun reports <code>applied: 4 ok, 0 failed, 0 skipped (of 4)</code>;</li><li>the <strong>final run reports <code>(no changes — converged)</code></strong>: the probes
+first), and the file;</li><li>the wetrun reports <code>applied: 4 ok, 0 failed, 0 skipped (of 4)</code> and closes
+with <code>converged &lt;vm-ip> in &lt;time>, the re-detect included</code>;</li><li>the <strong>final run reports <code>(no changes — converged)</code></strong>: the probes
 (<code>apk info -e</code>, <code>rc-service &lt;svc> status</code>, the service's entry under
 <code>/etc/runlevels</code>) read
 the post-apply state correctly, as the wetrun's own re-read already checked
@@ -4263,16 +4273,16 @@ entries fail and the table empties itself out. The table is reviewed like code.<
 			
 			<script>
 				{
-					__sveltekit_h0s9s2 = {
+					__sveltekit_pwsp6i = {
 						base: "",
-						version: "fa7283a6b9e6447582f73bdd3668dc027e726ae2"
+						version: "7d5d6b08255adf135853cb8d69eda97e88f92d81"
 					};
 
 					const element = document.currentScript.parentElement;
 
 					import("/_app/immutable/entry/start.DMWmOBF_.js").then(async (kit) => {
-						kit.init(__sveltekit_h0s9s2);
-						const app = await import("/_app/immutable/entry/app.DaSMZjRK.js");
+						kit.init(__sveltekit_pwsp6i);
+						const app = await import("/_app/immutable/entry/app.DoQSmrUM.js");
 						kit.start(app, element, {
 							node_ids: [0, 2, 5],
 							data: [null,null,null],

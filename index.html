@@ -28,7 +28,7 @@
 		<link href="/_app/immutable/chunks/CkSeWg2M.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Cyt8LZpN.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/nqpJJcfP.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.DaSMZjRK.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.DoQSmrUM.js" rel="modulepreload">
 		<link href="/_app/immutable/nodes/0.CBD02HwM.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/EpM2J4Cd.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/Drx_RGrR.js" rel="modulepreload">
@@ -36,7 +36,7 @@
 		<link href="/_app/immutable/chunks/yWx_1vUe.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CMVmPj5_.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/CJ6hHGax.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/3.B1h-g0o8.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/3.DCRrA_AP.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/BPVwp-J3.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DhAL6k45.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/DH_LefOd.js" rel="modulepreload">
@@ -82,10 +82,11 @@ apply — target local (wetrun)
   user: ada
   home: /home/ada
   target: <span class="token_svelte_expression"><span class="token_punctuation">{</span><span class="token_lang_ts"><span class="token_string">"local"</span><span class="token_operator">:</span><span class="token_boolean">true</span><span class="token_punctuation">,</span><span class="token_string_property token_property">"package_manager"</span><span class="token_operator">:</span><span class="token_string">"apt"</span><span class="token_punctuation">,</span><span class="token_string_property token_property">"service_manager"</span><span class="token_operator">:</span><span class="token_string">"systemd"</span></span><span class="token_punctuation">}</span></span>
-  ok    cache-update-apt
-  ok    gitconfig
-  ok    ripgrep
+  ok    cache-update-apt  2.8s
+  ok    gitconfig         0.0s
+  ok    ripgrep           3.1s
 applied: 3 ok, 0 failed, 0 skipped (of 3)
+converged local in 6.4s, the re-detect included
 plan_hash: d317a15e82f2f1117f0d9fa1fdafc079b70f9e3ac5e3103c4b3333f1b6afeab0
 <!----><!--]--></code><!----> <p class="text_70">Point the target at a host instead and the same config converges a server over SSH.</p></div></section> <section class="box width_atmost_md"><div class="panel p_xl box width:100%"><h2 class="mt_0">provision, then ship</h2> <p><code>zap apply</code> converges the host: packages, files, users, services with restart
 				triggers, PostgreSQL, swap, a firewall, from-source builds pinned to their source. <code>zap deploy</code> then ships your app to it as a versioned release with an atomic
@@ -104,16 +105,16 @@ plan_hash: d317a15e82f2f1117f0d9fa1fdafc079b70f9e3ac5e3103c4b3333f1b6afeab0
 			
 			<script>
 				{
-					__sveltekit_h0s9s2 = {
+					__sveltekit_pwsp6i = {
 						base: "",
-						version: "fa7283a6b9e6447582f73bdd3668dc027e726ae2"
+						version: "7d5d6b08255adf135853cb8d69eda97e88f92d81"
 					};
 
 					const element = document.currentScript.parentElement;
 
 					import("/_app/immutable/entry/start.DMWmOBF_.js").then(async (kit) => {
-						kit.init(__sveltekit_h0s9s2);
-						const app = await import("/_app/immutable/entry/app.DaSMZjRK.js");
+						kit.init(__sveltekit_pwsp6i);
+						const app = await import("/_app/immutable/entry/app.DoQSmrUM.js");
 						kit.start(app, element, {
 							node_ids: [0, 3],
 							data: [null,null],

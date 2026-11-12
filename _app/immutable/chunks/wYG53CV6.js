@@ -87,9 +87,10 @@ apply — target local (wetrun)
   user: ada
   home: /home/ada
   target: {"local":true,"package_manager":"apt","service_manager":"systemd"}
-  ok    cache-update-apt
-  ok    gitconfig
-  ok    ripgrep
+  ok    cache-update-apt  2.8s
+  ok    gitconfig         0.0s
+  ok    ripgrep           3.1s
 applied: 3 ok, 0 failed, 0 skipped (of 3)
+converged local in 6.4s, the re-detect included
 plan_hash: d317a15e82f2f1117f0d9fa1fdafc079b70f9e3ac5e3103c4b3333f1b6afeab0`});var S=e(x,2),C=e(i(S));o(),s(S);var w=e(S);u(w,`id`,`what-zap-does-differently`);var T=e(w),E=e(i(T)),D=e(i(E),3);D.nodeValue=`; see
 `;var O=e(D);o(),s(E),o(3),s(T);var k=e(T,2);u(k,`id`,`what-zap-converges`);var A=e(k,2),j=e(i(A));o(),s(A);var M=e(A,2);u(M,`id`,`what-zap-is-not`);var N=e(M,2),P=e(i(N));o(),s(N);var F=e(N);u(F,`id`,`status`);var I=e(F),L=e(i(I)),R=e(L,2);o(),s(I);var z=e(I);u(z,`id`,`where-next`);var B=e(z),V=i(B),H=i(V),U=e(H,2);s(V);var W=e(V),G=i(W);o(),s(W);var K=e(W),q=i(K);o(2),s(K);var J=e(K),Y=i(J);o(),s(J),s(B),r((e,t,n,r,i,a,o,s,c,l,d,f)=>{u(h,`href`,e),u(C,`href`,t),u(O,`href`,n),u(j,`href`,r),u(P,`href`,i),u(L,`href`,a),u(R,`href`,o),u(H,`href`,s),u(U,`href`,c),u(G,`href`,l),u(q,`href`,d),u(Y,`href`,f)},[()=>m(`docs/install`),()=>m(`docs/getting-started`),()=>m(`docs/detection#kinds-that-read-a-failed-probe-as-absent`),()=>m(`docs/resources`),()=>m(`docs/comparison`),()=>m(`docs/security`),()=>m(`docs/faq`),()=>m(`docs/install`),()=>m(`docs/getting-started`),()=>m(`docs/concepts`),()=>m(`docs/configs`),()=>m(`docs/cli`)]),l(t,c)},$$slots:{default:!0}})},$$slots:{default:!0}}),f()}export{b as t};
