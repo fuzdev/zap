@@ -6,7 +6,10 @@
 //! The file is loaded before the config is evaluated, so no test here needs `fgro`:
 //! each names a config that doesn't exist.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 use std::path::Path;
 use std::process::{Command, Output};

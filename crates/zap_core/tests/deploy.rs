@@ -6,7 +6,10 @@
 //! them against an unreachable `.invalid` host without ever touching the network.
 //! Gated on `ZAP_FGRO` (config eval), like the other command-core e2e tests.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

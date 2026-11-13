@@ -125,7 +125,10 @@ use walk::{AppWalk, ReleaseArchive, Stopped, execute_deploy_plan};
 /// A flat bundle of CLI flags — the `excessive_bools` lint targets domain types
 /// where a flag combination encodes hidden state, not a 1:1 mirror of the
 /// command-line switches, which is what this is.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a flat bundle of CLI switches, not domain state a flag combination encodes"
+)]
 #[derive(Debug, Clone, Default)]
 pub struct DeployOptions {
     /// Actually execute the deploy (`--wetrun`) rather than only previewing the plan.

@@ -8,7 +8,6 @@ use std::sync::OnceLock;
 /// `tempfile::tempdir()`, its directory pinned to `0755` and made a project. zap
 /// refuses to evaluate a config in a directory every user can write, which a bare temp
 /// directory is under `umask 000`, and one with no project `package.json` above it.
-#[allow(dead_code)] // not every suite evaluates from a scratch dir
 pub fn tempdir() -> std::io::Result<tempfile::TempDir> {
     let dir = tempfile::tempdir()?;
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755))?;
@@ -22,7 +21,6 @@ pub fn tempdir() -> std::io::Result<tempfile::TempDir> {
 /// `std::fs::write` of a config, the file pinned to `0644` (zap refuses a config file
 /// every user can write, which a written file is under `umask 000`), and, when there is
 /// a test `fgro` and the config has no lock yet, a lock pinning it ([`pin_lock`]).
-#[allow(dead_code)] // not every suite that evaluates from a scratch dir writes there
 pub fn write_config(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
     write_file(&path, contents)?;
     pin_lock(path.as_ref())
@@ -37,7 +35,6 @@ fn write_file(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> std::io::Re
 /// The `fgro` the tests evaluate with: `ZAP_FGRO`, when it names a file by an absolute
 /// path. A test that evaluates a config checks nothing without it; the crate's
 /// `tests/required_programs.rs` is the test that fails there.
-#[allow(dead_code)]
 pub fn fgro() -> Option<&'static Path> {
     static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
     PATH.get_or_init(|| {
@@ -50,7 +47,10 @@ pub fn fgro() -> Option<&'static Path> {
 
 /// The test `fgro`'s blake3, hashed once per test binary (on a thread of its own, so a
 /// caller inside a runtime can ask). Panics without a test `fgro`.
-#[allow(dead_code)]
+#[expect(
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 pub fn fgro_pin() -> &'static str {
     static PIN: OnceLock<String> = OnceLock::new();
     PIN.get_or_init(|| {
@@ -71,7 +71,6 @@ pub fn fgro_pin() -> &'static str {
 
 /// Write a lock beside `config_path` that pins the test `fgro` and holds no entry, when
 /// there is a test `fgro` and no lock stands there yet.
-#[allow(dead_code)]
 pub fn pin_lock(config_path: &Path) -> std::io::Result<()> {
     if fgro().is_none() {
         return Ok(());

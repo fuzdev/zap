@@ -6,7 +6,11 @@
 //! `~/.zap` pointed at a tempdir (injected, not via `ZAP_HOME` — `set_var` is `unsafe`,
 //! forbidden workspace-wide) and so need `fgro`; they skip cleanly without `ZAP_FGRO`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

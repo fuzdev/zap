@@ -5,7 +5,12 @@
 //! topological order — plus `plan_hash` determinism. Skips are derived for display,
 //! so a converged resource is asserted **absent** from the fact.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 

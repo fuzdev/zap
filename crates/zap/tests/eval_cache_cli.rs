@@ -8,7 +8,10 @@
 //! `required_programs.rs` fails.
 //! `ZAP_EVAL_CACHE_LOG=1` makes the L0 verdict observable on stderr.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

@@ -1,7 +1,5 @@
 //! Shared test helpers for the `zap` integration suite.
 
-#![allow(dead_code)] // each suite uses its own share of these
-
 pub use crate::scratch::fgro;
 
 /// Is there a test `fgro` (`ZAP_FGRO`, which the `zap` the tests run reads too)? The

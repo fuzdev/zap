@@ -20,7 +20,10 @@
 //! machine that moves `plan_hash` moves what `zap plan`, `zap plan --diff`, and
 //! `zap apply` print.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

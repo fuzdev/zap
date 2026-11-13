@@ -270,8 +270,10 @@ pub fn render_block(out: &mut String, lead: &str, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    // `{env:NAME}` is the notation a reference is shown in, written out here as text.
-    #![allow(clippy::literal_string_with_formatting_args)]
+    #![expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+    )]
 
     use std::borrow::Cow;
 

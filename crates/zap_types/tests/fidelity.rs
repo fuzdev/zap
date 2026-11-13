@@ -13,7 +13,12 @@
 //! structs the hand-read ones go through, so this guard stands behind that rejection:
 //! it would catch a type added without one.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 

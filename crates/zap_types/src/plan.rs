@@ -1806,7 +1806,10 @@ fn emitted_deps(
 /// # Panics
 ///
 /// Always: the planner has a bug.
-#[allow(clippy::panic)] // an invariant of the planner's own graphs, not of its input
+#[expect(
+    clippy::panic,
+    reason = "an invariant of the planner's own graphs, not of its input"
+)]
 fn internal_cycle(graph: &str, cycle: &[ResourceId]) -> ! {
     panic!(
         "zap internal error: a dependency cycle in {graph} ({}); please report this",
@@ -1839,7 +1842,10 @@ fn topo_order<T: HasId>(
     let count = items.len();
     let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); count];
     let mut indegree = vec![0usize; count];
-    #[allow(clippy::needless_range_loop)] // `i` indexes several parallel arrays
+    #[expect(
+        clippy::needless_range_loop,
+        reason = "`i` is the node itself, passed to `deps_of` and stored in `dependents`, not only an index into `indegree`"
+    )]
     for i in 0..count {
         for dep in deps_of(i) {
             if let Some(&j) = index_of.get(dep.0.as_str()) {

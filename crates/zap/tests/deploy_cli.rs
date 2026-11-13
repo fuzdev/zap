@@ -9,7 +9,11 @@
 //! `.invalid` host, so a refusal that came after the connection would read as a
 //! connectivity error instead.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

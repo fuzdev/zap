@@ -6142,8 +6142,10 @@ async fn a_current_naming_no_release_is_refused_before_the_build() {
 /// The names a preview prints outside its steps are escaped like the steps: the
 /// header's declared target, the resolved host, the declared target's fields, and a
 /// polled URL as it resolves.
-// `{env:NAME}` is the notation a reference is shown in, written out here as text.
-#[allow(clippy::literal_string_with_formatting_args)]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+)]
 #[test]
 fn the_names_a_preview_prints_are_escaped() {
     let deploy: DeploySpec = serde_json::from_value(serde_json::json!({

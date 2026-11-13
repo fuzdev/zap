@@ -58,8 +58,10 @@ mod tests {
     use crate::detected::{CurrentState, Detection};
     use crate::observe::{Observation, PathObservation, Privilege, QueryError, QueryResult};
 
-    // Builds the answer type `interpret` reads, which is always a `Result`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "builds the answer type `interpret` reads, which is always a `Result`"
+    )]
     fn target(bytes: &[u8]) -> QueryResult {
         Ok(Observation::Path(PathObservation::LinkTarget(
             bytes.to_vec(),

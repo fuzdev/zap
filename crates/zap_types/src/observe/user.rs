@@ -651,7 +651,10 @@ mod tests {
         serde_json::from_value(json).unwrap()
     }
 
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "builds the answer type `interpret` reads, which is always a `Result`"
+    )]
     fn read(bytes: &[u8], truncated: bool) -> QueryResult {
         Ok(Observation::Path(PathObservation::Contents {
             bytes: bytes.to_vec(),

@@ -72,7 +72,10 @@ use crate::secret::mask_outcomes;
 ///
 /// A flat bundle of CLI switches — `excessive_bools` targets domain types that encode
 /// hidden state, not a 1:1 mirror of command-line flags.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a flat bundle of CLI switches, not domain state a flag combination encodes"
+)]
 #[derive(Debug, Clone, Default)]
 pub struct ApplyOptions {
     /// Actually execute changes (`--wetrun`) rather than only previewing.

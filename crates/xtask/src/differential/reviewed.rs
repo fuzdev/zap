@@ -318,8 +318,10 @@ pub mod tests {
         );
     }
 
-    // `{env:NAME}` is the notation a reference is shown in, written out here as text.
-    #[allow(clippy::literal_string_with_formatting_args)]
+    #[expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+    )]
     #[test]
     fn any_other_change_or_verdict_is_not() {
         for plan in [PIPELINE_ONLY, PIPELINE_ONLY_WITH_SUBJECT] {

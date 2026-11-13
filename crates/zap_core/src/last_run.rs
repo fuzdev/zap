@@ -93,8 +93,10 @@ where
 /// `plan_hash` the plan the pass computed, when it planned.
 ///
 /// [`host_label`]: zap_types::last_run::host_label
-// Every argument is one fact of the pass; a struct would re-spell the report's own shape.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is a separate input the report is built from; a struct would re-spell `LastRun`'s own fields"
+)]
 #[must_use]
 pub fn build_last_run(
     command: RunCommand,

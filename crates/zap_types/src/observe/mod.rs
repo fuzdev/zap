@@ -705,8 +705,10 @@ pub(crate) mod testing {
     use super::{CommandObservation, FileKind, Observation, PathObservation, QueryResult};
 
     /// A command's answer: its exit status and stdout, with nothing on stderr.
-    // Builds the answer type `interpret` reads, which is always a `Result`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "builds the answer type `interpret` reads, which is always a `Result`"
+    )]
     pub fn exited(code: i32, stdout: &str) -> QueryResult {
         Ok(Observation::Command(CommandObservation {
             code,
@@ -716,8 +718,10 @@ pub(crate) mod testing {
     }
 
     /// A path's answer: a regular file when `yes`, else the probe failed.
-    // Builds the answer type `interpret` reads, which is always a `Result`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "builds the answer type `interpret` reads, which is always a `Result`"
+    )]
     pub fn exists(yes: bool) -> QueryResult {
         Ok(Observation::Path(if yes {
             PathObservation::Kind(FileKind::Regular)
@@ -727,7 +731,10 @@ pub(crate) mod testing {
     }
 
     /// A path's answer: the contents read, cut short when `truncated`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "builds the answer type `interpret` reads, which is always a `Result`"
+    )]
     pub fn contents(bytes: &str, truncated: bool) -> QueryResult {
         Ok(Observation::Path(PathObservation::Contents {
             bytes: bytes.as_bytes().to_vec(),
@@ -736,7 +743,10 @@ pub(crate) mod testing {
     }
 
     /// A path's answer: the probe failed.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "builds the answer type `interpret` reads, which is always a `Result`"
+    )]
     pub const fn failed() -> QueryResult {
         Ok(Observation::Path(PathObservation::Failed))
     }

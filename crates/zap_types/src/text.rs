@@ -89,7 +89,10 @@ impl Text {
     /// When [`try_of_pieces`](Self::try_of_pieces) would refuse them. For pieces the
     /// caller wrote.
     #[must_use]
-    #[allow(clippy::panic)] // a caller's own constants; the fallible form takes input
+    #[expect(
+        clippy::panic,
+        reason = "a caller's own constants; the fallible form takes input"
+    )]
     pub fn of_pieces<'a>(pieces: impl IntoIterator<Item = Segment<'a>>) -> Self {
         Self::try_of_pieces(pieces).unwrap_or_else(|error| panic!("{error}"))
     }
@@ -445,8 +448,10 @@ impl<'de> Deserialize<'de> for Text {
 
 #[cfg(test)]
 mod tests {
-    // `{env:NAME}` is the notation a reference is shown in, written out here as text.
-    #![allow(clippy::literal_string_with_formatting_args)]
+    #![expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+    )]
 
     use serde_json::{Value, json};
 

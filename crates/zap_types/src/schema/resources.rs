@@ -584,7 +584,10 @@ impl<'de> Deserialize<'de> for ExtractMode {
 
 /// `skip_serializing_if` predicate: omit a zero `strip_components` so a strip-less tar
 /// archive serializes without the field (and hashes like one that never had it).
-#[allow(clippy::trivially_copy_pass_by_ref)] // serde requires the `&` signature
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's `skip_serializing_if` passes the field by reference"
+)]
 const fn u32_is_zero(n: &u32) -> bool {
     *n == 0
 }

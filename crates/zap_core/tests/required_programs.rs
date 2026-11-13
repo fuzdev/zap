@@ -6,8 +6,6 @@
 //! `fgro` is not looked up on `PATH`: the tests that evaluate a config run the build
 //! `ZAP_FGRO` names, as `zap` itself does, so that is what is checked.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 use std::path::Path;
 use std::process::{Command, Stdio};
 

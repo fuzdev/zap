@@ -7,7 +7,11 @@
 //! gated on `ZAP_FGRO` (config eval) and run against a local target managing one
 //! directory in a temp dir, `ZAP_HOME` / `HOME` in a temp dir.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

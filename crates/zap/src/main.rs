@@ -99,9 +99,10 @@ struct Plan {
 }
 
 /// Apply: converge the machine to the desired state (dry-run by default).
-// A flat bundle of CLI switches — `excessive_bools` targets domain types that encode
-// hidden state, not a 1:1 mirror of command-line flags.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a flat bundle of CLI switches, not domain state a flag combination encodes"
+)]
 #[derive(FromArgs, Debug)]
 #[argh(subcommand, name = "apply")]
 struct Apply {
@@ -136,9 +137,10 @@ struct Apply {
 }
 
 /// Deploy: release a new version to a remote target (dry-run by default).
-// A flat bundle of CLI switches — `excessive_bools` targets domain types, not a 1:1
-// mirror of command-line flags.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a flat bundle of CLI switches, not domain state a flag combination encodes"
+)]
 #[derive(FromArgs, Debug)]
 #[argh(subcommand, name = "deploy")]
 struct Deploy {

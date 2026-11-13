@@ -6,8 +6,6 @@
 //! pure plan-diff logic itself is covered by `zap_types`' hand-authored goldens;
 //! this proves the eval → detect → diff wiring.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 mod common;
 mod scratch;
 

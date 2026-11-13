@@ -3,7 +3,12 @@
 //! These require `ZAP_FGRO`, an absolute path to an `fgro` build. They check nothing
 //! where it's unset, and `required_programs.rs` fails there.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;
@@ -1549,8 +1554,10 @@ async fn eval_failure(body: &str) -> String {
 
 /// `zap.env` is converted at the boundary to the typed wire form, wherever a string
 /// sits: alone, among other text, in an array, an `env` map, a template variable.
-// `{env:NAME}` is the notation a reference is shown in, written out here as text.
-#[allow(clippy::literal_string_with_formatting_args)]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+)]
 #[tokio::test]
 async fn the_builder_converts_references_to_their_wire_form() {
     if !fgro_available() {

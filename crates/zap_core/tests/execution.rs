@@ -10,7 +10,11 @@
 //! (stop-on-first-failure, verify-aborts-the-plan) deterministically. A fgro-gated
 //! e2e proves the full `run_apply_in` wiring (eval → detect → diff → execute).
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;
@@ -852,8 +856,10 @@ export default (zap) => {{
 /// the content takes no reference: no pass resolves it, so an unset variable of that
 /// name makes the dry run neither unverifiable nor a wetrun refused, and the file is
 /// written holding the characters as declared.
-// `{env:NAME}` is the notation a reference is shown in, written out here as text.
-#[allow(clippy::literal_string_with_formatting_args)]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+)]
 #[tokio::test]
 async fn text_that_spells_a_reference_in_inline_content_is_written_as_it_is() {
     use zap_core::commands::apply::{ApplyOptions, render_apply, run_apply_in};

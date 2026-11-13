@@ -140,8 +140,10 @@ pub(super) fn operator(snippet: &str, secs: u32) -> Query {
 }
 
 /// A finished command's answer.
-// An answer, compared with others that are errors.
-#[allow(clippy::unnecessary_wraps)]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "compared with the `QueryResult`s `batch::read` returns, some of them errors"
+)]
 pub(super) fn finished(code: i32, stdout: &[u8], stderr: &[u8]) -> QueryResult {
     Ok(Observation::Command(
         zap_types::observe::CommandObservation {

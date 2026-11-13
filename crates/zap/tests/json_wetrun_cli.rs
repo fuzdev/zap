@@ -5,8 +5,6 @@
 //! Hermetic: a local target managing one directory in a temp dir, `ZAP_HOME` / `HOME`
 //! in a temp dir. Requires `ZAP_FGRO` (config eval); skips cleanly without it.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 mod common;
 mod scratch;
 

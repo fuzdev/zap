@@ -8,7 +8,11 @@
 //! Requires `ZAP_FGRO` (config eval), which the binary reads too; checks nothing
 //! without it, where `required_programs.rs` fails.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

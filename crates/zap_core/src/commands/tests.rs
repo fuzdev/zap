@@ -457,7 +457,10 @@ fn build_ssh_selects_the_bootstrap_user_when_requested() {
 /// declared, one declared empty, or one whose references resolve to nothing here —
 /// shown as written, the variables named.
 #[test]
-#[allow(clippy::literal_string_with_formatting_args)]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+)]
 fn build_ssh_says_why_a_target_names_no_host() {
     let _env = crate::resolve::test_env::set(&[("ZAP_T_EMPTY_HOST", "")]);
     for (target, expected) in [
@@ -495,7 +498,10 @@ fn build_ssh_says_why_a_target_names_no_host() {
 /// that one resource, the variable named; the pass goes on, and every other resource
 /// is read. A `database` whose `pg_hba` host resolves to one holds the same way.
 #[tokio::test]
-#[allow(clippy::literal_string_with_formatting_args)]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+)]
 async fn a_value_holding_a_delimiter_holds_its_resource_by_name_and_no_other() {
     use crate::commands::plan::{plan_over, render_plan};
     use zap_types::detected::Detection;
@@ -819,7 +825,10 @@ fn the_structure_gate_holds_stopped_triggers_and_zaps_state_directory() {
 /// names the field the run selected and its variables. A target that declares no
 /// user connects as `ssh` chooses, by the config's own word.
 #[test]
-#[allow(clippy::literal_string_with_formatting_args)]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+)]
 fn build_ssh_refuses_a_declared_user_that_resolves_to_nothing() {
     let _env =
         crate::resolve::test_env::set(&[("ZAP_T_EMPTY_USER", ""), ("ZAP_T_SET_USER", "deploy")]);
@@ -1828,8 +1837,10 @@ fn a_label_cannot_forge_a_line() {
 /// The declared lines are config text like the steps: a path, a check, or a url
 /// that runs to several lines stays a block under its own key, a credential prints
 /// none of its literal text, and a template's variables are one line.
-// `{env:NAME}` is the notation a reference is shown in, written out here as text.
-#[allow(clippy::literal_string_with_formatting_args)]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+)]
 #[test]
 fn a_declared_line_cannot_forge_another() {
     use super::render_change;

@@ -1059,8 +1059,10 @@ plan_hash: 7a1c0f3e5b88bef942292360d093ec49b4ba4803a3329c46b0e7605d36bbb1077
         );
     }
 
-    // `{env:NAME}` is the notation a reference is shown in, written out here as text.
-    #[allow(clippy::literal_string_with_formatting_args)]
+    #[expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+    )]
     #[test]
     fn a_held_preview_reports_no_other_verdict() {
         for banner in [

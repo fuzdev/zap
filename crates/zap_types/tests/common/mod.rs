@@ -1,7 +1,5 @@
 //! Shared test helpers for the `zap_types` integration suites.
 
-#![allow(dead_code)] // each suite uses its own share of these
-
 use zap_types::plan::{LocalAccount, Machine};
 
 /// The machine zap runs on, as a fixture names it.

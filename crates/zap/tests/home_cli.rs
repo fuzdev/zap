@@ -7,7 +7,11 @@
 //! Every refusal here comes before the config is evaluated, so those cases need no
 //! `fgro`; the one that evaluates a config skips cleanly without `ZAP_FGRO`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

@@ -80,8 +80,10 @@ pub fn normalized_path(path: &str) -> String {
 /// Every kind is destructured in full, so a kind or a field added to the schema doesn't
 /// compile until it is placed: claimed, or left unclaimed here with the reason.
 #[must_use]
-// Each kind is its own arm, destructured in full, though several claim alike.
-#[allow(clippy::match_same_arms)]
+#[expect(
+    clippy::match_same_arms,
+    reason = "each kind is its own arm, destructured in full, though several claim alike"
+)]
 pub fn claims(resource: &Resource) -> Vec<Claim> {
     let path = |path: &str| Claim::Path(normalized_path(path));
     match &resource.kind {

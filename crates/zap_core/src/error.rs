@@ -1347,7 +1347,10 @@ mod tests {
     /// A value a path can't hold is the operator's to fix (exit 2), and the error names
     /// the variable as a reference is shown.
     #[test]
-    #[allow(clippy::literal_string_with_formatting_args)]
+    #[expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+    )]
     fn an_unusable_value_names_its_variable_and_needs_action() {
         let error = Error::UnusableValue(crate::resolve::UnsafeValue::FieldDelimiter {
             name: "ZP".to_owned(),

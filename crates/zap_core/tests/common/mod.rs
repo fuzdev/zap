@@ -1,6 +1,12 @@
 //! Shared test helpers for the `zap_core` integration suite.
 
-#![allow(dead_code)] // each suite uses its own share of these
+// `allow`, not `expect`: this module is compiled into every test binary, and
+// which helpers go unused differs from one binary to the next.
+#![allow(dead_code, reason = "each test binary uses only part of this module")]
+#![expect(
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 use std::sync::OnceLock;
 

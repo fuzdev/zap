@@ -7,8 +7,6 @@
 //! `ZAP_HOME` / `HOME` in a temp dir. Requires `ZAP_FGRO` (config eval), which the
 //! binary reads too; skips cleanly without it.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 mod common;
 mod scratch;
 

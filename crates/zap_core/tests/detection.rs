@@ -14,8 +14,6 @@
 //!   `~/.zap` pointed at a tempdir, proving eval → detect → the last-run report, and
 //!   that detection never reads a report back.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 mod common;
 mod scratch;
 

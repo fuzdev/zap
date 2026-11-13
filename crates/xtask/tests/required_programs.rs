@@ -3,8 +3,6 @@
 //! so a suite that skipped those tests can't pass unnoticed. Setting a program's
 //! variable to `1` accepts its absence.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 use std::process::{Command, Stdio};
 
 /// A program, an argument it runs with, and the variable that accepts its absence.

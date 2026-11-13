@@ -6,7 +6,11 @@
 //! HTTP server (dep-free, a std `TcpListener` on a worker thread). One fgro-gated test
 //! covers the `run_lock_check` config↔lock wiring. Real-target execution stays manual.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

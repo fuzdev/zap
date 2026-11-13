@@ -555,8 +555,10 @@ fn a_semantic_divergence_is_rendered_from_the_projections() {
 /// A plan that names no one machine ends in a footer and a banner where its hash would
 /// be. The footer is the line directly under the last change's steps: it ends the
 /// changes and is kept.
-// `{env:NAME}` is the notation a reference is shown in, written out here as text.
-#[allow(clippy::literal_string_with_formatting_args)]
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+)]
 #[test]
 fn a_footer_directly_under_the_last_change_is_kept() {
     let foot = "  (a wetrun of this config is refused, so this plan has no plan_hash and is not \

@@ -1288,8 +1288,10 @@ mod tests {
     /// its field's own text, in a field that takes a reference and in one that takes
     /// none: no scan names it, and the masker registers no value for it — a wetrun
     /// isn't refused for a variable nothing would substitute.
-    // `{env:NAME}` is the notation a reference is shown in, written out here as text.
-    #[allow(clippy::literal_string_with_formatting_args)]
+    #[expect(
+        clippy::literal_string_with_formatting_args,
+        reason = "`{env:NAME}` is the notation a reference is shown in, written out here as text"
+    )]
     #[test]
     fn text_that_spells_a_reference_names_no_variable() {
         let config: ZapConfig = serde_json::from_value(serde_json::json!({

@@ -13,8 +13,6 @@
 //! Requires `ZAP_FGRO` (config eval); checks nothing without it, where
 //! `required_programs.rs` fails.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
 mod common;
 mod scratch;
 

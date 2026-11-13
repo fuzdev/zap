@@ -269,8 +269,10 @@ mod tests {
             .collect()
     }
 
-    // Builds the answer type `interpret` reads, which is always a `Result`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "builds the answer type `interpret` reads, which is always a `Result`"
+    )]
     fn exited(code: i32, stdout: &str) -> QueryResult {
         Ok(Observation::Command(CommandObservation {
             code,

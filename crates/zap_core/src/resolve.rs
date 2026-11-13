@@ -54,7 +54,10 @@ static ENV_OVERLAY: OnceLock<HashMap<String, String>> = OnceLock::new();
 /// already set (the overlay is set-once; a second call is a no-op). The default-hasher
 /// `HashMap` is deliberate — the overlay is built once from [`parse_env_file`], not a
 /// hot path.
-#[allow(clippy::implicit_hasher)]
+#[expect(
+    clippy::implicit_hasher,
+    reason = "the overlay is stored as a default-hasher `HashMap`, built once at startup"
+)]
 pub fn set_env_overlay(vars: HashMap<String, String>) -> bool {
     ENV_OVERLAY.set(vars).is_ok()
 }

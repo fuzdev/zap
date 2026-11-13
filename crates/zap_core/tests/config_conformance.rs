@@ -17,7 +17,10 @@
 //! fgro-gated like `config_eval.rs`: it checks nothing where `ZAP_FGRO` is unset, and
 //! `required_programs.rs` fails there.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![expect(
+    clippy::panic,
+    reason = "test helpers outside `#[test]` fns panic on a failed setup or check"
+)]
 
 mod common;
 mod scratch;

@@ -113,13 +113,18 @@ mod tests {
         serde_json::from_value(serde_json::json!({"path": "/d", "mode": mode})).unwrap()
     }
 
-    // Builds the answer type `interpret` reads, which is always a `Result`.
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "builds the answer type `interpret` reads, which is always a `Result`"
+    )]
     fn kind(kind: FileKind) -> QueryResult {
         Ok(Observation::Path(PathObservation::Kind(kind)))
     }
 
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "builds the answer type `interpret` reads, which is always a `Result`"
+    )]
     fn metadata(kind: FileKind, mode: &str) -> QueryResult {
         Ok(Observation::Path(PathObservation::Metadata(PathMetadata {
             kind,
