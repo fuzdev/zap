@@ -47,23 +47,40 @@ use serde::{Deserialize, Serialize};
 /// the graph's records the manifest takes as inputs. An entry written under one
 /// invocation re-validates as a hit under another, so a change to either moves this
 /// number with it.
-pub const EVAL_CACHE_VERSION: u32 = 9;
+pub const EVAL_CACHE_VERSION: u32 = 10;
 
 /// Why a file is among the inputs: a module the run loaded, or a `package.json` a
-/// resolution read, by what it was read for (`fgro`'s graph roles).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// resolution read, with the fields it read (`fgro`'s graph `consulted`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputRole {
     /// A module the run loaded.
     Module,
-    /// A package's `package.json`, for its `"exports"`.
+    /// A `package.json` a resolution read.
+    Consulted {
+        /// The fields the run's resolutions read of it, each once, as the graph
+        /// lists them.
+        fields: Vec<PackageJsonField>,
+    },
+}
+
+/// A field of a `package.json` a resolution read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageJsonField {
+    /// `"exports"`: a package's, or a self-reference's from the nearest above an
+    /// importer.
     Exports,
-    /// The nearest `package.json` above a module, for its `"type"`, or above an
-    /// importer, for a self-reference.
-    PackageScope,
-    /// A `package.json` on the walk up for the project root.
-    SearchBound,
-    /// The `package.json` of the package an entry inside `node_modules` is in.
+    /// `"imports"`: the nearest above an importer, for a `#` specifier.
+    Imports,
+    /// Its keys: whether it holds more than `"type"` and `"sideEffects"`, read on the
+    /// walk up for the project root.
+    Keys,
+    /// `"name"`: a self-reference's.
+    Name,
+    /// `"type"`: the nearest above a `.js` module.
+    Type,
+    /// `"version"`: a package's, its origin's.
     Version,
 }
 
@@ -145,9 +162,9 @@ pub struct EvalInputs {
     /// Whether the run had V8's JIT. zap evaluates jitless, so always `false`; a
     /// term so an entry can't outlive a change to it.
     pub jit: bool,
-    /// The files the run read: each module, then each consulted `package.json` by
-    /// role, as the graph lists them. Re-hashed to validate. Never empty for a usable
-    /// entry: the config itself is one.
+    /// The files the run read: each module, then each consulted `package.json` with
+    /// the fields read of it, as the graph lists them. Re-hashed to validate. Never
+    /// empty for a usable entry: the config itself is one.
     pub entries: Vec<InputEntry>,
     /// The paths a resolution found nothing at. Each must still be missing.
     pub absent: Vec<AbsentEntry>,
@@ -424,6 +441,52 @@ mod tests {
             "the captured surface changed — anything not here is the leak surface \
              shadow must certify; adding a field is a deliberate version bump"
         );
+    }
+
+    /// The manifest records a module as `"module"` and a consulted `package.json` with
+    /// the fields read of it; a role of another layout, or a field it doesn't know,
+    /// doesn't parse.
+    #[test]
+    fn an_entry_s_role_is_module_or_consulted_with_its_fields() {
+        let consulted = InputEntry {
+            id: "project:package.json".to_owned(),
+            path: "/p/package.json".to_owned(),
+            role: InputRole::Consulted {
+                fields: vec![PackageJsonField::Imports, PackageJsonField::Keys],
+            },
+            blake3: "cc".to_owned(),
+        };
+        let json = serde_json::to_value(&consulted).unwrap();
+        assert_eq!(
+            json["role"],
+            serde_json::json!({"consulted": {"fields": ["imports", "keys"]}})
+        );
+        assert_eq!(
+            serde_json::from_value::<InputEntry>(json).unwrap(),
+            consulted
+        );
+        assert_eq!(
+            serde_json::to_value(module(CONFIG, "aa")).unwrap()["role"],
+            "module"
+        );
+        for role in [
+            serde_json::json!("package_scope"),
+            serde_json::json!("consulted"),
+            serde_json::json!({"consulted": {"fields": ["main"]}}),
+            serde_json::json!({"consulted": {"fields": [], "other": 1}}),
+            serde_json::json!({"module": {"fields": []}}),
+        ] {
+            let entry = serde_json::json!({
+                "id": "project:package.json",
+                "path": "/p/package.json",
+                "role": role,
+                "blake3": "cc",
+            });
+            assert!(
+                serde_json::from_value::<InputEntry>(entry).is_err(),
+                "{role}"
+            );
+        }
     }
 
     /// A manifest an older build wrote (another layout) doesn't parse as this one, so

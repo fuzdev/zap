@@ -41,9 +41,9 @@
 
 use std::path::Path;
 
-use fuz_eval::{DumpRole, GraphDump};
+use fuz_eval::{DumpField, GraphDump};
 use zap_types::eval_inputs::{
-    AbsentEntry, EVAL_CACHE_VERSION, EvalInputs, EvalKey, InputEntry, InputRole,
+    AbsentEntry, EVAL_CACHE_VERSION, EvalInputs, EvalKey, InputEntry, InputRole, PackageJsonField,
 };
 use zap_types::schema::ZapConfig;
 
@@ -328,8 +328,9 @@ fn capture(fresh: &EvaluatedConfig, value: blake3::Hash) -> Option<EvalInputs> {
 }
 
 /// The inputs `graph` records: each module (by the blake3 of the bytes `fgro` read for
-/// it), each consulted `package.json` with its role, and each absent path — every id's
-/// path taken from `local.paths`, a module's under its id cut at the first `?` or `#`.
+/// it), each consulted `package.json` with the fields read of it, and each absent path —
+/// every id's path taken from `local.paths`, a module's under its id cut at the first
+/// `?` or `#`.
 /// `None` when an id has no path there, or a module has no blake3 (which only a failed
 /// run leaves, and a failed run is never cached).
 fn capture_graph(graph: &GraphDump) -> Option<(Vec<InputEntry>, Vec<AbsentEntry>)> {
@@ -352,11 +353,8 @@ fn capture_graph(graph: &GraphDump) -> Option<(Vec<InputEntry>, Vec<AbsentEntry>
         entries.push(InputEntry {
             id: consulted.id.clone(),
             path: path_of(&consulted.id)?,
-            role: match consulted.role {
-                DumpRole::Exports => InputRole::Exports,
-                DumpRole::PackageScope => InputRole::PackageScope,
-                DumpRole::SearchBound => InputRole::SearchBound,
-                DumpRole::Version => InputRole::Version,
+            role: InputRole::Consulted {
+                fields: consulted.fields.iter().copied().map(field).collect(),
             },
             blake3: consulted.blake3.clone(),
         });
@@ -372,6 +370,18 @@ fn capture_graph(graph: &GraphDump) -> Option<(Vec<InputEntry>, Vec<AbsentEntry>
         })
         .collect::<Option<Vec<_>>>()?;
     Some((entries, absent))
+}
+
+/// The manifest's name for a `package.json` field the graph says a resolution read.
+const fn field(field: DumpField) -> PackageJsonField {
+    match field {
+        DumpField::Exports => PackageJsonField::Exports,
+        DumpField::Imports => PackageJsonField::Imports,
+        DumpField::Keys => PackageJsonField::Keys,
+        DumpField::Name => PackageJsonField::Name,
+        DumpField::Type => PackageJsonField::Type,
+        DumpField::Version => PackageJsonField::Version,
+    }
 }
 
 /// blake3 hex of a file's bytes, or `None` if it can't be read.
@@ -513,7 +523,7 @@ mod tests {
     /// An empty graph of a project at `/test`.
     fn graph() -> GraphDump {
         GraphDump {
-            graph_version: 1,
+            graph_version: 2,
             roots: vec!["project:zap.ts".to_owned()],
             modules: Vec::new(),
             consulted: Vec::new(),
@@ -547,9 +557,9 @@ mod tests {
         }
     }
 
-    /// Each module, each consulted `package.json` with its role, and each absent path
-    /// are captured by their `local.paths` path; a module's path is under its id cut at
-    /// `?` or `#`.
+    /// Each module, each consulted `package.json` with the fields read of it, and each
+    /// absent path are captured by their `local.paths` path; a module's path is under its
+    /// id cut at `?` or `#`.
     #[test]
     fn the_capture_is_the_graph_by_its_local_paths() {
         let mut graph = graph();
@@ -560,7 +570,14 @@ mod tests {
         graph.consulted = vec![DumpConsulted {
             id: "project:package.json".to_owned(),
             blake3: "cc".to_owned(),
-            role: DumpRole::PackageScope,
+            fields: vec![
+                DumpField::Exports,
+                DumpField::Imports,
+                DumpField::Keys,
+                DumpField::Name,
+                DumpField::Type,
+                DumpField::Version,
+            ],
         }];
         graph.absent = vec!["project:sub/package.json".to_owned()];
         for (id, path) in [
@@ -590,7 +607,16 @@ mod tests {
                 InputEntry {
                     id: "project:package.json".to_owned(),
                     path: "/test/package.json".to_owned(),
-                    role: InputRole::PackageScope,
+                    role: InputRole::Consulted {
+                        fields: vec![
+                            PackageJsonField::Exports,
+                            PackageJsonField::Imports,
+                            PackageJsonField::Keys,
+                            PackageJsonField::Name,
+                            PackageJsonField::Type,
+                            PackageJsonField::Version,
+                        ],
+                    },
                     blake3: "cc".to_owned(),
                 },
             ]
@@ -610,6 +636,25 @@ mod tests {
         let mut unloaded = graph;
         unloaded.modules[1].blake3 = None;
         assert!(capture_graph(&unloaded).is_none());
+    }
+
+    /// Each field the graph says a resolution read is recorded under the same name in
+    /// the manifest.
+    #[test]
+    fn each_consulted_field_is_recorded_by_its_name() {
+        for dumped in [
+            DumpField::Exports,
+            DumpField::Imports,
+            DumpField::Keys,
+            DumpField::Name,
+            DumpField::Type,
+            DumpField::Version,
+        ] {
+            assert_eq!(
+                serde_json::to_value(field(dumped)).unwrap(),
+                serde_json::to_value(dumped).unwrap()
+            );
+        }
     }
 
     /// Write a valid manifest (covering `module_file`) + a cached value into `dir`,

@@ -433,7 +433,9 @@ mod tests {
         for violation in [
             V::ProtocolVersion { found: Some(3) },
             V::ProtocolVersion { found: None },
-            V::GraphVersion { found: Some(2) },
+            V::GraphVersion { found: Some(1) },
+            V::GraphVersion { found: Some(3) },
+            V::GraphVersion { found: None },
         ] {
             let error = refused(violation.clone());
             assert!(
