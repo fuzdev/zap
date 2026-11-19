@@ -1,0 +1,1 @@
+export{t as component}from"../chunks/co1VGLb2.js";
