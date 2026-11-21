@@ -4,6 +4,11 @@
 
 > convergent machine-state management: set up and ship to Linux machines from TypeScript ↯ pre-alpha
 
+> ⚠️ **Not ready for production.** Pre-alpha with one maintainer: the schema and
+> CLI change without compatibility layers. Read
+> [the threat model](https://zap.fuz.dev/docs/security) before pointing it at a
+> machine you care about.
+
 [**zap.fuz.dev**](https://zap.fuz.dev/)
 
 In a TypeScript file, you declare what should be true of a machine: these
