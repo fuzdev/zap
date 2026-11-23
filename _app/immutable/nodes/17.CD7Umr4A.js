@@ -1,0 +1,1 @@
+export{t as component}from"../chunks/Ccx_R8FH.js";
