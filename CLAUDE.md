@@ -99,7 +99,7 @@ app's name. The catalog and the design rules are `docs/recipes.md`.
 Website and TS surface:
 
 ```bash
-gro check     # typecheck, test, gen --check, lint, format check (run before committing)
+gro check     # typecheck, test, gen --check, format check (run before committing)
 gro gen       # regenerate the docs tomes after editing docs/*.md or docs.gen.ts
 gro build     # static build
 gro deploy    # build and push to the deploy branch

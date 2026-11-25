@@ -164,7 +164,7 @@ jobs:
       # a runner has none.) `--workspace` fails on a dirty git tree;
       # `--build` adds the static site build.
       - name: gro check
-        run: npx @fuzdev/gro check --workspace --build
+        run: npx @fuzdev/gro check --workspace --build --lint
 
       - name: Release dep-graph audit
         run: cargo xtask check-release
